@@ -30,6 +30,9 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::Context as _;
 
 use axum::Router;
 use kaya_billing::BillingService;
@@ -49,6 +52,8 @@ use state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Try crate-local .env first, then fall back to CWD .env
+    dotenvy::from_path(concat!(env!("CARGO_MANIFEST_DIR"), "/.env")).ok();
     dotenvy::dotenv().ok();
 
     tracing_subscriber::registry()
@@ -73,7 +78,16 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(3001);
 
-    let pool = sqlx::PgPool::connect(&database_url).await?;
+    let pool = tokio::time::timeout(
+        Duration::from_secs(60),
+        sqlx::postgres::PgPoolOptions::new()
+            .min_connections(0)
+            .max_connections(10)
+            .acquire_timeout(Duration::from_secs(60))
+            .connect(&database_url),
+    )
+    .await
+    .context("timed out connecting to Postgres (is the Neon endpoint awake?)")??;
     tracing::info!("connected to Postgres");
 
     kaya_postgres_storage::MIGRATOR.run(&pool).await?;
