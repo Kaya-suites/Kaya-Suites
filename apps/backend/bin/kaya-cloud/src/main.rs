@@ -24,6 +24,7 @@
 //! | `ADMIN_EMAIL`             | Hardcoded admin email for founder dashboard (required)   |
 //! | `PRICING_CONFIG_PATH`     | Path to pricing.yaml (default: bin/kaya-cloud/config/pricing.yaml) |
 //! | `PORT`                    | Bind port (default: 3001)                               |
+//! | `FRONTEND_URL`            | Allowed CORS origin (default: http://localhost:3000)    |
 
 use std::path::Path;
 use std::sync::Arc;
@@ -37,6 +38,7 @@ use kaya_metering::pricing::PricingConfig;
 use kaya_metering::service::MeteringConfig;
 use kaya_metering::MeteringService;
 use kaya_tenant::{PasswordAuthService, PostgresStore};
+use axum::http::HeaderValue;
 use tower_http::cors::{Any, CorsLayer};
 use tower_sessions::SessionManagerLayer;
 use tower_sessions::cookie::SameSite;
@@ -143,10 +145,17 @@ async fn main() -> anyhow::Result<()> {
     let backend = kaya_tenant::KayaAuthBackend::new(pool.clone());
     let auth_layer = axum_login::AuthManagerLayerBuilder::new(backend, session_layer).build();
 
+    let frontend_url = std::env::var("FRONTEND_URL")
+        .unwrap_or_else(|_| "http://localhost:3000".into());
+    let cors_origin: HeaderValue = frontend_url
+        .parse()
+        .context("FRONTEND_URL is not a valid HTTP origin")?;
+
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(cors_origin)
         .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_headers(Any)
+        .allow_credentials(true);
 
     let app = Router::new()
         .merge(routes::auth::router())

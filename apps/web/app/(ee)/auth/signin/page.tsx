@@ -19,22 +19,27 @@ export default function SignInPage() {
     setState("loading");
     setErrorMsg("");
 
-    const r = await fetch(`${API_URL}/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ email: email.trim(), password }),
-    });
+    try {
+      const r = await fetch(`${API_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
 
-    if (r.ok) {
-      window.location.href = "/dashboard";
-    } else {
-      const body = await r.json().catch(() => ({}));
-      setErrorMsg(
-        body?.error === "invalid_credentials"
-          ? "Invalid email or password."
-          : "Something went wrong. Please try again."
-      );
+      if (r.ok) {
+        window.location.href = "/dashboard";
+      } else {
+        const body = await r.json().catch(() => ({}));
+        setErrorMsg(
+          body?.error === "invalid_credentials"
+            ? "Invalid email or password."
+            : "Something went wrong. Please try again."
+        );
+        setState("error");
+      }
+    } catch {
+      setErrorMsg("Could not reach the server. Please try again.");
       setState("error");
     }
   }
