@@ -25,7 +25,7 @@
 //! | `PADDLE_API_BASE`         | Paddle API base URL (default: sandbox)                   |
 //! | `PADDLE_OVERAGE_PRICE_ID` | Paddle price ID for overage billing (optional)           |
 //! | `ADMIN_EMAIL`             | Hardcoded admin email for founder dashboard (required)   |
-//! | `PRICING_CONFIG_PATH`     | Path to pricing.yaml (default: config/pricing.yaml)      |
+//! | `PRICING_CONFIG_PATH`     | Path to pricing.yaml (default: bin/kaya-cloud/config/pricing.yaml) |
 //! | `PORT`                    | Bind port (default: 3001)                               |
 
 use std::path::Path;
@@ -65,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| "https://sandbox-api.paddle.com".into());
     let paddle_overage_price_id = std::env::var("PADDLE_OVERAGE_PRICE_ID").ok();
     let pricing_config_path = std::env::var("PRICING_CONFIG_PATH")
-        .unwrap_or_else(|_| "config/pricing.yaml".into());
+        .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/config/pricing.yaml").into());
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())

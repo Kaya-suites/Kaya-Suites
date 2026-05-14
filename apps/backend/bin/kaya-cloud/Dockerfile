@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/li
 COPY apps/backend/Cargo.toml apps/backend/Cargo.lock ./
 COPY apps/backend/crates ./crates
 COPY apps/backend/bin ./bin
-COPY apps/backend/config ./config
+COPY apps/backend/bin/kaya-cloud/config ./config
 
 # Build release binary
 RUN cargo build --release --bin kaya-cloud
