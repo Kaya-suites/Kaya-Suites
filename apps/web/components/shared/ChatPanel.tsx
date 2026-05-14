@@ -8,6 +8,7 @@ import type {
   SSEEvent,
   ProposedDelete,
 } from "@/types/chat";
+import type { OnboardingStep } from "@/hooks/useOnboarding";
 import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
 
@@ -15,6 +16,7 @@ type Props = {
   sessionId: string | null;
   onCitationClick: (ref: CitationRef) => void;
   onDocumentUpdated: (docId: string) => void;
+  onStepComplete?: (step: OnboardingStep) => void;
 };
 
 function randomId(): string {
@@ -39,7 +41,7 @@ const WELCOME: ChatMessageData = {
   timestamp: Date.now(),
 };
 
-export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated }: Props) {
+export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onStepComplete }: Props) {
   const [messages, setMessages] = useState<ChatMessageData[]>([WELCOME]);
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -114,8 +116,10 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated }: Pro
       timestamp: Date.now(),
     };
 
+    const isFirstMessage = messages.filter((m) => m.role === "user").length === 0;
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setStreamingId(assistantId);
+    if (isFirstMessage) onStepComplete?.("send_first_message");
 
     try {
       const res = await fetch("/api/chat", {
@@ -259,6 +263,7 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated }: Pro
       ),
     );
 
+    onStepComplete?.("approve_first_diff");
     onDocumentUpdated(msg.proposedEdit.docId);
   }
 
