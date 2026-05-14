@@ -7,8 +7,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 type State = "idle" | "loading" | "error";
 
-export default function SignInPage() {
+export default function SignUpPage() {
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [state, setState] = useState<State>("idle");
   const [errorMsg, setErrorMsg] = useState("");
@@ -20,22 +21,27 @@ export default function SignInPage() {
     setErrorMsg("");
 
     try {
-      const r = await fetch(`${API_URL}/auth/login`, {
+      const body: Record<string, string> = { email: email.trim(), password };
+      if (username.trim()) body.username = username.trim();
+
+      const r = await fetch(`${API_URL}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify(body),
       });
 
       if (r.ok) {
         window.location.href = "/dashboard";
       } else {
-        const body = await r.json().catch(() => ({}));
-        setErrorMsg(
-          body?.error === "invalid_credentials"
-            ? "Invalid email or password."
-            : "Something went wrong. Please try again."
-        );
+        const data = await r.json().catch(() => ({}));
+        if (data?.error === "email_already_exists") {
+          setErrorMsg("An account with that email already exists.");
+        } else if (data?.error === "username_taken") {
+          setErrorMsg("That username is already taken.");
+        } else {
+          setErrorMsg("Something went wrong. Please try again.");
+        }
         setState("error");
       }
     } catch {
@@ -54,8 +60,8 @@ export default function SignInPage() {
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-200 p-8">
-          <h1 className="font-semibold text-gray-900 mb-1">Sign in</h1>
-          <p className="text-sm text-gray-500 mb-6">Enter your email and password to continue.</p>
+          <h1 className="font-semibold text-gray-900 mb-1">Create an account</h1>
+          <p className="text-sm text-gray-500 mb-6">Fill in the details below to get started.</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -70,6 +76,20 @@ export default function SignInPage() {
                 placeholder="you@example.com"
                 required
                 autoFocus
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="username" className="block text-xs text-gray-500 mb-1.5">
+                Username <span className="text-gray-400">(optional)</span>
+              </label>
+              <input
+                id="username"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="yourhandle"
                 className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
               />
             </div>
@@ -98,15 +118,15 @@ export default function SignInPage() {
               disabled={state === "loading" || !email.trim() || !password}
               className="w-full bg-gray-900 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {state === "loading" ? "Signing in…" : "Sign in"}
+              {state === "loading" ? "Creating account…" : "Create account"}
             </button>
           </form>
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
-          New here?{" "}
-          <Link href="/auth/signup" className="underline hover:text-gray-700">
-            Create an account
+          Already have an account?{" "}
+          <Link href="/auth/signin" className="underline hover:text-gray-700">
+            Sign in
           </Link>
         </p>
       </div>
