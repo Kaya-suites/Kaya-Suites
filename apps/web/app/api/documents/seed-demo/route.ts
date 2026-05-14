@@ -1,3 +1,5 @@
+import type { NextRequest } from "next/server";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 const DEMO_TITLE = "Kaya Quickstart Guide";
@@ -18,7 +20,7 @@ Import your Markdown documents and Kaya will keep them fresh automatically. Clau
 
 ## Current setup
 
-This guide was written for Kaya v0.9 (released January 2023). The recommended Node.js version at the time was 16 LTS. The default embedding model was \`text-embedding-ada-002\`.
+This guide was written for Kaya v0.9 (released January 2026). The recommended Node.js version at the time was 16 LTS. The default embedding model was \`text-embedding-ada-002\`.
 
 ## Chat interface
 
@@ -30,11 +32,15 @@ Ask Kaya anything about your documents. It cites the exact paragraph it's drawin
 - Review the proposed diff and click **Approve** — that's the core loop.
 `;
 
-export async function POST(): Promise<Response> {
+export async function POST(request: NextRequest): Promise<Response> {
+  const cookie = request.headers.get("cookie") ?? "";
   try {
     const res = await fetch(`${API_URL}/documents`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(cookie && { cookie }),
+      },
       body: JSON.stringify({ title: DEMO_TITLE, content: DEMO_CONTENT }),
     });
     const data = await res.json();

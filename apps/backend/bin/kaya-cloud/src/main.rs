@@ -167,6 +167,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(routes::billing::router())
         .merge(routes::dashboard::router())
         .merge(routes::admin::router())
+        .merge(routes::documents::router())
         .layer(auth_layer)
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http())
