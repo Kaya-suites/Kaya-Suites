@@ -1,115 +1,137 @@
 // Copyright 2024 Kaya Suites. All rights reserved. — BSL 1.1
 //!
-//! Magic-link auth routes.
+//! Password-based auth routes.
 //!
-//! - `POST /auth/request-link` — generate & email a magic link
-//! - `GET  /auth/verify`       — redeem a token, create session, redirect
-//! - `GET  /auth/me`           — return current user (for session-check proxy)
-//! - `POST /auth/logout`       — destroy session
+//! - `POST /auth/register` — create a new account
+//! - `POST /auth/login`    — authenticate and create a session
+//! - `GET  /auth/me`       — return current user (for session-check proxy)
+//! - `POST /auth/logout`   — destroy session
 
 use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::State,
     http::StatusCode,
-    response::{IntoResponse, Redirect, Response},
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
-use kaya_tenant::{AuthSession, KayaAuthBackend, MagicLinkError, MagicLinkService};
+use kaya_tenant::{AuthSession, KayaAuthBackend, PasswordAuthService, RegisterError};
 use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/auth/request-link", post(request_link))
-        .route("/auth/verify", get(verify))
+        .route("/auth/register", post(register))
+        .route("/auth/login", post(login))
         .route("/auth/me", get(me))
         .route("/auth/logout", post(logout))
 }
 
-// ── POST /auth/request-link ───────────────────────────────────────────────────
+// ── POST /auth/register ───────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-struct RequestLinkBody {
+struct RegisterBody {
     email: String,
+    username: Option<String>,
+    password: String,
 }
 
 #[derive(Serialize)]
-struct RequestLinkResponse {
-    ok: bool,
+struct UserResponse {
+    user_id: String,
+    email: String,
+    username: Option<String>,
 }
 
-async fn request_link(
-    State(svc): State<Arc<MagicLinkService>>,
-    Json(body): Json<RequestLinkBody>,
+async fn register(
+    State(svc): State<Arc<PasswordAuthService>>,
+    mut auth: AuthSession<KayaAuthBackend>,
+    Json(body): Json<RegisterBody>,
 ) -> Response {
-    match svc.request_link(&body.email).await {
-        Ok(()) => Json(RequestLinkResponse { ok: true }).into_response(),
-        Err(MagicLinkError::EmailDelivery(msg)) => {
-            tracing::error!(email = %body.email, error = %msg, "email delivery failed");
-            StatusCode::SERVICE_UNAVAILABLE.into_response()
+    match svc
+        .register(&body.email, body.username.as_deref(), &body.password)
+        .await
+    {
+        Ok(user) => {
+            let response = UserResponse {
+                user_id: user.id.to_string(),
+                email: user.email.clone(),
+                username: user.username.clone(),
+            };
+            if let Err(e) = auth.login(&user).await {
+                tracing::error!(error = %e, "session login failed after register");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+            (StatusCode::CREATED, Json(response)).into_response()
         }
+        Err(RegisterError::EmailAlreadyExists) => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": "email_already_exists" })),
+        )
+            .into_response(),
+        Err(RegisterError::UsernameTaken) => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": "username_taken" })),
+        )
+            .into_response(),
         Err(e) => {
-            tracing::error!(error = %e, "request_link failed");
+            tracing::error!(error = %e, "register failed");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
 }
 
-// ── GET /auth/verify?token=... ────────────────────────────────────────────────
+// ── POST /auth/login ──────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-struct VerifyParams {
-    token: String,
+struct LoginBody {
+    email: String,
+    password: String,
 }
 
-async fn verify(
-    State(svc): State<Arc<MagicLinkService>>,
+async fn login(
     mut auth: AuthSession<KayaAuthBackend>,
-    Query(params): Query<VerifyParams>,
+    Json(body): Json<LoginBody>,
 ) -> Response {
-    match svc.verify(&params.token).await {
-        Ok((user_id, email)) => {
-            let user = kaya_tenant::AuthUser { id: user_id, email };
+    use kaya_tenant::PasswordCredentials;
+
+    let creds = PasswordCredentials { email: body.email, password: body.password };
+
+    match auth.authenticate(creds).await {
+        Ok(Some(user)) => {
+            let response = UserResponse {
+                user_id: user.id.to_string(),
+                email: user.email.clone(),
+                username: user.username.clone(),
+            };
             if let Err(e) = auth.login(&user).await {
                 tracing::error!(error = %e, "session login failed");
-                return (StatusCode::INTERNAL_SERVER_ERROR, "session error").into_response();
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
-            Redirect::to("/documents").into_response()
+            Json(response).into_response()
         }
-        Err(MagicLinkError::Expired) => error_page(
-            StatusCode::GONE,
-            "Link expired",
-            "This sign-in link has expired. Please request a new one.",
-        ),
-        Err(MagicLinkError::AlreadyUsed) => error_page(
-            StatusCode::GONE,
-            "Link already used",
-            "This sign-in link has already been used. Please request a new one.",
-        ),
-        Err(_) => error_page(
-            StatusCode::BAD_REQUEST,
-            "Invalid link",
-            "This sign-in link is not valid. Please request a new one.",
-        ),
+        Ok(None) => (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "invalid_credentials" })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "login failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }
 
 // ── GET /auth/me ──────────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
-struct MeResponse {
-    user_id: String,
-    email: String,
-}
-
 async fn me(auth: AuthSession<KayaAuthBackend>) -> Response {
     match auth.user {
-        Some(user) => Json(MeResponse {
+        Some(user) => Json(UserResponse {
             user_id: user.id.to_string(),
             email: user.email,
+            username: user.username,
         })
         .into_response(),
         None => StatusCode::UNAUTHORIZED.into_response(),
@@ -124,22 +146,4 @@ async fn logout(mut auth: AuthSession<KayaAuthBackend>) -> Response {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     StatusCode::NO_CONTENT.into_response()
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-fn error_page(status: StatusCode, title: &str, message: &str) -> Response {
-    let html = format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>{title}</title>
-<style>body{{font-family:-apple-system,sans-serif;max-width:480px;margin:80px auto;padding:0 20px;color:#111}}
-h1{{font-size:20px}}p{{color:#555}}a{{color:#111}}</style></head>
-<body>
-  <h1>{title}</h1>
-  <p>{message}</p>
-  <p><a href="/auth/signin">Request a new sign-in link &rarr;</a></p>
-</body></html>"#
-    );
-    (status, [("content-type", "text/html; charset=utf-8")], html).into_response()
 }

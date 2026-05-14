@@ -1,25 +1,25 @@
 // Copyright 2024 Kaya Suites. All rights reserved. — BSL 1.1
 //!
-//! Multi-tenant context and magic-link authentication for Kaya Suites cloud.
+//! Password-based authentication and multi-tenant context for Kaya Suites cloud.
 //!
 //! # Crate layout
 //!
 //! - [`UserContext`] — per-request tenant identifier used by `PostgresAdapter`.
-//! - [`magic_link`] — token generation, storage, email delivery (FR-28).
+//! - [`password_auth`] — user registration with argon2 password hashing.
 //! - [`auth_adapter`] — axum-login backend + `CloudAuthAdapter`.
-//! - [`error`] — `MagicLinkError` and `AuthError`.
+//! - [`error`] — `RegisterError` and `AuthError`.
 
 use uuid::Uuid;
 
 pub mod auth_adapter;
 pub mod error;
-pub mod magic_link;
+pub mod password_auth;
 
 // ── Public re-exports ─────────────────────────────────────────────────────────
 
-pub use auth_adapter::{AuthUser, CloudAuthAdapter, KayaAuthBackend, MagicLinkCredentials};
-pub use error::{AuthError, MagicLinkError};
-pub use magic_link::MagicLinkService;
+pub use auth_adapter::{AuthUser, CloudAuthAdapter, KayaAuthBackend, PasswordCredentials};
+pub use error::{AuthError, RegisterError};
+pub use password_auth::PasswordAuthService;
 
 // ── Re-export session types used by callers ───────────────────────────────────
 

@@ -1,19 +1,16 @@
 // Copyright 2024 Kaya Suites. All rights reserved. — BSL 1.1
 
-/// Errors that can occur during magic-link token lifecycle.
+/// Errors that can occur when registering a new user.
 #[derive(Debug, thiserror::Error)]
-pub enum MagicLinkError {
-    #[error("token not found or already used")]
-    Invalid,
+pub enum RegisterError {
+    #[error("an account with that email already exists")]
+    EmailAlreadyExists,
 
-    #[error("token has expired")]
-    Expired,
+    #[error("that username is already taken")]
+    UsernameTaken,
 
-    #[error("token has already been used")]
-    AlreadyUsed,
-
-    #[error("email send failed: {0}")]
-    EmailDelivery(String),
+    #[error("password hashing failed: {0}")]
+    PasswordHash(String),
 
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
@@ -22,8 +19,8 @@ pub enum MagicLinkError {
 /// Errors surfaced by the axum-login auth backend.
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
-    #[error(transparent)]
-    MagicLink(#[from] MagicLinkError),
+    #[error("password hash error: {0}")]
+    PasswordHash(String),
 
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),

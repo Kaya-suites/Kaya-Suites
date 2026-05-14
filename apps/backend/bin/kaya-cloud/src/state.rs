@@ -5,14 +5,14 @@ use std::sync::Arc;
 use axum::extract::FromRef;
 use kaya_billing::BillingService;
 use kaya_metering::MeteringService;
-use kaya_tenant::MagicLinkService;
+use kaya_tenant::PasswordAuthService;
 use sqlx::PgPool;
 
 /// Shared application state for the cloud binary.
 #[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
-    pub magic_link_svc: Arc<MagicLinkService>,
+    pub password_auth_svc: Arc<PasswordAuthService>,
     pub billing_svc: Arc<BillingService>,
     pub metering_svc: Arc<MeteringService>,
     /// Hardcoded admin email from `ADMIN_EMAIL` env var.
@@ -25,9 +25,9 @@ impl FromRef<AppState> for PgPool {
     }
 }
 
-impl FromRef<AppState> for Arc<MagicLinkService> {
+impl FromRef<AppState> for Arc<PasswordAuthService> {
     fn from_ref(s: &AppState) -> Self {
-        s.magic_link_svc.clone()
+        s.password_auth_svc.clone()
     }
 }
 

@@ -17,9 +17,6 @@
 //! | Variable                  | Description                                              |
 //! |---------------------------|----------------------------------------------------------|
 //! | `NEON_DATABASE_URL`       | Postgres connection string (required)                    |
-//! | `RESEND_API_KEY`          | Resend API key for email delivery (required)             |
-//! | `RESEND_FROM`             | Verified sender address (required)                       |
-//! | `FRONTEND_BASE_URL`       | Frontend origin for magic-link URLs (required)           |
 //! | `PADDLE_API_KEY`          | Paddle API key for REST calls (required)                 |
 //! | `PADDLE_WEBHOOK_SECRET`   | Paddle webhook signing secret (required)                 |
 //! | `PADDLE_API_BASE`         | Paddle API base URL (default: sandbox)                   |
@@ -39,7 +36,7 @@ use kaya_billing::BillingService;
 use kaya_metering::pricing::PricingConfig;
 use kaya_metering::service::MeteringConfig;
 use kaya_metering::MeteringService;
-use kaya_tenant::{MagicLinkService, PostgresStore};
+use kaya_tenant::{PasswordAuthService, PostgresStore};
 use tower_http::cors::{Any, CorsLayer};
 use tower_sessions::SessionManagerLayer;
 use tower_sessions::cookie::SameSite;
@@ -62,9 +59,6 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let database_url = require_env("NEON_DATABASE_URL")?;
-    let resend_api_key = require_env("RESEND_API_KEY")?;
-    let resend_from = require_env("RESEND_FROM")?;
-    let frontend_base_url = require_env("FRONTEND_BASE_URL")?;
     let paddle_api_key = require_env("PADDLE_API_KEY")?;
     let paddle_webhook_secret = require_env("PADDLE_WEBHOOK_SECRET")?;
     let admin_email = require_env("ADMIN_EMAIL")?;
@@ -97,12 +91,7 @@ async fn main() -> anyhow::Result<()> {
     session_store.migrate().await?;
     tracing::info!("session store ready");
 
-    let magic_link_svc = Arc::new(MagicLinkService::new(
-        pool.clone(),
-        resend_api_key.clone(),
-        resend_from.clone(),
-        frontend_base_url,
-    ));
+    let password_auth_svc = Arc::new(PasswordAuthService::new(pool.clone()));
 
     let billing_svc = Arc::new(BillingService::new(
         pool.clone(),
@@ -127,15 +116,16 @@ async fn main() -> anyhow::Result<()> {
         paddle_api_key: paddle_api_key.clone(),
         paddle_api_base: paddle_api_base.clone(),
         paddle_overage_price_id,
-        resend_api_key,
-        resend_from,
+        // Alert emails are optional; leave empty to disable notifications.
+        resend_api_key: std::env::var("RESEND_API_KEY").unwrap_or_default(),
+        resend_from: std::env::var("RESEND_FROM").unwrap_or_default(),
         admin_email: admin_email.clone(),
     };
     let metering_svc = Arc::new(MeteringService::new(pool.clone(), pricing, metering_config));
 
     let state = AppState {
         pool: pool.clone(),
-        magic_link_svc: magic_link_svc.clone(),
+        password_auth_svc,
         billing_svc,
         metering_svc,
         admin_email,
@@ -150,7 +140,7 @@ async fn main() -> anyhow::Result<()> {
             tower_sessions::cookie::time::Duration::days(7),
         ));
 
-    let backend = kaya_tenant::KayaAuthBackend::new(pool.clone(), magic_link_svc);
+    let backend = kaya_tenant::KayaAuthBackend::new(pool.clone());
     let auth_layer = axum_login::AuthManagerLayerBuilder::new(backend, session_layer).build();
 
     let cors = CorsLayer::new()

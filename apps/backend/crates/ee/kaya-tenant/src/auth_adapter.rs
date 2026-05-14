@@ -11,6 +11,7 @@
 //!                     implements kaya_core::AuthAdapter for the application layer
 //! ```
 
+use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use async_trait::async_trait;
 use axum_login::{AuthSession, AuthUser as AxumAuthUser};
 use kaya_core::{AuthAdapter, KayaError, UserSession};
@@ -19,18 +20,15 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::error::AuthError;
-use crate::magic_link::MagicLinkService;
 
 // ── AuthUser ──────────────────────────────────────────────────────────────────
 
 /// The authenticated user stored in the tower-sessions session store.
-///
-/// Must be `Serialize + DeserializeOwned` because tower-sessions serialises it
-/// to JSON. Must be `Clone` because axum-login holds it behind an `Arc`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthUser {
     pub id: Uuid,
     pub email: String,
+    pub username: Option<String>,
 }
 
 impl AxumAuthUser for AuthUser {
@@ -40,8 +38,7 @@ impl AxumAuthUser for AuthUser {
         self.id
     }
 
-    /// Changing a user's email invalidates all existing sessions automatically
-    /// because axum-login compares this hash on every request.
+    /// Changing a user's email invalidates all existing sessions automatically.
     fn session_auth_hash(&self) -> &[u8] {
         self.email.as_bytes()
     }
@@ -51,57 +48,84 @@ impl AxumAuthUser for AuthUser {
 
 /// axum-login backend wired into the tower layer stack.
 ///
-/// `authenticate` is the credential-based path (magic-link token → user).
+/// `authenticate` is the credential-based path (email + password → user).
 /// `get_user` is the session-restore path (user_id → user, called on every request).
 #[derive(Clone)]
 pub struct KayaAuthBackend {
     pool: PgPool,
-    magic_link_svc: std::sync::Arc<MagicLinkService>,
 }
 
 impl KayaAuthBackend {
-    pub fn new(pool: PgPool, magic_link_svc: std::sync::Arc<MagicLinkService>) -> Self {
-        Self { pool, magic_link_svc }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 }
 
-/// Credential type used when logging in via a magic-link token.
+/// Credentials used when logging in with email and password.
 #[derive(Debug, Clone, Deserialize)]
-pub struct MagicLinkCredentials {
-    pub token: String,
+pub struct PasswordCredentials {
+    pub email: String,
+    pub password: String,
 }
 
 #[async_trait]
 impl axum_login::AuthnBackend for KayaAuthBackend {
     type User = AuthUser;
-    type Credentials = MagicLinkCredentials;
+    type Credentials = PasswordCredentials;
     type Error = AuthError;
 
     async fn authenticate(
         &self,
         creds: Self::Credentials,
     ) -> Result<Option<Self::User>, Self::Error> {
-        match self.magic_link_svc.verify(&creds.token).await {
-            Ok((user_id, email)) => Ok(Some(AuthUser { id: user_id, email })),
-            Err(crate::error::MagicLinkError::Invalid)
-            | Err(crate::error::MagicLinkError::Expired)
-            | Err(crate::error::MagicLinkError::AlreadyUsed) => Ok(None),
-            Err(e) => Err(AuthError::from(e)),
+        let row = sqlx::query(
+            "SELECT id, email, username, password_hash FROM users WHERE email = $1",
+        )
+        .bind(&creds.email)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let hash: Option<String> = row.try_get("password_hash").unwrap_or(None);
+        let Some(hash) = hash else {
+            return Ok(None);
+        };
+
+        let parsed =
+            PasswordHash::new(&hash).map_err(|e| AuthError::PasswordHash(e.to_string()))?;
+
+        if Argon2::default()
+            .verify_password(creds.password.as_bytes(), &parsed)
+            .is_err()
+        {
+            return Ok(None);
         }
+
+        Ok(Some(AuthUser {
+            id: row.try_get("id").unwrap(),
+            email: row.try_get("email").unwrap(),
+            username: row.try_get("username").unwrap_or(None),
+        }))
     }
 
     async fn get_user(
         &self,
         user_id: &axum_login::UserId<Self>,
     ) -> Result<Option<Self::User>, Self::Error> {
-        let row = sqlx::query("SELECT id, email FROM users WHERE id = $1")
-            .bind(user_id)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(
+            "SELECT id, email, username FROM users WHERE id = $1",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
 
         Ok(row.map(|r| AuthUser {
             id: r.try_get("id").unwrap(),
             email: r.try_get("email").unwrap(),
+            username: r.try_get("username").unwrap_or(None),
         }))
     }
 }
@@ -110,9 +134,6 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
 
 /// Per-request wrapper around `AuthSession<KayaAuthBackend>` that implements
 /// the `kaya_core::AuthAdapter` trait consumed by business-logic handlers.
-///
-/// Construct in an axum handler by extracting both the `AuthSession` and then
-/// calling `CloudAuthAdapter::new(auth_session)`.
 pub struct CloudAuthAdapter {
     session: AuthSession<KayaAuthBackend>,
 }
