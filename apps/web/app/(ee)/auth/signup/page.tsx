@@ -32,7 +32,7 @@ export default function SignUpPage() {
       });
 
       if (r.ok) {
-        window.location.href = "/dashboard";
+        window.location.href = "/chat";
       } else {
         const data = await r.json().catch(() => ({}));
         if (data?.error === "email_already_exists") {

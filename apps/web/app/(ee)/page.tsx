@@ -26,6 +26,12 @@ export default function LandingPage() {
             GitHub
           </a>
           <Link
+            href="/auth/signup"
+            className="text-gray-500 hover:text-gray-900 transition-colors"
+          >
+            Sign up
+          </Link>
+          <Link
             href="/auth/signin"
             className="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-700 transition-colors"
           >
@@ -46,7 +52,7 @@ export default function LandingPage() {
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           <Link
-            href="/billing/subscribe"
+            href="/auth/signup"
             className="bg-gray-900 text-white px-8 py-3.5 rounded-lg font-semibold text-base hover:bg-gray-700 transition-colors"
           >
             Start for $10 / month
@@ -126,7 +132,7 @@ export default function LandingPage() {
               ))}
             </ul>
             <Link
-              href="/billing/subscribe"
+              href="/auth/signup"
               className="w-full block text-center bg-gray-900 text-white py-3 rounded-lg font-semibold hover:bg-gray-700 transition-colors"
             >
               Get started

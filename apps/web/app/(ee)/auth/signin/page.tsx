@@ -28,7 +28,7 @@ export default function SignInPage() {
       });
 
       if (r.ok) {
-        window.location.href = "/dashboard";
+        window.location.href = "/chat";
       } else {
         const body = await r.json().catch(() => ({}));
         setErrorMsg(

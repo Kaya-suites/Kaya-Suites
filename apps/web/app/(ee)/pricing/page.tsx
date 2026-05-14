@@ -23,6 +23,12 @@ export default function PricingPage() {
             GitHub
           </a>
           <Link
+            href="/auth/signup"
+            className="text-gray-500 hover:text-gray-900 transition-colors"
+          >
+            Sign up
+          </Link>
+          <Link
             href="/auth/signin"
             className="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-700 transition-colors"
           >
@@ -51,7 +57,7 @@ export default function PricingPage() {
             <p className="text-sm text-gray-500 mb-8">Per workspace. Cancel any time.</p>
 
             <Link
-              href="/billing/subscribe"
+              href="/auth/signup"
               className="block w-full text-center bg-gray-900 text-white py-3 rounded-lg font-semibold hover:bg-gray-700 transition-colors mb-8"
             >
               Get started
@@ -216,7 +222,7 @@ export default function PricingPage() {
           <p className="text-gray-500 mb-8 text-sm">Start today. Cancel or export your data any time.</p>
           <div className="flex flex-col sm:flex-row justify-center gap-4">
             <Link
-              href="/billing/subscribe"
+              href="/auth/signup"
               className="bg-gray-900 text-white px-8 py-3.5 rounded-lg font-semibold hover:bg-gray-700 transition-colors"
             >
               Start for $10 / month

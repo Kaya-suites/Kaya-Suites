@@ -14,11 +14,11 @@ export default function BillingSuccessPage() {
         </p>
 
         <Link
-          href="/"
+          href="/chat"
           className="inline-block rounded-lg bg-gray-900 text-white py-3 px-8 font-semibold
                      hover:bg-gray-700 transition-colors"
         >
-          Go to dashboard →
+          Start using Kaya →
         </Link>
 
         <p className="mt-8 text-xs text-gray-400">
