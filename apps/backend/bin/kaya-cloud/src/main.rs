@@ -49,6 +49,8 @@ use state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
+
     tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
