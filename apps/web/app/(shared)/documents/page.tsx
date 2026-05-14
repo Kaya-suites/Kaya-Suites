@@ -23,7 +23,7 @@ export default function DocumentsPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-stone-50">
+    <div className="h-full overflow-y-auto bg-stone-50">
       {/* Header */}
       <div className="bg-white border-b border-stone-200">
         <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">

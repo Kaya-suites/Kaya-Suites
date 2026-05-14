@@ -93,7 +93,7 @@ export function ChatLayout() {
   }, []);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-stone-50">
+    <div className="flex h-full overflow-hidden bg-stone-50">
       {/* Session rail — hidden on mobile */}
       <div className="hidden md:flex shrink-0">
         <SessionRail

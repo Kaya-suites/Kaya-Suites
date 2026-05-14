@@ -102,7 +102,7 @@ export default function SettingsPage() {
 
   if (error) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-gray-50">
+      <main className="h-full flex items-center justify-center bg-gray-50">
         <div className="text-center space-y-3">
           <p className="text-red-600">{error}</p>
           <Link href="/auth/signin" className="text-sm underline text-gray-500">Sign in →</Link>
@@ -113,7 +113,7 @@ export default function SettingsPage() {
 
   if (!billing || !metering) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-gray-50">
+      <main className="h-full flex items-center justify-center bg-gray-50">
         <p className="text-gray-400">Loading…</p>
       </main>
     );
@@ -127,7 +127,7 @@ export default function SettingsPage() {
   const spendPct = Math.min((metering.spend_usd / metering.spend_cap_usd) * 100, 100);
 
   return (
-    <main className="min-h-screen bg-gray-50 py-12">
+    <main className="h-full overflow-y-auto bg-gray-50 py-12">
       <div className="max-w-2xl mx-auto px-6 space-y-8">
         <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
 
