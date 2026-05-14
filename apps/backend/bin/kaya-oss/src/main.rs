@@ -185,6 +185,58 @@ async fn list_documents(State(state): State<S>) -> Result<Json<Vec<DocumentSumma
     ))
 }
 
+// ── Route: POST /documents ────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct CreateDocumentBody {
+    title: String,
+    content: String,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+async fn create_document(
+    State(state): State<S>,
+    Json(body): Json<CreateDocumentBody>,
+) -> Result<(StatusCode, Json<DocumentResponse>), ApiError> {
+    let doc = kaya_core::storage::Document {
+        id: Uuid::new_v4(),
+        title: body.title,
+        body: body.content,
+        tags: body.tags,
+        owner: None,
+        last_reviewed: None,
+        related_docs: vec![],
+        path: None,
+    };
+
+    state
+        .storage
+        .save_document(&doc)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let response = DocumentResponse {
+        id: doc.id,
+        title: doc.title.clone(),
+        body: doc.body.clone(),
+        tags: doc.tags.clone(),
+        last_reviewed: None,
+    };
+
+    if let Some(router) = state.router.clone() {
+        let storage = state.storage.clone();
+        let id = doc.id;
+        tokio::spawn(async move {
+            if let Err(e) = index_document_chunks(&doc, &storage, &router).await {
+                eprintln!("[reindex] create_document {id}: {e}");
+            }
+        });
+    }
+
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
 // ── Route: GET /documents/:id ─────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -977,7 +1029,7 @@ async fn main() {
     // ── Router ────────────────────────────────────────────────────────────────
     let app = oa_router
         .route("/sessions", get(list_sessions).post(create_session))
-        .route("/documents", get(list_documents))
+        .route("/documents", get(list_documents).post(create_document))
         .route("/documents/{id}", get(get_document).put(update_document).delete(delete_document))
         .route("/documents/{id}/export.pdf", get(export_document_pdf))
         .route("/sessions/{id}/messages", get(get_session_messages))
