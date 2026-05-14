@@ -76,9 +76,9 @@ export function SessionRail({ sessions, currentSessionId, onSelect, onNew }: Pro
         {sessions.length === 0 && (
           <p className="px-3 py-2 text-xs text-stone-400 italic">No past sessions</p>
         )}
-        {sessions.map((s) => (
+        {sessions.map((s, i) => (
           <button
-            key={s.id}
+            key={s.id ?? i}
             onClick={() => onSelect(s.id)}
             className={`w-full text-left px-3 py-2 rounded mx-1 text-sm transition-colors ${
               s.id === currentSessionId
