@@ -38,8 +38,8 @@ use kaya_metering::pricing::PricingConfig;
 use kaya_metering::service::MeteringConfig;
 use kaya_metering::MeteringService;
 use kaya_tenant::{PasswordAuthService, PostgresStore};
-use axum::http::HeaderValue;
-use tower_http::cors::{Any, CorsLayer};
+use axum::http::{HeaderName, HeaderValue, Method};
+use tower_http::cors::CorsLayer;
 use tower_sessions::SessionManagerLayer;
 use tower_sessions::cookie::SameSite;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
@@ -153,8 +153,12 @@ async fn main() -> anyhow::Result<()> {
 
     let cors = CorsLayer::new()
         .allow_origin(cors_origin)
-        .allow_methods(Any)
-        .allow_headers(Any)
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE, Method::OPTIONS])
+        .allow_headers([
+            HeaderName::from_static("content-type"),
+            HeaderName::from_static("authorization"),
+            HeaderName::from_static("x-requested-with"),
+        ])
         .allow_credentials(true);
 
     let app = Router::new()
