@@ -6,6 +6,7 @@ import type {
   CitationRef,
   Role,
   SSEEvent,
+  ProposedEdit,
   ProposedDelete,
 } from "@/types/chat";
 import type { OnboardingStep } from "@/hooks/useOnboarding";
@@ -44,7 +45,12 @@ const WELCOME: ChatMessageData = {
 export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onStepComplete }: Props) {
   const [messages, setMessages] = useState<ChatMessageData[]>([WELCOME]);
   const [streamingId, setStreamingId] = useState<string | null>(null);
+  // Tracks current text for each pending edit card so "Approve All" reads the right value
+  const [pendingEditTexts, setPendingEditTexts] = useState<Record<string, string>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Buffers edits/deletes during a streaming turn; flushed all at once on Done
+  const editBufferRef = useRef<ProposedEdit[]>([]);
+  const deleteBufferRef = useRef<ProposedDelete[]>([]);
 
   // Scroll to bottom on new content
   useEffect(() => {
@@ -119,6 +125,8 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onSte
     const isFirstMessage = messages.filter((m) => m.role === "user").length === 0;
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setStreamingId(assistantId);
+    editBufferRef.current = [];
+    deleteBufferRef.current = [];
     if (isFirstMessage) onStepComplete?.("send_first_message");
 
     try {
@@ -185,36 +193,47 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onSte
                 ),
               );
             } else if (event.type === "ProposedEditEmitted") {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? {
-                        ...m,
-                        proposedEdit: {
-                          id: event.editId,
-                          docId: event.docId,
-                          paragraphId: event.paragraphId,
-                          original: event.original,
-                          proposed: event.proposed,
-                          status: "pending",
-                        },
-                      }
-                    : m,
-                ),
-              );
+              // Buffer the edit — it will be flushed to the message on Done
+              editBufferRef.current.push({
+                id: event.editId,
+                docId: event.docId ?? "",
+                paragraphId: event.paragraphId,
+                original: event.original,
+                proposed: event.proposed,
+                status: "pending",
+              });
             } else if (event.type === "ProposedDeleteEmitted") {
-              const deletion: ProposedDelete = {
+              deleteBufferRef.current.push({
                 id: event.editId,
                 docId: event.docId,
                 docTitle: event.docTitle,
                 status: "pending",
-              };
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId ? { ...m, proposedDelete: deletion } : m,
-                ),
-              );
+              });
             } else if (event.type === "Done") {
+              // Flush all buffered edits/deletes at once so cards appear together
+              const edits = editBufferRef.current;
+              const deletes = deleteBufferRef.current;
+              editBufferRef.current = [];
+              deleteBufferRef.current = [];
+
+              if (edits.length > 0 || deletes.length > 0) {
+                const newTexts: Record<string, string> = {};
+                for (const e of edits) newTexts[e.id] = e.proposed;
+                setPendingEditTexts((prev) => ({ ...prev, ...newTexts }));
+
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? {
+                          ...m,
+                          ...(edits.length > 0 ? { proposedEdits: edits } : {}),
+                          ...(deletes.length > 0 ? { proposedDeletes: deletes } : {}),
+                        }
+                      : m,
+                  ),
+                );
+              }
+
               setStreamingId(null);
             } else if (event.type === "Error") {
               setMessages((prev) =>
@@ -242,10 +261,14 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onSte
     }
   }
 
+  function onEditTextChange(editId: string, text: string) {
+    setPendingEditTexts((prev) => ({ ...prev, [editId]: text }));
+  }
+
   async function approveEdit(editId: string, finalText: string) {
-    // Find the edit to get the docId
-    const msg = messages.find((m) => m.proposedEdit?.id === editId);
-    if (!msg?.proposedEdit) return;
+    const msg = messages.find((m) => m.proposedEdits?.some((e) => e.id === editId));
+    const edit = msg?.proposedEdits?.find((e) => e.id === editId);
+    if (!msg || !edit) return;
 
     const res = await fetch(`/api/edits/${editId}/approve`, {
       method: "POST",
@@ -257,21 +280,31 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onSte
 
     setMessages((prev) =>
       prev.map((m) =>
-        m.id === msg.id && m.proposedEdit
-          ? { ...m, proposedEdit: { ...m.proposedEdit, status: "approved" } }
+        m.id === msg.id && m.proposedEdits
+          ? {
+              ...m,
+              proposedEdits: m.proposedEdits.map((e) =>
+                e.id === editId ? { ...e, status: "approved" } : e,
+              ),
+            }
           : m,
       ),
     );
 
     onStepComplete?.("approve_first_diff");
-    onDocumentUpdated(msg.proposedEdit.docId);
+    onDocumentUpdated(edit.docId);
   }
 
   function rejectEdit(editId: string) {
     setMessages((prev) =>
       prev.map((m) =>
-        m.proposedEdit?.id === editId && m.proposedEdit
-          ? { ...m, proposedEdit: { ...m.proposedEdit, status: "rejected" } }
+        m.proposedEdits?.some((e) => e.id === editId)
+          ? {
+              ...m,
+              proposedEdits: m.proposedEdits!.map((e) =>
+                e.id === editId ? { ...e, status: "rejected" } : e,
+              ),
+            }
           : m,
       ),
     );
@@ -286,8 +319,13 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onSte
     if (!res.ok) throw new Error("approve failed");
     setMessages((prev) =>
       prev.map((m) =>
-        m.proposedDelete?.id === editId && m.proposedDelete
-          ? { ...m, proposedDelete: { ...m.proposedDelete, status: "approved" } }
+        m.proposedDeletes?.some((d) => d.id === editId)
+          ? {
+              ...m,
+              proposedDeletes: m.proposedDeletes!.map((d) =>
+                d.id === editId ? { ...d, status: "approved" } : d,
+              ),
+            }
           : m,
       ),
     );
@@ -296,10 +334,47 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onSte
   function rejectDelete(editId: string) {
     setMessages((prev) =>
       prev.map((m) =>
-        m.proposedDelete?.id === editId && m.proposedDelete
-          ? { ...m, proposedDelete: { ...m.proposedDelete, status: "rejected" } }
+        m.proposedDeletes?.some((d) => d.id === editId)
+          ? {
+              ...m,
+              proposedDeletes: m.proposedDeletes!.map((d) =>
+                d.id === editId ? { ...d, status: "rejected" } : d,
+              ),
+            }
           : m,
       ),
+    );
+  }
+
+  async function approveAll(messageId: string) {
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg) return;
+
+    const pendingEdits = msg.proposedEdits?.filter((e) => e.status === "pending") ?? [];
+    const pendingDeletes = msg.proposedDeletes?.filter((d) => d.status === "pending") ?? [];
+
+    await Promise.all([
+      ...pendingEdits.map((e) =>
+        approveEdit(e.id, pendingEditTexts[e.id] ?? e.proposed),
+      ),
+      ...pendingDeletes.map((d) => approveDelete(d.id)),
+    ]);
+  }
+
+  function rejectAll(messageId: string) {
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== messageId) return m;
+        return {
+          ...m,
+          proposedEdits: m.proposedEdits?.map((e) =>
+            e.status === "pending" ? { ...e, status: "rejected" } : e,
+          ),
+          proposedDeletes: m.proposedDeletes?.map((d) =>
+            d.status === "pending" ? { ...d, status: "rejected" } : d,
+          ),
+        };
+      }),
     );
   }
 
@@ -317,6 +392,10 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onSte
             onRejectEdit={rejectEdit}
             onApproveDelete={approveDelete}
             onRejectDelete={rejectDelete}
+            onEditTextChange={onEditTextChange}
+            editTexts={pendingEditTexts}
+            onApproveAll={approveAll}
+            onRejectAll={rejectAll}
           />
         ))}
         <div ref={bottomRef} />
