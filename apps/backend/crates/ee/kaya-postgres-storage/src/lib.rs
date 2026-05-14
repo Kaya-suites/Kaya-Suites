@@ -24,6 +24,10 @@
 //! is used so that ranking is consistent with the cosine-similarity ranking
 //! in the SQLite adapter.
 
+pub mod session;
+
+pub use session::PostgresSessionStorage;
+
 use async_trait::async_trait;
 use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter, StorageError};
 use kaya_tenant::UserContext;

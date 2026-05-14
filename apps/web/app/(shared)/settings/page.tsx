@@ -232,6 +232,23 @@ export default function SettingsPage() {
           </a>
         </div>
 
+        {/* Onboarding */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3">
+          <h2 className="font-medium text-gray-900">Onboarding</h2>
+          <p className="text-sm text-gray-500">
+            Show the getting-started checklist again from the beginning.
+          </p>
+          <button
+            onClick={() => {
+              localStorage.removeItem("kaya_onboarding_v1");
+              window.location.reload();
+            }}
+            className="border border-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:border-gray-400 transition-colors"
+          >
+            Reset onboarding
+          </button>
+        </div>
+
         {/* Danger zone */}
         <div className="bg-white rounded-xl border border-red-100 p-6 space-y-4">
           <h2 className="font-medium text-red-700">Delete account</h2>

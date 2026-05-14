@@ -8,8 +8,8 @@
 //! 2. Run storage migrations (kaya-postgres-storage MIGRATOR).
 //! 3. Run session-store migration (tower-sessions-sqlx-store).
 //! 4. Load pricing config (PRICING_CONFIG_PATH or the bundled default).
-//! 5. Build service layer: MagicLink, Billing, Metering.
-//! 6. Mount auth, account, billing, and admin routes.
+//! 5. Build service layer: PasswordAuth, Billing, Metering.
+//! 6. Mount auth, account, billing, admin, and shared kaya-server routes.
 //! 7. Bind and serve.
 //!
 //! # Environment variables
@@ -25,33 +25,77 @@
 //! | `PRICING_CONFIG_PATH`     | Path to pricing.yaml (default: bin/kaya-cloud/config/pricing.yaml) |
 //! | `PORT`                    | Bind port (default: 3001)                               |
 //! | `FRONTEND_URL`            | Allowed CORS origin (default: http://localhost:3000)    |
+//! | `KAYA_CONFIG`             | Path to kaya.yaml for LLM router (optional)             |
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
-
-use axum::Router;
+use axum::{
+    Router,
+    extract::{Request, State},
+    http::{HeaderName, HeaderValue, Method},
+    middleware::Next,
+    response::{IntoResponse, Response},
+};
 use kaya_billing::BillingService;
+use kaya_core::{SessionStorage, StorageAdapter, model_router::ModelRouter};
 use kaya_metering::pricing::PricingConfig;
 use kaya_metering::service::MeteringConfig;
 use kaya_metering::MeteringService;
-use kaya_tenant::{PasswordAuthService, PostgresStore};
-use axum::http::{HeaderName, HeaderValue, Method};
+use kaya_postgres_storage::{PostgresAdapter, PostgresSessionStorage};
+use kaya_server::state::StoredEdit;
+use kaya_tenant::{KayaAuthBackend, PasswordAuthService, UserContext};
+use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 use tower_sessions::SessionManagerLayer;
 use tower_sessions::cookie::SameSite;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use uuid::Uuid;
 
 mod routes;
 mod state;
 
 use state::AppState;
 
+// ── Per-request storage injection ─────────────────────────────────────────────
+
+/// Middleware that creates per-request `StorageAdapter` and `SessionStorage`
+/// extensions scoped to the authenticated user.
+///
+/// Must run after `auth_layer` so the `AuthSession` extension is present.
+/// Returns 401 if the user is not authenticated.
+async fn inject_storage(
+    State(state): State<AppState>,
+    auth: axum_login::AuthSession<KayaAuthBackend>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let Some(user) = auth.user else {
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    };
+
+    let user_ctx = UserContext { user_id: user.id, tenant_id: user.id };
+
+    let storage: Arc<dyn StorageAdapter> =
+        Arc::new(PostgresAdapter::new(state.pool.clone(), user_ctx));
+    let sessions: Arc<dyn SessionStorage> =
+        Arc::new(PostgresSessionStorage::new(state.pool.clone(), user.id));
+
+    request.extensions_mut().insert(storage);
+    request.extensions_mut().insert(sessions);
+    request.extensions_mut().insert(state.llm.clone());
+    request.extensions_mut().insert(state.pending_edits.clone());
+
+    next.run(request).await
+}
+
+// ── Entry point ───────────────────────────────────────────────────────────────
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Try crate-local .env first, then fall back to CWD .env
     dotenvy::from_path(concat!(env!("CARGO_MANIFEST_DIR"), "/.env")).ok();
     dotenvy::dotenv().ok();
 
@@ -89,7 +133,7 @@ async fn main() -> anyhow::Result<()> {
     kaya_postgres_storage::MIGRATOR.run(&pool).await?;
     tracing::info!("storage migrations applied");
 
-    let session_store = PostgresStore::new(pool.clone());
+    let session_store = kaya_tenant::PostgresStore::new(pool.clone());
     session_store.migrate().await?;
     tracing::info!("session store ready");
 
@@ -118,12 +162,29 @@ async fn main() -> anyhow::Result<()> {
         paddle_api_key: paddle_api_key.clone(),
         paddle_api_base: paddle_api_base.clone(),
         paddle_overage_price_id,
-        // Alert emails are optional; leave empty to disable notifications.
         resend_api_key: std::env::var("RESEND_API_KEY").unwrap_or_default(),
         resend_from: std::env::var("RESEND_FROM").unwrap_or_default(),
         admin_email: admin_email.clone(),
     };
     let metering_svc = Arc::new(MeteringService::new(pool.clone(), pricing, metering_config));
+
+    // ── LLM router (optional) ─────────────────────────────────────────────────
+    let config_path = std::env::var("KAYA_CONFIG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("kaya.yaml"));
+
+    let llm: Option<Arc<ModelRouter>> = match ModelRouter::from_yaml(&config_path) {
+        Ok(r) => {
+            tracing::info!("LLM router loaded from {config_path:?}");
+            Some(Arc::new(r))
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "LLM router unavailable; chat will return 503");
+            None
+        }
+    };
+
+    let pending_edits = Arc::new(Mutex::new(HashMap::<Uuid, StoredEdit>::new()));
 
     let state = AppState {
         pool: pool.clone(),
@@ -131,6 +192,8 @@ async fn main() -> anyhow::Result<()> {
         billing_svc,
         metering_svc,
         admin_email,
+        llm,
+        pending_edits,
     };
 
     let session_layer = SessionManagerLayer::new(session_store)
@@ -142,7 +205,7 @@ async fn main() -> anyhow::Result<()> {
             tower_sessions::cookie::time::Duration::days(7),
         ));
 
-    let backend = kaya_tenant::KayaAuthBackend::new(pool.clone());
+    let backend = KayaAuthBackend::new(pool.clone());
     let auth_layer = axum_login::AuthManagerLayerBuilder::new(backend, session_layer).build();
 
     let frontend_url = std::env::var("FRONTEND_URL")
@@ -153,7 +216,14 @@ async fn main() -> anyhow::Result<()> {
 
     let cors = CorsLayer::new()
         .allow_origin(cors_origin)
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers([
             HeaderName::from_static("content-type"),
             HeaderName::from_static("authorization"),
@@ -161,13 +231,20 @@ async fn main() -> anyhow::Result<()> {
         ])
         .allow_credentials(true);
 
+    // kaya-server routes get per-request storage injection (requires auth).
+    let shared_routes = kaya_server::router()
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            inject_storage,
+        ));
+
     let app = Router::new()
         .merge(routes::auth::router())
         .merge(routes::account::router())
         .merge(routes::billing::router())
         .merge(routes::dashboard::router())
         .merge(routes::admin::router())
-        .merge(routes::documents::router())
+        .merge(shared_routes)
         .layer(auth_layer)
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http())

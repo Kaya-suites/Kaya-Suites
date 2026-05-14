@@ -4,6 +4,7 @@
 members = [
   "crates/kaya-core",
   "crates/kaya-storage",
+  "crates/kaya-server",
   "crates/ee/kaya-billing",
   "crates/ee/kaya-tenant",
   "crates/ee/kaya-metering",
