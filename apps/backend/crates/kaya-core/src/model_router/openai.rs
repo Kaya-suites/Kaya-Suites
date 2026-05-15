@@ -128,14 +128,24 @@ impl LlmProvider for OpenAIProvider {
             "input": request.text,
         });
 
-        let resp = Self::check_status(
-            self.request("/embeddings")
+        // Retry up to 3 times on 5xx with exponential backoff (1s, 2s, 4s).
+        let mut attempt = 0u32;
+        let resp = loop {
+            let http_resp = self
+                .request("/embeddings")
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| KayaError::Internal(e.to_string()))?,
-        )
-        .await?;
+                .map_err(|e| KayaError::Internal(e.to_string()))?;
+
+            let status = http_resp.status();
+            if status.is_server_error() && attempt < 3 {
+                attempt += 1;
+                tokio::time::sleep(std::time::Duration::from_secs(1 << attempt)).await;
+                continue;
+            }
+            break Self::check_status(http_resp).await?;
+        };
 
         let json: Value =
             resp.json().await.map_err(|e| KayaError::Internal(e.to_string()))?;
