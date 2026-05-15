@@ -16,15 +16,18 @@ impl SqliteSessionStorage {
         Self { pool }
     }
 
-    /// Create the `sessions` and `messages` tables if they do not exist.
+    /// Create the `sessions` and `messages` tables if they do not exist,
+    /// and add token columns to existing tables.
     pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS sessions (
-                id            TEXT    PRIMARY KEY,
-                title         TEXT    NOT NULL,
-                created_at    INTEGER NOT NULL,
-                updated_at    INTEGER NOT NULL,
-                message_count INTEGER NOT NULL DEFAULT 0
+                id                  TEXT    PRIMARY KEY,
+                title               TEXT    NOT NULL,
+                created_at          INTEGER NOT NULL,
+                updated_at          INTEGER NOT NULL,
+                message_count       INTEGER NOT NULL DEFAULT 0,
+                total_input_tokens  INTEGER NOT NULL DEFAULT 0,
+                total_output_tokens INTEGER NOT NULL DEFAULT 0
             )",
         )
         .execute(pool)
@@ -32,16 +35,28 @@ impl SqliteSessionStorage {
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS messages (
-                id         TEXT    PRIMARY KEY,
-                session_id TEXT    NOT NULL,
-                role       TEXT    NOT NULL,
-                content    TEXT    NOT NULL,
-                citations  TEXT    NOT NULL DEFAULT '[]',
-                created_at INTEGER NOT NULL
+                id             TEXT    PRIMARY KEY,
+                session_id     TEXT    NOT NULL,
+                role           TEXT    NOT NULL,
+                content        TEXT    NOT NULL,
+                citations      TEXT    NOT NULL DEFAULT '[]',
+                created_at     INTEGER NOT NULL,
+                input_tokens   INTEGER NOT NULL DEFAULT 0,
+                output_tokens  INTEGER NOT NULL DEFAULT 0
             )",
         )
         .execute(pool)
         .await?;
+
+        // Add token columns to existing databases that predate this migration.
+        for stmt in [
+            "ALTER TABLE sessions ADD COLUMN total_input_tokens INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE sessions ADD COLUMN total_output_tokens INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE messages ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE messages ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0",
+        ] {
+            let _ = sqlx::query(stmt).execute(pool).await; // ignored if column already exists
+        }
 
         Ok(())
     }
@@ -55,7 +70,8 @@ fn box_err<E: std::error::Error + Send + Sync + 'static>(e: E) -> SessionError {
 impl SessionStorage for SqliteSessionStorage {
     async fn list_sessions(&self) -> Result<Vec<Session>, SessionError> {
         let rows = sqlx::query(
-            "SELECT id, title, created_at, updated_at, message_count
+            "SELECT id, title, created_at, updated_at, message_count,
+                    total_input_tokens, total_output_tokens
              FROM sessions ORDER BY updated_at DESC",
         )
         .fetch_all(&self.pool)
@@ -71,6 +87,8 @@ impl SessionStorage for SqliteSessionStorage {
                     created_at: row.try_get("created_at").map_err(box_err)?,
                     updated_at: row.try_get("updated_at").map_err(box_err)?,
                     message_count: row.try_get::<i64, _>("message_count").map_err(box_err)? as u32,
+                    total_input_tokens: row.try_get::<i64, _>("total_input_tokens").map_err(box_err)? as u32,
+                    total_output_tokens: row.try_get::<i64, _>("total_output_tokens").map_err(box_err)? as u32,
                 })
             })
             .collect()
@@ -93,12 +111,20 @@ impl SessionStorage for SqliteSessionStorage {
         .await
         .map_err(box_err)?;
 
-        Ok(Session { id, title, created_at: now, updated_at: now, message_count: 0 })
+        Ok(Session {
+            id,
+            title,
+            created_at: now,
+            updated_at: now,
+            message_count: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+        })
     }
 
     async fn get_messages(&self, session_id: Uuid) -> Result<Vec<MessageRecord>, SessionError> {
         let rows = sqlx::query(
-            "SELECT id, role, content, citations, created_at
+            "SELECT id, role, content, citations, created_at, input_tokens, output_tokens
              FROM messages WHERE session_id = ? ORDER BY created_at ASC",
         )
         .bind(session_id.to_string())
@@ -114,6 +140,8 @@ impl SessionStorage for SqliteSessionStorage {
                     content: row.try_get("content").map_err(box_err)?,
                     citations_json: row.try_get("citations").map_err(box_err)?,
                     created_at: row.try_get("created_at").map_err(box_err)?,
+                    input_tokens: row.try_get::<i64, _>("input_tokens").map_err(box_err)? as u32,
+                    output_tokens: row.try_get::<i64, _>("output_tokens").map_err(box_err)? as u32,
                 })
             })
             .collect()
@@ -168,20 +196,39 @@ impl SessionStorage for SqliteSessionStorage {
         id: &str,
         content: &str,
         citations_json: &str,
+        input_tokens: u32,
+        output_tokens: u32,
     ) -> Result<(), SessionError> {
         let now = Utc::now().timestamp_millis();
         sqlx::query(
-            "INSERT INTO messages (id, session_id, role, content, citations, created_at)
-             VALUES (?, ?, 'assistant', ?, ?, ?)",
+            "INSERT INTO messages
+                 (id, session_id, role, content, citations, created_at, input_tokens, output_tokens)
+             VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?)",
         )
         .bind(id)
         .bind(session_id.to_string())
         .bind(content)
         .bind(citations_json)
         .bind(now)
+        .bind(input_tokens as i64)
+        .bind(output_tokens as i64)
         .execute(&self.pool)
         .await
         .map_err(box_err)?;
+
+        sqlx::query(
+            "UPDATE sessions
+             SET total_input_tokens  = total_input_tokens  + ?,
+                 total_output_tokens = total_output_tokens + ?
+             WHERE id = ?",
+        )
+        .bind(input_tokens as i64)
+        .bind(output_tokens as i64)
+        .bind(session_id.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+
         Ok(())
     }
 

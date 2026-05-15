@@ -53,6 +53,7 @@ use crate::edit::ProposedEdit;
 use crate::error::KayaError;
 use crate::model_router::{ModelRouter, OperationType, ToolCallRequest, ToolDefinition};
 use crate::storage::StorageAdapter;
+use crate::token_counter::count_tokens;
 
 // ── Context ───────────────────────────────────────────────────────────────────
 
@@ -83,6 +84,8 @@ pub enum AgentEvent {
     ProposedEditEmitted { edit: ProposedEdit },
     /// The model's final text response — the agent turn is complete.
     FinalMessage { text: String },
+    /// Token counts for the completed turn, computed locally from message text.
+    Usage { input_tokens: u32, output_tokens: u32 },
 }
 
 // ── Loop ─────────────────────────────────────────────────────────────────────
@@ -159,6 +162,8 @@ async fn agent_task(
     let system_prompt = build_system_prompt(&tools);
     let turn_id = Uuid::new_v4();
     let mut tool_history = String::new();
+    let mut total_input_tokens: u32 = 0;
+    let mut total_output_tokens: u32 = 0;
 
     // Format prior conversation turns as context before the current message.
     let conversation_context = if prior_turns.is_empty() {
@@ -177,6 +182,8 @@ async fn agent_task(
 
     for _ in 0..max_turns {
         let prompt = format!("{system_prompt}{conversation_context}\nUser: {message}\n{tool_history}");
+        // Count before moving prompt into the request; use cl100k_base as a universal baseline.
+        total_input_tokens = total_input_tokens.saturating_add(count_tokens(&prompt, "gpt-4"));
 
         let req = ToolCallRequest {
             prompt,
@@ -277,18 +284,29 @@ async fn agent_task(
             }
 
             None => {
-                // ── Model is done — emit final message ───────────────────────
+                // ── Model is done — emit usage then final message ─────────────
                 let text = resp
                     .content
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| "Done.".to_owned());
+                total_output_tokens = count_tokens(&text, &resp.usage.model);
+                let _ = tx.send(Ok(AgentEvent::Usage {
+                    input_tokens: total_input_tokens,
+                    output_tokens: total_output_tokens,
+                })).await;
                 let _ = tx.send(Ok(AgentEvent::FinalMessage { text })).await;
                 return;
             }
         }
     }
 
-    // Exceeded max_turns — still emit a final message so the stream closes.
+    // Exceeded max_turns — emit usage then final message so the stream closes.
+    let _ = tx
+        .send(Ok(AgentEvent::Usage {
+            input_tokens: total_input_tokens,
+            output_tokens: total_output_tokens,
+        }))
+        .await;
     let _ = tx
         .send(Ok(AgentEvent::FinalMessage {
             text: "Reached maximum agent turns.".to_owned(),

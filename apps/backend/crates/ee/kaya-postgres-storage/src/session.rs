@@ -34,7 +34,9 @@ impl SessionStorage for PostgresSessionStorage {
                     COALESCE(s.title, 'Untitled') AS title,
                     s.created_at,
                     s.updated_at,
-                    COUNT(m.id)::int4 AS message_count
+                    COUNT(m.id)::int4 AS message_count,
+                    s.total_input_tokens,
+                    s.total_output_tokens
              FROM chat_sessions s
              LEFT JOIN chat_messages m
                ON m.session_id = s.id AND m.user_id = s.user_id
@@ -56,12 +58,18 @@ impl SessionStorage for PostgresSessionStorage {
                 let updated_at: chrono::DateTime<chrono::Utc> =
                     row.try_get("updated_at").map_err(box_err)?;
                 let message_count: i32 = row.try_get("message_count").map_err(box_err)?;
+                let total_input_tokens: i32 =
+                    row.try_get("total_input_tokens").map_err(box_err)?;
+                let total_output_tokens: i32 =
+                    row.try_get("total_output_tokens").map_err(box_err)?;
                 Ok(Session {
                     id,
                     title,
                     created_at: ts_millis(created_at),
                     updated_at: ts_millis(updated_at),
                     message_count: message_count as u32,
+                    total_input_tokens: total_input_tokens as u32,
+                    total_output_tokens: total_output_tokens as u32,
                 })
             })
             .collect()
@@ -90,12 +98,14 @@ impl SessionStorage for PostgresSessionStorage {
             created_at: ts_millis(now),
             updated_at: ts_millis(now),
             message_count: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
         })
     }
 
     async fn get_messages(&self, session_id: Uuid) -> Result<Vec<MessageRecord>, SessionError> {
         let rows = sqlx::query(
-            "SELECT id::text, role, content, citations, created_at
+            "SELECT id::text, role, content, citations, created_at, input_tokens, output_tokens
              FROM chat_messages
              WHERE session_id = $1 AND user_id = $2
              ORDER BY created_at ASC",
@@ -115,12 +125,16 @@ impl SessionStorage for PostgresSessionStorage {
                     row.try_get("citations").map_err(box_err)?;
                 let created_at: chrono::DateTime<chrono::Utc> =
                     row.try_get("created_at").map_err(box_err)?;
+                let input_tokens: i32 = row.try_get("input_tokens").map_err(box_err)?;
+                let output_tokens: i32 = row.try_get("output_tokens").map_err(box_err)?;
                 Ok(MessageRecord {
                     id,
                     role,
                     content,
                     citations_json: citations.to_string(),
                     created_at: ts_millis(created_at),
+                    input_tokens: input_tokens as u32,
+                    output_tokens: output_tokens as u32,
                 })
             })
             .collect()
@@ -181,6 +195,8 @@ impl SessionStorage for PostgresSessionStorage {
         id: &str,
         content: &str,
         citations_json: &str,
+        input_tokens: u32,
+        output_tokens: u32,
     ) -> Result<(), SessionError> {
         let msg_id = Uuid::parse_str(id).unwrap_or_else(|_| Uuid::new_v4());
         let now = chrono::Utc::now();
@@ -188,8 +204,9 @@ impl SessionStorage for PostgresSessionStorage {
             serde_json::from_str(citations_json).unwrap_or_else(|_| serde_json::json!([]));
         sqlx::query(
             "INSERT INTO chat_messages
-                 (id, session_id, user_id, role, content, citations, created_at)
-             VALUES ($1, $2, $3, 'assistant', $4, $5, $6)",
+                 (id, session_id, user_id, role, content, citations, created_at,
+                  input_tokens, output_tokens)
+             VALUES ($1, $2, $3, 'assistant', $4, $5, $6, $7, $8)",
         )
         .bind(msg_id)
         .bind(session_id)
@@ -197,9 +214,26 @@ impl SessionStorage for PostgresSessionStorage {
         .bind(content)
         .bind(citations)
         .bind(now)
+        .bind(input_tokens as i32)
+        .bind(output_tokens as i32)
         .execute(&self.pool)
         .await
         .map_err(box_err)?;
+
+        sqlx::query(
+            "UPDATE chat_sessions
+             SET total_input_tokens  = total_input_tokens  + $1,
+                 total_output_tokens = total_output_tokens + $2
+             WHERE id = $3 AND user_id = $4",
+        )
+        .bind(input_tokens as i32)
+        .bind(output_tokens as i32)
+        .bind(session_id)
+        .bind(self.user_id)
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+
         Ok(())
     }
 

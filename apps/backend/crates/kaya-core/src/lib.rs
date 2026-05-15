@@ -6,6 +6,7 @@ pub mod model_router;
 pub mod retrieval;
 pub mod session;
 pub mod storage;
+pub mod token_counter;
 
 // agent is declared here; populated in the next step
 pub mod agent;

@@ -14,6 +14,8 @@ pub struct Session {
     /// Unix epoch milliseconds.
     pub updated_at: i64,
     pub message_count: u32,
+    pub total_input_tokens: u32,
+    pub total_output_tokens: u32,
 }
 
 /// A persisted chat message.
@@ -26,6 +28,8 @@ pub struct MessageRecord {
     pub citations_json: String,
     /// Unix epoch milliseconds.
     pub created_at: i64,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
 }
 
 /// Error type for session storage operations.
@@ -60,6 +64,8 @@ pub trait SessionStorage: Send + Sync {
         id: &str,
         content: &str,
         citations_json: &str,
+        input_tokens: u32,
+        output_tokens: u32,
     ) -> Result<(), SessionError>;
     /// Update the session's `updated_at` timestamp (and `message_count` where tracked).
     async fn touch_session(&self, session_id: Uuid) -> Result<(), SessionError>;

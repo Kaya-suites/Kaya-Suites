@@ -194,6 +194,9 @@ async fn main() {
                 println!("\nAssistant: {text}");
             }
             AgentEvent::ThinkingChunk { text } => print!("{text}"),
+            AgentEvent::Usage { input_tokens, output_tokens } => {
+                println!("[usage] input={input_tokens} output={output_tokens}");
+            }
         }
     }
 

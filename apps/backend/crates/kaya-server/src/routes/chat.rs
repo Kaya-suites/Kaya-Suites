@@ -114,6 +114,8 @@ async fn run_agent_stream(
     let mut doc_title_cache: HashMap<Uuid, String> = HashMap::new();
     let mut assistant_text = String::new();
     let mut assistant_citations: Vec<Value> = Vec::new();
+    let mut turn_input_tokens: u32 = 0;
+    let mut turn_output_tokens: u32 = 0;
 
     macro_rules! send {
         ($data:expr) => {{
@@ -212,6 +214,11 @@ async fn run_agent_stream(
                 assistant_text = clean_text;
             }
 
+            Ok(AgentEvent::Usage { input_tokens, output_tokens }) => {
+                turn_input_tokens = input_tokens;
+                turn_output_tokens = output_tokens;
+            }
+
             Ok(_) => {}
         }
     }
@@ -225,6 +232,8 @@ async fn run_agent_stream(
                 &Uuid::new_v4().to_string(),
                 &assistant_text,
                 &citations_json,
+                turn_input_tokens,
+                turn_output_tokens,
             )
             .await;
 
