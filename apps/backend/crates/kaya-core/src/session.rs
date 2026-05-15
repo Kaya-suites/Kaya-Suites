@@ -30,6 +30,38 @@ pub struct MessageRecord {
     pub created_at: i64,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    pub model: String,
+}
+
+/// Token usage aggregated across all sessions.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSummary {
+    pub total_input_tokens: u32,
+    pub total_output_tokens: u32,
+    pub by_model: Vec<ModelUsage>,
+    pub sessions: Vec<SessionTokenUsage>,
+}
+
+/// Per-model token breakdown.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsage {
+    pub model: String,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+}
+
+/// Per-session token totals (for the usage table).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTokenUsage {
+    pub session_id: String,
+    pub title: String,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    /// Unix epoch milliseconds.
+    pub updated_at: i64,
 }
 
 /// Error type for session storage operations.
@@ -66,7 +98,9 @@ pub trait SessionStorage: Send + Sync {
         citations_json: &str,
         input_tokens: u32,
         output_tokens: u32,
+        model: &str,
     ) -> Result<(), SessionError>;
+    async fn get_usage_summary(&self) -> Result<UsageSummary, SessionError>;
     /// Update the session's `updated_at` timestamp (and `message_count` where tracked).
     async fn touch_session(&self, session_id: Uuid) -> Result<(), SessionError>;
     /// Rename the session, replacing its current title.

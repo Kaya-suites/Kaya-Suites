@@ -3,6 +3,27 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+interface ModelUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+interface SessionTokenUsage {
+  sessionId: string;
+  title: string;
+  inputTokens: number;
+  outputTokens: number;
+  updatedAt: number;
+}
+
+interface UsageSummary {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  byModel: ModelUsage[];
+  sessions: SessionTokenUsage[];
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 interface BillingStatus {
@@ -37,6 +58,7 @@ function statusLabel(s: BillingStatus["status"]) {
 export default function SettingsPage() {
   const [billing, setBilling] = useState<BillingStatus | null>(null);
   const [metering, setMetering] = useState<MeteringSummary | null>(null);
+  const [tokenUsage, setTokenUsage] = useState<UsageSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refunding, setRefunding] = useState(false);
   const [refundDone, setRefundDone] = useState(false);
@@ -60,6 +82,12 @@ export default function SettingsPage() {
       const [b, m] = await Promise.all([bRes.json(), mRes.json()]);
       setBilling(b);
       setMetering(m);
+
+      // Token usage is best-effort — don't block the page on failure.
+      fetch("/api/usage")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => { if (data) setTokenUsage(data); })
+        .catch(() => {});
     }
     load();
   }, []);
@@ -218,6 +246,9 @@ export default function SettingsPage() {
           </p>
         </div>
 
+        {/* Token usage card */}
+        <TokenUsageCard summary={tokenUsage} />
+
         {/* Data portability */}
         <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3">
           <h2 className="font-medium text-gray-900">Your data</h2>
@@ -277,6 +308,98 @@ export default function SettingsPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function TokenUsageCard({ summary }: { summary: UsageSummary | null }) {
+  if (!summary) return null;
+
+  const total = summary.totalInputTokens + summary.totalOutputTokens;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
+      <h2 className="font-medium text-gray-900">Token usage</h2>
+
+      {/* Summary row */}
+      <div className="grid grid-cols-3 gap-4 text-center">
+        <div className="bg-gray-50 rounded-lg p-3">
+          <p className="text-xs text-gray-500 mb-1">Total</p>
+          <p className="text-lg font-semibold tabular-nums text-gray-900">{fmtTokens(total)}</p>
+        </div>
+        <div className="bg-gray-50 rounded-lg p-3">
+          <p className="text-xs text-gray-500 mb-1">Input</p>
+          <p className="text-lg font-semibold tabular-nums text-gray-900">{fmtTokens(summary.totalInputTokens)}</p>
+        </div>
+        <div className="bg-gray-50 rounded-lg p-3">
+          <p className="text-xs text-gray-500 mb-1">Output</p>
+          <p className="text-lg font-semibold tabular-nums text-gray-900">{fmtTokens(summary.totalOutputTokens)}</p>
+        </div>
+      </div>
+
+      {/* Per-model breakdown */}
+      {summary.byModel.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">By model</p>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-gray-400 text-left">
+                <th className="pb-1 font-normal">Model</th>
+                <th className="pb-1 font-normal text-right">Input</th>
+                <th className="pb-1 font-normal text-right">Output</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {summary.byModel.map((m) => (
+                <tr key={m.model}>
+                  <td className="py-1.5 font-mono text-xs text-gray-700 pr-4">{m.model}</td>
+                  <td className="py-1.5 tabular-nums text-gray-900 text-right pr-4">{fmtTokens(m.inputTokens)}</td>
+                  <td className="py-1.5 tabular-nums text-gray-900 text-right">{fmtTokens(m.outputTokens)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Per-session breakdown */}
+      {summary.sessions.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">By conversation</p>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-gray-400 text-left">
+                <th className="pb-1 font-normal">Conversation</th>
+                <th className="pb-1 font-normal text-right">Input</th>
+                <th className="pb-1 font-normal text-right">Output</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {summary.sessions.map((s) => (
+                <tr key={s.sessionId}>
+                  <td className="py-1.5 text-gray-700 pr-4 truncate max-w-[200px]">{s.title}</td>
+                  <td className="py-1.5 tabular-nums text-gray-900 text-right pr-4">{fmtTokens(s.inputTokens)}</td>
+                  <td className="py-1.5 tabular-nums text-gray-900 text-right">{fmtTokens(s.outputTokens)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {total === 0 && (
+        <p className="text-sm text-gray-400">No conversations yet. Start chatting to see token usage.</p>
+      )}
+
+      <p className="text-xs text-gray-400">
+        Counts are estimates computed locally from message text using BPE tokenization.
+      </p>
+    </div>
   );
 }
 

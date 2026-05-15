@@ -116,6 +116,7 @@ async fn run_agent_stream(
     let mut assistant_citations: Vec<Value> = Vec::new();
     let mut turn_input_tokens: u32 = 0;
     let mut turn_output_tokens: u32 = 0;
+    let mut turn_model = String::new();
 
     macro_rules! send {
         ($data:expr) => {{
@@ -214,9 +215,10 @@ async fn run_agent_stream(
                 assistant_text = clean_text;
             }
 
-            Ok(AgentEvent::Usage { input_tokens, output_tokens }) => {
+            Ok(AgentEvent::Usage { input_tokens, output_tokens, model }) => {
                 turn_input_tokens = input_tokens;
                 turn_output_tokens = output_tokens;
+                turn_model = model;
             }
 
             Ok(_) => {}
@@ -234,6 +236,7 @@ async fn run_agent_stream(
                 &citations_json,
                 turn_input_tokens,
                 turn_output_tokens,
+                &turn_model,
             )
             .await;
 

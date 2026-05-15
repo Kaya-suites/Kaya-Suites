@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use kaya_core::SessionStorage;
+use kaya_core::{SessionStorage, UsageSummary};
 
 use crate::error::ApiError;
 
@@ -73,6 +73,20 @@ pub(crate) struct MessageResponse {
     citations: Value,
     created_at: i64,
 }
+
+// ── GET /sessions/usage ───────────────────────────────────────────────────────
+
+pub async fn get_usage_summary(
+    Extension(sessions): Extension<Arc<dyn SessionStorage>>,
+) -> Result<Json<UsageSummary>, ApiError> {
+    let summary = sessions
+        .get_usage_summary()
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(summary))
+}
+
+// ── GET /sessions/:id/messages ────────────────────────────────────────────────
 
 pub async fn get_session_messages(
     Extension(sessions): Extension<Arc<dyn SessionStorage>>,

@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use chrono::Utc;
-use kaya_core::session::{MessageRecord, Session, SessionError, SessionStorage};
+use kaya_core::session::{MessageRecord, ModelUsage, Session, SessionError, SessionStorage, SessionTokenUsage, UsageSummary};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
@@ -42,18 +42,20 @@ impl SqliteSessionStorage {
                 citations      TEXT    NOT NULL DEFAULT '[]',
                 created_at     INTEGER NOT NULL,
                 input_tokens   INTEGER NOT NULL DEFAULT 0,
-                output_tokens  INTEGER NOT NULL DEFAULT 0
+                output_tokens  INTEGER NOT NULL DEFAULT 0,
+                model          TEXT    NOT NULL DEFAULT ''
             )",
         )
         .execute(pool)
         .await?;
 
-        // Add token columns to existing databases that predate this migration.
+        // Add columns to existing databases that predate this migration.
         for stmt in [
             "ALTER TABLE sessions ADD COLUMN total_input_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sessions ADD COLUMN total_output_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE messages ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE messages ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE messages ADD COLUMN model TEXT NOT NULL DEFAULT ''",
         ] {
             let _ = sqlx::query(stmt).execute(pool).await; // ignored if column already exists
         }
@@ -124,7 +126,7 @@ impl SessionStorage for SqliteSessionStorage {
 
     async fn get_messages(&self, session_id: Uuid) -> Result<Vec<MessageRecord>, SessionError> {
         let rows = sqlx::query(
-            "SELECT id, role, content, citations, created_at, input_tokens, output_tokens
+            "SELECT id, role, content, citations, created_at, input_tokens, output_tokens, model
              FROM messages WHERE session_id = ? ORDER BY created_at ASC",
         )
         .bind(session_id.to_string())
@@ -142,6 +144,7 @@ impl SessionStorage for SqliteSessionStorage {
                     created_at: row.try_get("created_at").map_err(box_err)?,
                     input_tokens: row.try_get::<i64, _>("input_tokens").map_err(box_err)? as u32,
                     output_tokens: row.try_get::<i64, _>("output_tokens").map_err(box_err)? as u32,
+                    model: row.try_get("model").map_err(box_err)?,
                 })
             })
             .collect()
@@ -198,12 +201,13 @@ impl SessionStorage for SqliteSessionStorage {
         citations_json: &str,
         input_tokens: u32,
         output_tokens: u32,
+        model: &str,
     ) -> Result<(), SessionError> {
         let now = Utc::now().timestamp_millis();
         sqlx::query(
             "INSERT INTO messages
-                 (id, session_id, role, content, citations, created_at, input_tokens, output_tokens)
-             VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?)",
+                 (id, session_id, role, content, citations, created_at, input_tokens, output_tokens, model)
+             VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)",
         )
         .bind(id)
         .bind(session_id.to_string())
@@ -212,6 +216,7 @@ impl SessionStorage for SqliteSessionStorage {
         .bind(now)
         .bind(input_tokens as i64)
         .bind(output_tokens as i64)
+        .bind(model)
         .execute(&self.pool)
         .await
         .map_err(box_err)?;
@@ -253,5 +258,59 @@ impl SessionStorage for SqliteSessionStorage {
             .await
             .map_err(box_err)?;
         Ok(())
+    }
+
+    async fn get_usage_summary(&self) -> Result<UsageSummary, SessionError> {
+        // Per-model aggregation from assistant messages.
+        let model_rows = sqlx::query(
+            "SELECT model, SUM(input_tokens) AS total_in, SUM(output_tokens) AS total_out
+             FROM messages
+             WHERE role = 'assistant' AND model != ''
+             GROUP BY model
+             ORDER BY total_in DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(box_err)?;
+
+        let by_model: Vec<ModelUsage> = model_rows
+            .into_iter()
+            .map(|row| -> Result<ModelUsage, SessionError> {
+                Ok(ModelUsage {
+                    model: row.try_get("model").map_err(box_err)?,
+                    input_tokens: row.try_get::<i64, _>("total_in").map_err(box_err)? as u32,
+                    output_tokens: row.try_get::<i64, _>("total_out").map_err(box_err)? as u32,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        let total_input_tokens: u32 = by_model.iter().map(|m| m.input_tokens).sum();
+        let total_output_tokens: u32 = by_model.iter().map(|m| m.output_tokens).sum();
+
+        // Per-session token totals joined with title.
+        let session_rows = sqlx::query(
+            "SELECT id, title, total_input_tokens, total_output_tokens, updated_at
+             FROM sessions
+             WHERE total_input_tokens > 0 OR total_output_tokens > 0
+             ORDER BY updated_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(box_err)?;
+
+        let sessions: Vec<SessionTokenUsage> = session_rows
+            .into_iter()
+            .map(|row| -> Result<SessionTokenUsage, SessionError> {
+                Ok(SessionTokenUsage {
+                    session_id: row.try_get::<&str, _>("id").map_err(box_err)?.to_owned(),
+                    title: row.try_get("title").map_err(box_err)?,
+                    input_tokens: row.try_get::<i64, _>("total_input_tokens").map_err(box_err)? as u32,
+                    output_tokens: row.try_get::<i64, _>("total_output_tokens").map_err(box_err)? as u32,
+                    updated_at: row.try_get("updated_at").map_err(box_err)?,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(UsageSummary { total_input_tokens, total_output_tokens, by_model, sessions })
     }
 }

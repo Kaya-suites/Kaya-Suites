@@ -85,7 +85,7 @@ pub enum AgentEvent {
     /// The model's final text response — the agent turn is complete.
     FinalMessage { text: String },
     /// Token counts for the completed turn, computed locally from message text.
-    Usage { input_tokens: u32, output_tokens: u32 },
+    Usage { input_tokens: u32, output_tokens: u32, model: String },
 }
 
 // ── Loop ─────────────────────────────────────────────────────────────────────
@@ -164,6 +164,7 @@ async fn agent_task(
     let mut tool_history = String::new();
     let mut total_input_tokens: u32 = 0;
     let mut total_output_tokens: u32 = 0;
+    let mut last_model = String::new();
 
     // Format prior conversation turns as context before the current message.
     let conversation_context = if prior_turns.is_empty() {
@@ -199,6 +200,8 @@ async fn agent_task(
                 return;
             }
         };
+
+        last_model = resp.usage.model.clone();
 
         match resp.result {
             Some(tool_call) => {
@@ -293,6 +296,7 @@ async fn agent_task(
                 let _ = tx.send(Ok(AgentEvent::Usage {
                     input_tokens: total_input_tokens,
                     output_tokens: total_output_tokens,
+                    model: last_model.clone(),
                 })).await;
                 let _ = tx.send(Ok(AgentEvent::FinalMessage { text })).await;
                 return;
@@ -305,6 +309,7 @@ async fn agent_task(
         .send(Ok(AgentEvent::Usage {
             input_tokens: total_input_tokens,
             output_tokens: total_output_tokens,
+            model: last_model,
         }))
         .await;
     let _ = tx

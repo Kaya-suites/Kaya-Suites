@@ -2,7 +2,7 @@
 //! Postgres-backed [`SessionStorage`] implementation.
 
 use async_trait::async_trait;
-use kaya_core::session::{MessageRecord, Session, SessionError, SessionStorage};
+use kaya_core::session::{MessageRecord, ModelUsage, Session, SessionError, SessionStorage, SessionTokenUsage, UsageSummary};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -105,7 +105,7 @@ impl SessionStorage for PostgresSessionStorage {
 
     async fn get_messages(&self, session_id: Uuid) -> Result<Vec<MessageRecord>, SessionError> {
         let rows = sqlx::query(
-            "SELECT id::text, role, content, citations, created_at, input_tokens, output_tokens
+            "SELECT id::text, role, content, citations, created_at, input_tokens, output_tokens, model
              FROM chat_messages
              WHERE session_id = $1 AND user_id = $2
              ORDER BY created_at ASC",
@@ -127,6 +127,7 @@ impl SessionStorage for PostgresSessionStorage {
                     row.try_get("created_at").map_err(box_err)?;
                 let input_tokens: i32 = row.try_get("input_tokens").map_err(box_err)?;
                 let output_tokens: i32 = row.try_get("output_tokens").map_err(box_err)?;
+                let model: String = row.try_get("model").map_err(box_err)?;
                 Ok(MessageRecord {
                     id,
                     role,
@@ -135,6 +136,7 @@ impl SessionStorage for PostgresSessionStorage {
                     created_at: ts_millis(created_at),
                     input_tokens: input_tokens as u32,
                     output_tokens: output_tokens as u32,
+                    model,
                 })
             })
             .collect()
@@ -197,6 +199,7 @@ impl SessionStorage for PostgresSessionStorage {
         citations_json: &str,
         input_tokens: u32,
         output_tokens: u32,
+        model: &str,
     ) -> Result<(), SessionError> {
         let msg_id = Uuid::parse_str(id).unwrap_or_else(|_| Uuid::new_v4());
         let now = chrono::Utc::now();
@@ -205,8 +208,8 @@ impl SessionStorage for PostgresSessionStorage {
         sqlx::query(
             "INSERT INTO chat_messages
                  (id, session_id, user_id, role, content, citations, created_at,
-                  input_tokens, output_tokens)
-             VALUES ($1, $2, $3, 'assistant', $4, $5, $6, $7, $8)",
+                  input_tokens, output_tokens, model)
+             VALUES ($1, $2, $3, 'assistant', $4, $5, $6, $7, $8, $9)",
         )
         .bind(msg_id)
         .bind(session_id)
@@ -216,6 +219,7 @@ impl SessionStorage for PostgresSessionStorage {
         .bind(now)
         .bind(input_tokens as i32)
         .bind(output_tokens as i32)
+        .bind(model)
         .execute(&self.pool)
         .await
         .map_err(box_err)?;
@@ -262,5 +266,69 @@ impl SessionStorage for PostgresSessionStorage {
         .await
         .map_err(box_err)?;
         Ok(())
+    }
+
+    async fn get_usage_summary(&self) -> Result<UsageSummary, SessionError> {
+        let model_rows = sqlx::query(
+            "SELECT model,
+                    SUM(input_tokens)::int4  AS total_in,
+                    SUM(output_tokens)::int4 AS total_out
+             FROM chat_messages
+             WHERE user_id = $1 AND role = 'assistant' AND model != ''
+             GROUP BY model
+             ORDER BY total_in DESC",
+        )
+        .bind(self.user_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(box_err)?;
+
+        let by_model: Vec<ModelUsage> = model_rows
+            .iter()
+            .map(|row| -> Result<ModelUsage, SessionError> {
+                let total_in: i32 = row.try_get("total_in").map_err(box_err)?;
+                let total_out: i32 = row.try_get("total_out").map_err(box_err)?;
+                Ok(ModelUsage {
+                    model: row.try_get("model").map_err(box_err)?,
+                    input_tokens: total_in as u32,
+                    output_tokens: total_out as u32,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        let total_input_tokens: u32 = by_model.iter().map(|m| m.input_tokens).sum();
+        let total_output_tokens: u32 = by_model.iter().map(|m| m.output_tokens).sum();
+
+        let session_rows = sqlx::query(
+            "SELECT id::text, COALESCE(title, 'Untitled') AS title,
+                    total_input_tokens, total_output_tokens, updated_at
+             FROM chat_sessions
+             WHERE user_id = $1
+               AND (total_input_tokens > 0 OR total_output_tokens > 0)
+             ORDER BY updated_at DESC",
+        )
+        .bind(self.user_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(box_err)?;
+
+        let sessions: Vec<SessionTokenUsage> = session_rows
+            .iter()
+            .map(|row| -> Result<SessionTokenUsage, SessionError> {
+                let total_in: i32 = row.try_get("total_input_tokens").map_err(box_err)?;
+                let total_out: i32 = row.try_get("total_output_tokens").map_err(box_err)?;
+                let updated_at: chrono::DateTime<chrono::Utc> =
+                    row.try_get("updated_at").map_err(box_err)?;
+                Ok(SessionTokenUsage {
+                    session_id: row.try_get("id").map_err(box_err)?,
+                    title: row.try_get("title").map_err(box_err)?,
+                    input_tokens: total_in as u32,
+                    output_tokens: total_out as u32,
+                    updated_at: ts_millis(updated_at),
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(UsageSummary { total_input_tokens, total_output_tokens, by_model, sessions })
     }
 }
