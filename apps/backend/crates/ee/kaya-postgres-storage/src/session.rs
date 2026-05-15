@@ -216,4 +216,17 @@ impl SessionStorage for PostgresSessionStorage {
         .map_err(box_err)?;
         Ok(())
     }
+
+    async fn rename_session(&self, session_id: Uuid, title: String) -> Result<(), SessionError> {
+        sqlx::query(
+            "UPDATE chat_sessions SET title = $1 WHERE id = $2 AND user_id = $3",
+        )
+        .bind(&title)
+        .bind(session_id)
+        .bind(self.user_id)
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(())
+    }
 }
