@@ -2,23 +2,20 @@
 //!
 //! Session store abstraction that dispatches to Postgres, SQLite, or MySQL.
 
-pub mod mysql;
-pub use mysql::MysqlSessionStore;
-
 use async_trait::async_trait;
 use tower_sessions::{
     SessionStore,
     session::{Id, Record},
     session_store,
 };
-use tower_sessions_sqlx_store::{PostgresStore, SqliteStore};
+use tower_sessions_sqlx_store::{MySqlStore, PostgresStore, SqliteStore};
 
 /// Enum that dispatches `SessionStore` methods to the appropriate backend.
 #[derive(Clone, Debug)]
 pub enum AnySessionStore {
     Postgres(PostgresStore),
     Sqlite(SqliteStore),
-    Mysql(MysqlSessionStore),
+    Mysql(MySqlStore),
 }
 
 #[async_trait]

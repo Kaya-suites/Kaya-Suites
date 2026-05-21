@@ -45,7 +45,7 @@ use tokio::sync::Mutex;
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
 use tower_sessions::cookie::SameSite;
 use tower_sessions::{Expiry, SessionManagerLayer};
-use tower_sessions_sqlx_store::{PostgresStore, SqliteStore};
+use tower_sessions_sqlx_store::{MySqlStore, PostgresStore, SqliteStore};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 use utoipa::OpenApi;
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -250,7 +250,7 @@ async fn main() -> anyhow::Result<()> {
             AnySessionStore::Sqlite(store)
         }
         DbBackend::Mysql(mysql) => {
-            let store = session_store::MysqlSessionStore::new(mysql.clone());
+            let store = MySqlStore::new(mysql.clone());
             store
                 .migrate()
                 .await

@@ -4230,7 +4230,6 @@ dependencies = [
  "kaya-server",
  "kaya-storage",
  "mime_guess",
- "rmp-serde",
  "rust-embed",
  "serde",
  "serde_json",

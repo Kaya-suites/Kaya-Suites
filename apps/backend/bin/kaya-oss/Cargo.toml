@@ -31,7 +31,7 @@ dotenvy      = { workspace = true }
 # Auth + sessions
 axum-login                = "0.17"
 tower-sessions            = "0.14"
-tower-sessions-sqlx-store = { version = "0.15", features = ["postgres", "sqlite"] }
+tower-sessions-sqlx-store = { version = "0.15", features = ["postgres", "sqlite", "mysql"] }
 
 # Database
 sqlx = { version = "0.8", features = [
@@ -40,9 +40,6 @@ sqlx = { version = "0.8", features = [
 
 # Async trait
 async-trait = { workspace = true }
-
-# Session serialization
-rmp-serde = "1"
 
 # Export archive
 zip = "2"
