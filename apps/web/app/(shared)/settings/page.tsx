@@ -26,13 +26,6 @@ interface UsageSummary {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
-interface BillingStatus {
-  status: "active" | "grace_period" | "cancelled" | "refunded" | "none";
-  current_period_end: string | null;
-  refund_days_remaining: number | null;
-  paddle_customer_id: string | null;
-}
-
 interface MeteringSummary {
   agent_invocations_used: number;
   agent_invocations_limit: number;
@@ -45,42 +38,24 @@ function fmt(n: number) {
   return `$${n.toFixed(4)}`;
 }
 
-function statusLabel(s: BillingStatus["status"]) {
-  switch (s) {
-    case "active": return { text: "Active", cls: "text-[var(--color-success)] bg-[#C8F0D8] border-[var(--color-success)]" };
-    case "grace_period": return { text: "Past due", cls: "text-[var(--color-warning-fg)] bg-[#FFF3CC] border-[var(--color-warning)]" };
-    case "cancelled": return { text: "Cancelled", cls: "text-[var(--color-muted)] bg-[var(--color-muted-bg)] border-black" };
-    case "refunded": return { text: "Refunded", cls: "text-[var(--color-muted)] bg-[var(--color-muted-bg)] border-black" };
-    default: return { text: "No plan", cls: "text-[var(--color-muted)] bg-[var(--color-muted-bg)] border-black" };
-  }
-}
-
 const cardClass = "bg-[var(--color-surface)] border-2 border-black p-6 space-y-4";
 const cardStyle = { borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" };
 const sectionHeading = "font-bold text-xs uppercase tracking-wider text-black font-mono";
 const btnSecondary = "border-2 border-black bg-[var(--color-surface)] text-black px-4 py-2 text-xs font-bold uppercase tracking-wider font-mono hover:bg-[var(--color-muted-bg)] transition-all";
 
 export default function SettingsPage() {
-  const [billing, setBilling] = useState<BillingStatus | null>(null);
   const [metering, setMetering] = useState<MeteringSummary | null>(null);
   const [tokenUsage, setTokenUsage] = useState<UsageSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [refunding, setRefunding] = useState(false);
-  const [refundDone, setRefundDone] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     async function load() {
-      const [bRes, mRes] = await Promise.all([
-        fetch(`${API_URL}/billing/status`, { credentials: "include" }),
-        fetch(`${API_URL}/metering/summary`, { credentials: "include" }),
-      ]);
-      if (bRes.status === 401 || mRes.status === 401) { setError("Not signed in."); return; }
-      if (!bRes.ok || !mRes.ok) { setError("Failed to load settings."); return; }
-      const [b, m] = await Promise.all([bRes.json(), mRes.json()]);
-      setBilling(b);
-      setMetering(m);
+      const mRes = await fetch(`${API_URL}/metering/summary`, { credentials: "include" });
+      if (mRes.status === 401) { setError("Not signed in."); return; }
+      if (!mRes.ok) { setError("Failed to load settings."); return; }
+      setMetering(await mRes.json());
       fetch("/api/usage")
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => { if (data) setTokenUsage(data); })
@@ -88,24 +63,6 @@ export default function SettingsPage() {
     }
     load();
   }, []);
-
-  async function handleRefund() {
-    if (!confirm("Request a full refund? Your subscription will be cancelled immediately.")) return;
-    setRefunding(true);
-    const r = await fetch(`${API_URL}/billing/refund`, {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    setRefunding(false);
-    if (r.ok) {
-      setRefundDone(true);
-      setBilling((prev) => prev ? { ...prev, status: "refunded" } : prev);
-    } else {
-      const body = await r.json().catch(() => ({}));
-      alert(body.error ?? "Refund failed.");
-    }
-  }
 
   async function handleDelete() {
     if (deleteConfirm !== "DELETE MY ACCOUNT") return;
@@ -131,7 +88,7 @@ export default function SettingsPage() {
     );
   }
 
-  if (!billing || !metering) {
+  if (!metering) {
     return (
       <main className="h-full flex items-center justify-center" style={{ background: "var(--color-background)" }}>
         <p className="text-[var(--color-muted)] text-xs font-mono uppercase tracking-wider animate-pulse">Loading…</p>
@@ -139,7 +96,6 @@ export default function SettingsPage() {
     );
   }
 
-  const { text: statusText, cls: statusCls } = statusLabel(billing.status);
   const invocationPct = Math.min((metering.agent_invocations_used / metering.agent_invocations_limit) * 100, 100);
   const spendPct = Math.min((metering.spend_usd / metering.spend_cap_usd) * 100, 100);
 
@@ -147,59 +103,6 @@ export default function SettingsPage() {
     <main className="h-full overflow-y-auto py-12 font-mono" style={{ background: "var(--color-background)" }}>
       <div className="max-w-2xl mx-auto px-6 space-y-6">
         <h1 className="text-2xl font-black uppercase tracking-tight">Settings</h1>
-
-        {refundDone && (
-          <div
-            className="border-2 border-[var(--color-success)] bg-[#C8F0D8] p-4 text-xs text-[var(--color-success)] font-bold uppercase"
-            style={{ borderRadius: "var(--border-radius)" }}
-          >
-            Refund requested. Confirmation from Paddle within 5–10 business days.
-          </div>
-        )}
-
-        {/* Subscription */}
-        <div className={cardClass} style={cardStyle}>
-          <div className="flex items-center justify-between">
-            <h2 className={sectionHeading}>Subscription</h2>
-            <span className={`text-xs font-bold px-2.5 py-1 border-2 uppercase tracking-wider ${statusCls}`} style={{ borderRadius: "var(--border-radius)" }}>
-              {statusText}
-            </span>
-          </div>
-
-          {billing.current_period_end && (
-            <p className="text-xs text-[var(--color-muted)]">
-              {billing.status === "cancelled" ? "Access until" : "Renews"}{" "}
-              {new Date(billing.current_period_end).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-            </p>
-          )}
-
-          {billing.status === "none" && (
-            <Link
-              href="/billing/subscribe"
-              className="inline-block border-2 border-black bg-[var(--color-accent)] text-white px-5 py-2.5 text-xs font-bold uppercase tracking-wider hover:bg-black transition-all"
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
-            >
-              Subscribe — $10 / month
-            </Link>
-          )}
-
-          {billing.status === "active" && billing.paddle_customer_id && (
-            <div className="flex flex-wrap gap-3 pt-1">
-              <a href="https://customer.paddle.com/portal" target="_blank" rel="noreferrer" className="text-xs underline font-bold text-black hover:text-[var(--color-accent)]">
-                Manage billing ↗
-              </a>
-              {billing.refund_days_remaining && billing.refund_days_remaining > 0 && !refundDone && (
-                <button
-                  onClick={handleRefund}
-                  disabled={refunding}
-                  className="text-xs underline text-[var(--color-muted)] hover:text-[var(--color-danger)] disabled:opacity-50 font-bold"
-                >
-                  {refunding ? "Requesting refund…" : `Request refund (${billing.refund_days_remaining}d remaining)`}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
 
         {/* Usage */}
         <div className={cardClass} style={{ ...cardStyle, gap: "1.5rem" }}>
