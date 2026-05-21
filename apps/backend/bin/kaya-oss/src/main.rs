@@ -31,9 +31,8 @@ use axum::{
 use kaya_core::{SessionStorage, StorageAdapter, model_router::ModelRouter};
 use kaya_db::Dialect;
 use kaya_metering::{MeteringService, pricing::PricingConfig, service::MeteringConfig};
-use kaya_postgres_storage::{PostgresAdapter, PostgresSessionStorage};
 use kaya_server::state::StoredEdit;
-use kaya_storage::{MySqlAdapter, SqliteAdapter, SqliteSessionStorage};
+use kaya_storage::{MySqlAdapter, MySqlSessionStorage, PostgresAdapter, PostgresSessionStorage, SqliteAdapter, SqliteSessionStorage};
 use kaya_auth::{KayaAuthBackend, PasswordAuthService};
 use kaya_core::UserContext;
 use rust_embed::RustEmbed;
@@ -125,12 +124,13 @@ async fn inject_storage(
                 let adapter = SqliteAdapter::from_pool(sqlite.clone())
                     .await
                     .expect("sqlite adapter");
-                let sess = SqliteSessionStorage::from_pool(sqlite.clone());
+                let sess = SqliteSessionStorage::new(sqlite.clone());
                 (Arc::new(adapter), Arc::new(sess))
             }
-            DbBackend::Mysql(_mysql) => {
-                // MySQL StorageAdapter requires a MySqlSessionStorage — not yet implemented.
-                return StatusCode::NOT_IMPLEMENTED.into_response();
+            DbBackend::Mysql(mysql) => {
+                let adapter = MySqlAdapter::new(mysql.clone(), user_ctx.clone());
+                let sess = MySqlSessionStorage::new(mysql.clone(), user.id);
+                (Arc::new(adapter), Arc::new(sess))
             }
         };
 
@@ -212,7 +212,7 @@ async fn main() -> anyhow::Result<()> {
             SqliteAdapter::run_migrations(&sqlite)
                 .await
                 .context("sqlite storage migrations")?;
-            SqliteSessionStorage::migrate(&sqlite)
+            SqliteSessionStorage::run_migrations(&sqlite)
                 .await
                 .context("sqlite session migrations")?;
             DbBackend::Sqlite(sqlite)
@@ -222,6 +222,9 @@ async fn main() -> anyhow::Result<()> {
             MySqlAdapter::run_migrations(&mysql)
                 .await
                 .context("mysql storage migrations")?;
+            MySqlSessionStorage::run_migrations(&mysql)
+                .await
+                .context("mysql session migrations")?;
             DbBackend::Mysql(mysql)
         }
     };

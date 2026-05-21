@@ -2,6 +2,7 @@
 ///
 /// - `fail/no_user_context.rs` — struct-literal construction exposes private fields,
 ///   proving no code path can bypass the `new(pool, user_context)` constructor.
+#[cfg(feature = "postgres")]
 #[test]
 fn postgres_adapter_requires_user_context() {
     let t = trybuild::TestCases::new();

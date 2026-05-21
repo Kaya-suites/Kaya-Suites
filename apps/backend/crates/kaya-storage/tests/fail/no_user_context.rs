@@ -4,7 +4,7 @@
 
 fn main() {
     // ERROR: fields `pool` and `user_context` are private
-    let _ = kaya_postgres_storage::PostgresAdapter {
+    let _ = kaya_storage::PostgresAdapter {
         pool: todo!(),
         user_context: todo!(),
     };

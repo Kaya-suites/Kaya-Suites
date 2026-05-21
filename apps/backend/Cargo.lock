@@ -4226,7 +4226,6 @@ dependencies = [
  "kaya-core",
  "kaya-db",
  "kaya-metering",
- "kaya-postgres-storage",
  "kaya-server",
  "kaya-storage",
  "mime_guess",
@@ -4245,24 +4244,6 @@ dependencies = [
  "utoipa-axum",
  "uuid",
  "zip",
-]
-
-[[package]]
-name = "kaya-postgres-storage"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "kaya-core",
- "pgvector",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sqlx",
- "thiserror 2.0.18",
- "tokio",
- "trybuild",
- "uuid",
 ]
 
 [[package]]
@@ -4291,6 +4272,7 @@ dependencies = [
  "chrono",
  "futures",
  "kaya-core",
+ "pgvector",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -4299,6 +4281,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "trybuild",
  "uuid",
 ]
 

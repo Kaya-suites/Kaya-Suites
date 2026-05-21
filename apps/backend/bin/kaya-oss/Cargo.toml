@@ -8,13 +8,12 @@ description = "Unified self-hosted binary for Kaya Suites (Apache 2.0)"
 # IMPORTANT: only Apache-licensed crates may appear here.
 # BSL crates (anything under crates/ee/) must never be listed as dependencies.
 [dependencies]
-kaya-core              = { path = "../../crates/kaya-core" }
-kaya-storage           = { path = "../../crates/kaya-storage" }
-kaya-server            = { path = "../../crates/kaya-server" }
-kaya-auth              = { path = "../../crates/kaya-auth" }
-kaya-metering          = { path = "../../crates/kaya-metering" }
-kaya-postgres-storage  = { path = "../../crates/kaya-postgres-storage" }
-kaya-db                = { path = "../../crates/kaya-db" }
+kaya-core     = { path = "../../crates/kaya-core" }
+kaya-storage  = { path = "../../crates/kaya-storage", features = ["postgres"] }
+kaya-server   = { path = "../../crates/kaya-server" }
+kaya-auth     = { path = "../../crates/kaya-auth" }
+kaya-metering = { path = "../../crates/kaya-metering" }
+kaya-db       = { path = "../../crates/kaya-db" }
 
 axum         = { workspace = true, features = ["macros"] }
 tokio        = { workspace = true }

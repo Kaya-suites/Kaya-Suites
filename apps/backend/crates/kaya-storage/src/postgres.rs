@@ -1,4 +1,4 @@
-// Copyright 2024 Kaya Suites. Licensed under the Apache License, Version 2.0.
+// Copyright 2026 Kaya Suites. Licensed under the Apache License, Version 2.0.
 //
 //! Postgres + pgvector storage adapter for Kaya Suites.
 //!
@@ -15,13 +15,9 @@
 //! unconditionally include `WHERE user_id = self.user_context.user_id`.
 //! An instance without a `UserContext` cannot exist.
 
-pub mod session;
-
-pub use session::PostgresSessionStorage;
-
 use async_trait::async_trait;
-use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter, StorageError};
 use kaya_core::UserContext;
+use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter, StorageError};
 use pgvector::Vector;
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
@@ -84,7 +80,6 @@ impl StorageAdapter for PostgresAdapter {
         let hash = content_hash(&doc.body);
         let now = chrono::Utc::now();
 
-        // Convert related_docs to Vec<String> for the TEXT[] column.
         let related: Vec<String> = doc.related_docs.iter().map(|u| u.to_string()).collect();
 
         sqlx::query(
@@ -177,14 +172,12 @@ impl StorageAdapter for PostgresAdapter {
     }
 
     async fn delete_chunks_for_document(&self, document_id: Uuid) -> Result<(), StorageError> {
-        sqlx::query(
-            "DELETE FROM chunks WHERE user_id = $1 AND document_id = $2",
-        )
-        .bind(self.user_id().to_string())
-        .bind(document_id.to_string())
-        .execute(&self.pool)
-        .await
-        .map_err(box_err)?;
+        sqlx::query("DELETE FROM chunks WHERE user_id = $1 AND document_id = $2")
+            .bind(self.user_id().to_string())
+            .bind(document_id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
         Ok(())
     }
 
@@ -212,11 +205,7 @@ impl StorageAdapter for PostgresAdapter {
             .collect()
     }
 
-    async fn search_text(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<ChunkHit>, StorageError> {
+    async fn search_text(&self, query: &str, limit: usize) -> Result<Vec<ChunkHit>, StorageError> {
         if query.trim().is_empty() {
             return Ok(vec![]);
         }
@@ -322,10 +311,8 @@ fn row_to_document(row: &sqlx::postgres::PgRow) -> Result<Document, StorageError
     let id = Uuid::parse_str(&id_str).unwrap_or_default();
     let title: String = row.try_get("title").map_err(box_err)?;
     let owner: Option<String> = row.try_get("owner").map_err(box_err)?;
-    let last_reviewed: Option<chrono::NaiveDate> =
-        row.try_get("last_reviewed").map_err(box_err)?;
+    let last_reviewed: Option<chrono::NaiveDate> = row.try_get("last_reviewed").map_err(box_err)?;
     let tags: Vec<String> = row.try_get("tags").map_err(box_err)?;
-    // related_docs is now stored as TEXT[] — parse each string as Uuid
     let related_strs: Vec<String> = row.try_get("related_docs").map_err(box_err)?;
     let related_docs: Vec<Uuid> = related_strs
         .iter()
