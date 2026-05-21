@@ -58,6 +58,7 @@ impl SqliteSessionStorage {
         for stmt in [
             "ALTER TABLE sessions ADD COLUMN total_input_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sessions ADD COLUMN total_output_tokens INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE messages ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE messages ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE messages ADD COLUMN model TEXT NOT NULL DEFAULT ''",
@@ -78,8 +79,8 @@ impl SessionStorage for SqliteSessionStorage {
     async fn list_sessions(&self) -> Result<Vec<Session>, SessionError> {
         let rows = sqlx::query(
             "SELECT id, title, created_at, updated_at, message_count,
-                    total_input_tokens, total_output_tokens
-             FROM sessions ORDER BY updated_at DESC",
+                    total_input_tokens, total_output_tokens, pinned
+             FROM sessions ORDER BY pinned DESC, updated_at DESC",
         )
         .fetch_all(&self.pool)
         .await
@@ -96,6 +97,7 @@ impl SessionStorage for SqliteSessionStorage {
                     message_count: row.try_get::<i64, _>("message_count").map_err(box_err)? as u32,
                     total_input_tokens: row.try_get::<i64, _>("total_input_tokens").map_err(box_err)? as u32,
                     total_output_tokens: row.try_get::<i64, _>("total_output_tokens").map_err(box_err)? as u32,
+                    pinned: row.try_get::<i64, _>("pinned").map_err(box_err)? != 0,
                 })
             })
             .collect()
@@ -126,6 +128,7 @@ impl SessionStorage for SqliteSessionStorage {
             message_count: 0,
             total_input_tokens: 0,
             total_output_tokens: 0,
+            pinned: false,
         })
     }
 
@@ -258,6 +261,31 @@ impl SessionStorage for SqliteSessionStorage {
     async fn rename_session(&self, session_id: Uuid, title: String) -> Result<(), SessionError> {
         sqlx::query("UPDATE sessions SET title = ? WHERE id = ?")
             .bind(&title)
+            .bind(session_id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn delete_session(&self, session_id: Uuid) -> Result<(), SessionError> {
+        let id = session_id.to_string();
+        sqlx::query("DELETE FROM messages WHERE session_id = ?")
+            .bind(&id)
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
+        sqlx::query("DELETE FROM sessions WHERE id = ?")
+            .bind(&id)
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn pin_session(&self, session_id: Uuid, pinned: bool) -> Result<(), SessionError> {
+        sqlx::query("UPDATE sessions SET pinned = ? WHERE id = ?")
+            .bind(pinned as i64)
             .bind(session_id.to_string())
             .execute(&self.pool)
             .await

@@ -16,6 +16,7 @@ pub struct Session {
     pub message_count: u32,
     pub total_input_tokens: u32,
     pub total_output_tokens: u32,
+    pub pinned: bool,
 }
 
 /// A persisted chat message.
@@ -105,4 +106,8 @@ pub trait SessionStorage: Send + Sync {
     async fn touch_session(&self, session_id: Uuid) -> Result<(), SessionError>;
     /// Rename the session, replacing its current title.
     async fn rename_session(&self, session_id: Uuid, title: String) -> Result<(), SessionError>;
+    /// Delete the session and all its messages.
+    async fn delete_session(&self, session_id: Uuid) -> Result<(), SessionError>;
+    /// Set the pinned flag on a session.
+    async fn pin_session(&self, session_id: Uuid, pinned: bool) -> Result<(), SessionError>;
 }

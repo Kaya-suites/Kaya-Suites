@@ -30,7 +30,11 @@ where
         .route("/documents/{id}/export.pdf", get(documents::export_document_pdf))
         .route("/sessions", get(sessions::list_sessions).post(sessions::create_session))
         .route("/sessions/usage", get(sessions::get_usage_summary))
-        .route("/sessions/{id}", patch(sessions::rename_session))
+        .route(
+            "/sessions/{id}",
+            patch(sessions::rename_session).delete(sessions::delete_session),
+        )
+        .route("/sessions/{id}/pin", post(sessions::pin_session))
         .route("/sessions/{id}/messages", get(sessions::get_session_messages))
         .route("/sessions/{id}/chat", post(chat::chat_stream))
         .route("/edits/{id}/approve", post(edits::approve_edit))

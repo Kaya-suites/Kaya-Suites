@@ -142,7 +142,6 @@ pub async fn commit_edit(
                 tags: vec![],
                 related_docs: vec![],
                 body,
-                path: None,
             };
             let doc_id = doc.id;
             storage.save_document(&doc).await?;

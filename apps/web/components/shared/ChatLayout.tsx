@@ -101,6 +101,40 @@ export function ChatLayout() {
     }).catch(() => {});
   }, [handleSessionRenamed]);
 
+  const handleDeleteSession = useCallback(async (id: string) => {
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    if (sessionId === id) {
+      const remaining = sessions.filter((s) => s.id !== id);
+      if (remaining.length > 0) {
+        setSessionId(remaining[0].id);
+      } else {
+        const created = await createSession();
+        if (created) {
+          setSessions([created]);
+          setSessionId(created.id);
+          return;
+        }
+      }
+    }
+    await fetch(`/api/sessions/${id}`, { method: "DELETE" }).catch(() => {});
+  }, [sessionId, sessions]);
+
+  const handlePinSession = useCallback(async (id: string, pinned: boolean) => {
+    setSessions((prev) =>
+      prev
+        .map((s) => (s.id === id ? { ...s, pinned } : s))
+        .sort((a, b) => {
+          if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+          return b.updatedAt - a.updatedAt;
+        })
+    );
+    await fetch(`/api/sessions/${id}/pin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned }),
+    }).catch(() => {});
+  }, []);
+
   return (
     <div className="flex h-full overflow-hidden" style={{ background: "var(--color-background)" }}>
       <div className="hidden md:flex shrink-0">
@@ -110,6 +144,8 @@ export function ChatLayout() {
           onSelect={handleSessionSelect}
           onNew={handleNewSession}
           onRename={handleRenameSession}
+          onDelete={handleDeleteSession}
+          onPin={handlePinSession}
         />
       </div>
 

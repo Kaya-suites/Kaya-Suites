@@ -38,13 +38,14 @@ impl SessionStorage for PostgresSessionStorage {
                     s.updated_at,
                     COUNT(m.id)::int4 AS message_count,
                     s.total_input_tokens,
-                    s.total_output_tokens
+                    s.total_output_tokens,
+                    s.pinned
              FROM chat_sessions s
              LEFT JOIN chat_messages m
                ON m.session_id = s.id AND m.user_id = s.user_id
              WHERE s.user_id = $1
              GROUP BY s.id
-             ORDER BY s.updated_at DESC",
+             ORDER BY s.pinned DESC, s.updated_at DESC",
         )
         .bind(self.user_id.to_string())
         .fetch_all(&self.pool)
@@ -65,6 +66,7 @@ impl SessionStorage for PostgresSessionStorage {
                     row.try_get("total_input_tokens").map_err(box_err)?;
                 let total_output_tokens: i32 =
                     row.try_get("total_output_tokens").map_err(box_err)?;
+                let pinned: bool = row.try_get("pinned").map_err(box_err)?;
                 Ok(Session {
                     id,
                     title,
@@ -73,6 +75,7 @@ impl SessionStorage for PostgresSessionStorage {
                     message_count: message_count as u32,
                     total_input_tokens: total_input_tokens as u32,
                     total_output_tokens: total_output_tokens as u32,
+                    pinned,
                 })
             })
             .collect()
@@ -103,6 +106,7 @@ impl SessionStorage for PostgresSessionStorage {
             message_count: 0,
             total_input_tokens: 0,
             total_output_tokens: 0,
+            pinned: false,
         })
     }
 
@@ -263,6 +267,37 @@ impl SessionStorage for PostgresSessionStorage {
             "UPDATE chat_sessions SET title = $1 WHERE id = $2 AND user_id = $3",
         )
         .bind(&title)
+        .bind(session_id.to_string())
+        .bind(self.user_id.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn delete_session(&self, session_id: Uuid) -> Result<(), SessionError> {
+        let id = session_id.to_string();
+        let uid = self.user_id.to_string();
+        sqlx::query("DELETE FROM chat_messages WHERE session_id = $1 AND user_id = $2")
+            .bind(&id)
+            .bind(&uid)
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
+        sqlx::query("DELETE FROM chat_sessions WHERE id = $1 AND user_id = $2")
+            .bind(&id)
+            .bind(&uid)
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn pin_session(&self, session_id: Uuid, pinned: bool) -> Result<(), SessionError> {
+        sqlx::query(
+            "UPDATE chat_sessions SET pinned = $1 WHERE id = $2 AND user_id = $3",
+        )
+        .bind(pinned)
         .bind(session_id.to_string())
         .bind(self.user_id.to_string())
         .execute(&self.pool)

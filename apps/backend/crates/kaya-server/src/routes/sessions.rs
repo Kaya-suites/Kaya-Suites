@@ -62,6 +62,38 @@ pub async fn rename_session(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// ── DELETE /sessions/:id ─────────────────────────────────────────────────────
+
+pub async fn delete_session(
+    Extension(sessions): Extension<Arc<dyn SessionStorage>>,
+    Path(session_id): Path<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    sessions
+        .delete_session(session_id)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── POST /sessions/:id/pin ────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct PinSessionBody {
+    pub pinned: bool,
+}
+
+pub async fn pin_session(
+    Extension(sessions): Extension<Arc<dyn SessionStorage>>,
+    Path(session_id): Path<Uuid>,
+    Json(body): Json<PinSessionBody>,
+) -> Result<StatusCode, ApiError> {
+    sessions
+        .pin_session(session_id, body.pinned)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // ── GET /sessions/:id/messages ────────────────────────────────────────────────
 
 #[derive(Serialize)]

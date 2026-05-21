@@ -188,6 +188,42 @@ fn lcs_indices<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(usize, usize)> {
     pairs
 }
 
+// ── Hunk application ─────────────────────────────────────────────────────────
+
+/// A single find-and-replace hunk, analogous to a git diff hunk.
+#[derive(Debug, Clone)]
+pub struct Hunk {
+    pub old_text: String,
+    pub new_text: String,
+}
+
+/// Apply a sequence of hunks to `body` in order.
+///
+/// Returns the modified body, or an error string naming the first hunk whose
+/// `old_text` could not be found.
+pub fn apply_hunks(body: &str, hunks: &[Hunk]) -> Result<String, String> {
+    let mut current = body.to_owned();
+    for (i, hunk) in hunks.iter().enumerate() {
+        match current.find(hunk.old_text.as_str()) {
+            Some(pos) => {
+                current = format!(
+                    "{}{}{}",
+                    &current[..pos],
+                    hunk.new_text,
+                    &current[pos + hunk.old_text.len()..],
+                );
+            }
+            None => {
+                return Err(format!(
+                    "hunk {i}: old_text not found in document: {:?}",
+                    &hunk.old_text[..hunk.old_text.len().min(80)],
+                ));
+            }
+        }
+    }
+    Ok(current)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -217,6 +253,28 @@ mod tests {
         let diff = compute_paragraph_diff(old, new);
         assert_eq!(diff.changes.len(), 1);
         assert!(matches!(&diff.changes[0], ParagraphChange::Remove { text, .. } if text == "Para two."));
+    }
+
+    #[test]
+    fn apply_hunks_replaces_text() {
+        use super::{apply_hunks, Hunk};
+        let body = "Hello world.\n\nSecond paragraph.";
+        let result = apply_hunks(body, &[Hunk {
+            old_text: "world".into(),
+            new_text: "Rust".into(),
+        }]).unwrap();
+        assert_eq!(result, "Hello Rust.\n\nSecond paragraph.");
+    }
+
+    #[test]
+    fn apply_hunks_errors_on_missing_old_text() {
+        use super::{apply_hunks, Hunk};
+        let body = "Hello world.";
+        let err = apply_hunks(body, &[Hunk {
+            old_text: "not present".into(),
+            new_text: "x".into(),
+        }]).unwrap_err();
+        assert!(err.contains("hunk 0"), "{err}");
     }
 
     #[test]
