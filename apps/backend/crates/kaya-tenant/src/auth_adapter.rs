@@ -29,6 +29,7 @@ pub struct AuthUser {
     pub id: Uuid,
     pub email: String,
     pub username: Option<String>,
+    pub is_superadmin: bool,
 }
 
 impl AxumAuthUser for AuthUser {
@@ -79,7 +80,7 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
         creds: Self::Credentials,
     ) -> Result<Option<Self::User>, Self::Error> {
         let row = sqlx::query(
-            "SELECT id, email, username, password_hash FROM users WHERE email = $1",
+            "SELECT id, email, username, password_hash, is_superadmin FROM users WHERE email = $1",
         )
         .bind(&creds.email)
         .fetch_optional(&self.pool)
@@ -108,6 +109,7 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
             id: row.try_get("id").unwrap(),
             email: row.try_get("email").unwrap(),
             username: row.try_get("username").unwrap_or(None),
+            is_superadmin: row.try_get("is_superadmin").unwrap_or(false),
         }))
     }
 
@@ -116,7 +118,7 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
         user_id: &axum_login::UserId<Self>,
     ) -> Result<Option<Self::User>, Self::Error> {
         let row = sqlx::query(
-            "SELECT id, email, username FROM users WHERE id = $1",
+            "SELECT id, email, username, is_superadmin FROM users WHERE id = $1",
         )
         .bind(user_id)
         .fetch_optional(&self.pool)
@@ -126,6 +128,7 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
             id: r.try_get("id").unwrap(),
             email: r.try_get("email").unwrap(),
             username: r.try_get("username").unwrap_or(None),
+            is_superadmin: r.try_get("is_superadmin").unwrap_or(false),
         }))
     }
 }

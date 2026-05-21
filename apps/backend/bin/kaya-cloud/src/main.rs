@@ -22,6 +22,7 @@
 //! | `PORT`                    | Bind port (default: 3001)                               |
 //! | `FRONTEND_URL`            | Allowed CORS origin (default: http://localhost:3000)    |
 //! | `KAYA_CONFIG`             | Path to kaya.yaml for LLM router (optional)             |
+//! | `SUPERADMIN_EMAIL`        | Email for the built-in superadmin (default: admin@kaya.local) |
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -118,7 +119,14 @@ async fn main() -> anyhow::Result<()> {
     session_store.migrate().await?;
     tracing::info!("session store ready");
 
+    let superadmin_email = std::env::var("SUPERADMIN_EMAIL")
+        .unwrap_or_else(|_| "admin@kaya.local".into());
     let password_auth_svc = Arc::new(PasswordAuthService::new(pool.clone()));
+    password_auth_svc
+        .seed_superadmin(&superadmin_email, "KayaSuperAdmin", "KayaPassword")
+        .await
+        .context("failed to seed superadmin account")?;
+    tracing::info!("superadmin ready");
 
     let pricing = PricingConfig::from_yaml_file(Path::new(&pricing_config_path))
         .unwrap_or_else(|e| {

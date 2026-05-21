@@ -11,6 +11,15 @@ use sqlx::{PgPool, Row};
 use crate::auth_adapter::AuthUser;
 use crate::error::RegisterError;
 
+/// Error returned when superadmin seeding fails.
+#[derive(Debug, thiserror::Error)]
+pub enum SeedError {
+    #[error("password hashing failed: {0}")]
+    PasswordHash(String),
+    #[error("database error: {0}")]
+    Database(#[from] sqlx::Error),
+}
+
 /// Service for registering new users with a hashed password.
 #[derive(Clone)]
 pub struct PasswordAuthService {
@@ -64,6 +73,48 @@ impl PasswordAuthService {
             id: row.try_get("id").unwrap(),
             email: row.try_get("email").unwrap(),
             username: row.try_get("username").unwrap_or(None),
+            is_superadmin: false,
         })
+    }
+
+    /// Seed the built-in superadmin account if it does not already exist.
+    ///
+    /// Idempotent — safe to call on every startup.
+    pub async fn seed_superadmin(
+        &self,
+        email: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<(), SeedError> {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)",
+        )
+        .bind(username)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if exists {
+            return Ok(());
+        }
+
+        let salt = SaltString::generate(&mut OsRng);
+        let hash = Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .map_err(|e| SeedError::PasswordHash(e.to_string()))?
+            .to_string();
+
+        sqlx::query(
+            "INSERT INTO users (email, username, password_hash, is_superadmin)
+             VALUES ($1, $2, $3, TRUE)
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(email)
+        .bind(username)
+        .bind(&hash)
+        .execute(&self.pool)
+        .await?;
+
+        tracing::info!(username, "superadmin account seeded");
+        Ok(())
     }
 }
