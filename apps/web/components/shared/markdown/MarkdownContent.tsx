@@ -25,6 +25,7 @@ type Props = {
   markdown: string;
   className?: string;
   decorateText?: (text: string) => ReactNode;
+  isStreaming?: boolean;
 };
 
 function InlineMarkdown({
@@ -181,7 +182,7 @@ function alignmentClass(alignment: MarkdownAlignment) {
   }
 }
 
-export function MarkdownContent({ markdown, className, decorateText }: Props) {
+export function MarkdownContent({ markdown, className, decorateText, isStreaming }: Props) {
   const blocks = useMemo(() => parseMarkdownToBlocks(markdown), [markdown]);
 
   return (
@@ -298,6 +299,7 @@ export function MarkdownContent({ markdown, className, decorateText }: Props) {
                   <MermaidDiagram
                     code={block.code}
                     className="overflow-auto border-2 border-black bg-white p-4"
+                    isStreaming={isStreaming}
                   />
                 </div>
               );

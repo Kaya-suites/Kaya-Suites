@@ -117,6 +117,7 @@ export function ChatMessage({
           {message.content ? (
             <MarkdownContent
               markdown={message.content}
+              isStreaming={isStreaming}
               decorateText={(text) => (
                 <CitationText citations={message.citations} onCitationClick={onCitationClick}>
                   {text}

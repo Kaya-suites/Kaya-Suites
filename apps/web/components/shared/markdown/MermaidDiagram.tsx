@@ -5,11 +5,12 @@ import { useEffect, useId, useState } from "react";
 type Props = {
   code: string;
   className?: string;
+  isStreaming?: boolean;
 };
 
 let mermaidInitialized = false;
 
-export function MermaidDiagram({ code, className }: Props) {
+export function MermaidDiagram({ code, className, isStreaming }: Props) {
   const id = useId().replace(/:/g, "-");
   const [svg, setSvg] = useState<string>("");
   const [error, setError] = useState<string>("");
@@ -44,13 +45,15 @@ export function MermaidDiagram({ code, className }: Props) {
         }
       } catch (err) {
         if (!cancelled) {
+          // Mermaid appends an error div to document.body on failure — remove it.
+          document.getElementById(`dmermaid-${id}`)?.remove();
           setError(err instanceof Error ? err.message : "Could not render Mermaid diagram.");
           setSvg("");
         }
       }
     }
 
-    if (code.trim()) {
+    if (code.trim() && !isStreaming) {
       void render();
     }
 
