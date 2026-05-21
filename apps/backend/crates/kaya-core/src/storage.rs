@@ -12,31 +12,26 @@ use uuid::Uuid;
 
 // ── Domain types ──────────────────────────────────────────────────────────────
 
-/// A knowledge-base document.
+/// A knowledge-base document stored in the database.
 ///
 /// Frontmatter fields follow FR-1 / FR-2 from the BRD. The `body` field holds
-/// the raw Markdown text that follows the YAML frontmatter block. The `path`
-/// field is the path of the `.md` file relative to the content directory; it is
-/// `None` for in-memory / not-yet-persisted documents.
+/// the raw Markdown text.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Document {
-    /// Stable UUID written into frontmatter (FR-2). Never changes across renames.
+    /// Stable UUID (FR-2). Never changes.
     pub id: Uuid,
-    /// Document title (frontmatter `title`, required).
+    /// Document title (required).
     pub title: String,
-    /// Optional owner (frontmatter `owner`).
+    /// Optional owner.
     pub owner: Option<String>,
-    /// Optional ISO date of last review (frontmatter `last_reviewed`).
+    /// Optional ISO date of last review.
     pub last_reviewed: Option<chrono::NaiveDate>,
-    /// Tag list (frontmatter `tags`).
+    /// Tag list.
     pub tags: Vec<String>,
-    /// UUIDs of related documents (frontmatter `related_docs`).
+    /// UUIDs of related documents.
     pub related_docs: Vec<Uuid>,
-    /// Raw Markdown body (everything after the closing `---` delimiter).
+    /// Raw Markdown body.
     pub body: String,
-    /// Path of the `.md` file relative to the content directory, if known.
-    #[serde(skip)]
-    pub path: Option<std::path::PathBuf>,
 }
 
 /// A paragraph chunk extracted from a document body.

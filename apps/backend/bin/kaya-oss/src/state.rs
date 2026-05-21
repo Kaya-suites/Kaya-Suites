@@ -1,7 +1,6 @@
 // Copyright 2024 Kaya Suites. Licensed under the Apache License, Version 2.0.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::FromRef;
@@ -17,7 +16,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub enum DbBackend {
     Postgres(PgPool),
-    Sqlite(SqlitePool, PathBuf),
+    Sqlite(SqlitePool),
     Mysql(MySqlPool),
 }
 

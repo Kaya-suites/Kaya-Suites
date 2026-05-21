@@ -1,7 +1,7 @@
 //! Integration tests for `SqliteAdapter`.
 //!
-//! Each test spins up a fresh temporary directory + SQLite database so the tests
-//! are completely isolated and can run in parallel.
+//! Each test spins up a fresh temporary SQLite database so the tests are
+//! completely isolated and can run in parallel.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -30,14 +30,13 @@ use kaya_storage::SqliteAdapter;
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
-fn temp_env() -> (tempfile::TempDir, PathBuf, PathBuf) {
+fn temp_db() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let content = dir.path().join("content");
     let db = dir.path().join("index.db");
-    (dir, content, db)
+    (dir, db)
 }
 
-fn make_doc(rel_path: &str) -> Document {
+fn make_doc() -> Document {
     Document {
         id: Uuid::new_v4(),
         title: "Integration Test Doc".to_string(),
@@ -46,7 +45,6 @@ fn make_doc(rel_path: &str) -> Document {
         tags: vec!["rust".to_string(), "sqlite".to_string()],
         related_docs: vec![],
         body: "# Hello\n\nThis is the body.\n".to_string(),
-        path: Some(PathBuf::from(rel_path)),
     }
 }
 
@@ -59,14 +57,10 @@ fn blank_doc() -> Document {
         tags: vec![],
         related_docs: vec![],
         body: String::new(),
-        path: None,
     }
 }
 
 // ── Topic embedder ─────────────────────────────────────────────────────────────
-//
-// Returns deterministic 3-dim unit vectors based on topic keywords so that
-// cosine similarity tests are fully deterministic without a real LLM.
 
 struct TopicEmbedder {
     call_count: Arc<AtomicUsize>,
@@ -130,15 +124,14 @@ fn make_router(embedder: Arc<dyn LlmProvider>) -> ModelRouter {
     ModelRouter::from_routes(routes)
 }
 
-// ── Document round-trip tests (Prompt 1) ──────────────────────────────────────
+// ── Document round-trip tests ─────────────────────────────────────────────────
 
 #[tokio::test]
 async fn test_round_trip() {
-    let (_dir, content, db) = temp_env();
-    let adapter = SqliteAdapter::new(content, &db).await.unwrap();
-    adapter.wait_for_reconciliation().await;
+    let (_dir, db) = temp_db();
+    let adapter = SqliteAdapter::new(&db).await.unwrap();
 
-    let doc = make_doc("round_trip.md");
+    let doc = make_doc();
     adapter.save_document(&doc).await.unwrap();
 
     let loaded = adapter.get_document(doc.id).await.unwrap();
@@ -148,102 +141,33 @@ async fn test_round_trip() {
     assert_eq!(loaded.last_reviewed, doc.last_reviewed);
     assert_eq!(loaded.tags, doc.tags);
     assert_eq!(loaded.body.trim(), doc.body.trim());
-    assert_eq!(loaded.path.as_deref(), Some(PathBuf::from("round_trip.md").as_path()));
 
     let all = adapter.list_documents().await.unwrap();
     assert!(all.iter().any(|d| d.id == doc.id));
 }
 
 #[tokio::test]
-async fn test_manual_edit_detection() {
-    let (_dir, content, db) = temp_env();
+async fn test_delete_document() {
+    let (_dir, db) = temp_db();
+    let adapter = SqliteAdapter::new(&db).await.unwrap();
 
-    {
-        let adapter = SqliteAdapter::new(content.clone(), &db).await.unwrap();
-        adapter.wait_for_reconciliation().await;
-        let doc = make_doc("manual_edit.md");
-        adapter.save_document(&doc).await.unwrap();
-    }
-
-    let file_path = content.join("manual_edit.md");
-    let original_raw = std::fs::read_to_string(&file_path).unwrap();
-    let patched = original_raw.replace("title: Integration Test Doc", "title: Edited Title");
-    std::fs::write(&file_path, &patched).unwrap();
-
-    let adapter2 = SqliteAdapter::new(content.clone(), &db).await.unwrap();
-    adapter2.wait_for_reconciliation().await;
-
-    let (doc_from_file, _) = kaya_storage::document::parse_document(&patched).unwrap();
-    let loaded = adapter2.get_document(doc_from_file.id).await.unwrap();
-    assert_eq!(loaded.title, "Edited Title");
-}
-
-#[tokio::test]
-async fn test_uuid_stability_after_rename() {
-    let (_dir, content, db) = temp_env();
-    let adapter = SqliteAdapter::new(content.clone(), &db).await.unwrap();
-    adapter.wait_for_reconciliation().await;
-
-    let doc = make_doc("original_name.md");
-    let original_id = doc.id;
+    let doc = make_doc();
     adapter.save_document(&doc).await.unwrap();
+    adapter.delete_document(doc.id).await.unwrap();
 
-    std::fs::rename(content.join("original_name.md"), content.join("renamed.md")).unwrap();
+    let result = adapter.get_document(doc.id).await;
+    assert!(result.is_err(), "deleted document should not be retrievable");
 
-    let adapter2 = SqliteAdapter::new(content.clone(), &db).await.unwrap();
-    adapter2.wait_for_reconciliation().await;
-
-    let mut renamed_doc = doc.clone();
-    renamed_doc.path = Some(PathBuf::from("renamed.md"));
-    adapter2.save_document(&renamed_doc).await.unwrap();
-
-    let loaded = adapter2.get_document(original_id).await.unwrap();
-    assert_eq!(loaded.id, original_id);
-    assert_eq!(loaded.path.as_deref(), Some(PathBuf::from("renamed.md").as_path()));
+    let all = adapter.list_documents().await.unwrap();
+    assert!(!all.iter().any(|d| d.id == doc.id));
 }
 
-#[tokio::test]
-async fn test_file_on_disk_wins() {
-    let (_dir, content, db) = temp_env();
-    let adapter = SqliteAdapter::new(content.clone(), &db).await.unwrap();
-    adapter.wait_for_reconciliation().await;
+// ── Retrieval tests ────────────────────────────────────────────────────────────
 
-    let doc = make_doc("truth.md");
-    adapter.save_document(&doc).await.unwrap();
-
-    {
-        use sqlx::sqlite::SqliteConnectOptions;
-        use sqlx::SqlitePool;
-        let opts = SqliteConnectOptions::new().filename(&db);
-        let pool = SqlitePool::connect_with(opts).await.unwrap();
-        sqlx::query(
-            "UPDATE documents SET frontmatter_json = '{\"corrupted\":true}' WHERE id = ?",
-        )
-        .bind(doc.id.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
-        pool.close().await;
-    }
-
-    let loaded = adapter.get_document(doc.id).await.unwrap();
-    assert_eq!(loaded.title, doc.title);
-    assert_eq!(loaded.body.trim(), doc.body.trim());
-}
-
-// ── Retrieval tests (Prompt 2) ─────────────────────────────────────────────────
-
-/// FR-7: Hybrid retrieval over a seed corpus returns the expected top result.
-///
-/// Three documents are seeded with distinct topic keywords (alpha, beta, gamma).
-/// `TopicEmbedder` returns a unit vector per topic so cosine similarity is 1.0
-/// for a matching query and 0.0 for others. FTS5 BM25 likewise gives the
-/// matching document the top rank. After RRF fusion, the correct document wins.
 #[tokio::test]
 async fn test_retrieval_seed_corpus() {
-    let (_dir, content, db) = temp_env();
-    let adapter = Arc::new(SqliteAdapter::new(content.clone(), &db).await.unwrap());
-    adapter.wait_for_reconciliation().await;
+    let (_dir, db) = temp_db();
+    let adapter = Arc::new(SqliteAdapter::new(&db).await.unwrap());
 
     let (embedder, _count) = TopicEmbedder::new();
     let router = make_router(embedder);
@@ -252,21 +176,18 @@ async fn test_retrieval_seed_corpus() {
         id: Uuid::new_v4(),
         title: "Alpha Systems".to_string(),
         body: "Alpha particles are a type of ionizing radiation.\n\nAlpha decay releases helium nuclei.".to_string(),
-        path: Some(PathBuf::from("alpha.md")),
         ..blank_doc()
     };
     let doc_b = Document {
         id: Uuid::new_v4(),
         title: "Beta Testing".to_string(),
         body: "Beta testing involves systematic verification.\n\nBeta releases precede stable versions.".to_string(),
-        path: Some(PathBuf::from("beta.md")),
         ..blank_doc()
     };
     let doc_c = Document {
         id: Uuid::new_v4(),
         title: "Gamma Radiation".to_string(),
         body: "Gamma rays are electromagnetic waves of high frequency.\n\nGamma radiation penetrates most materials.".to_string(),
-        path: Some(PathBuf::from("gamma.md")),
         ..blank_doc()
     };
 
@@ -287,12 +208,10 @@ async fn test_retrieval_seed_corpus() {
     assert_eq!(results[0].document_id, doc_c.id, "gamma query → gamma doc");
 }
 
-/// FR-8: A retrieved chunk resolves back to the correct paragraph in the source.
 #[tokio::test]
 async fn test_citation_round_trip() {
-    let (_dir, content, db) = temp_env();
-    let adapter = Arc::new(SqliteAdapter::new(content.clone(), &db).await.unwrap());
-    adapter.wait_for_reconciliation().await;
+    let (_dir, db) = temp_db();
+    let adapter = Arc::new(SqliteAdapter::new(&db).await.unwrap());
 
     let (embedder, _) = TopicEmbedder::new();
     let router = make_router(embedder);
@@ -301,7 +220,6 @@ async fn test_citation_round_trip() {
         id: Uuid::new_v4(),
         title: "Citation Test".to_string(),
         body: "First paragraph about alpha concepts.\n\nSecond paragraph discusses other topics.\n\nThird paragraph mentions gamma radiation.".to_string(),
-        path: Some(PathBuf::from("citation.md")),
         ..blank_doc()
     };
 
@@ -315,7 +233,6 @@ async fn test_citation_round_trip() {
     let hit = &results[0];
     assert_eq!(hit.document_id, doc.id, "citation points to correct document");
 
-    // The cited paragraph_id must exist in the document's chunks.
     let all_chunks = chunk_document(&doc);
     let source_chunk = all_chunks
         .iter()
@@ -325,18 +242,14 @@ async fn test_citation_round_trip() {
     assert_eq!(source_chunk.content, hit.content, "chunk content must match");
 }
 
-/// FR-6: Editing one paragraph in a 10-paragraph document triggers exactly
-/// one embedding call on re-index; the other 9 embeddings are reused.
 #[tokio::test]
 async fn test_reembedding_efficiency() {
-    let (_dir, content, db) = temp_env();
-    let adapter = Arc::new(SqliteAdapter::new(content.clone(), &db).await.unwrap());
-    adapter.wait_for_reconciliation().await;
+    let (_dir, db) = temp_db();
+    let adapter = Arc::new(SqliteAdapter::new(&db).await.unwrap());
 
     let (embedder, call_count) = TopicEmbedder::new();
     let router = make_router(embedder);
 
-    // Ten paragraphs, separated by double newlines.
     let make_body = |edit: bool| -> String {
         (0..10_usize)
             .map(|i| {
@@ -354,7 +267,6 @@ async fn test_reembedding_efficiency() {
         id: Uuid::new_v4(),
         title: "Efficiency Test".to_string(),
         body: make_body(false),
-        path: Some(PathBuf::from("efficiency.md")),
         ..blank_doc()
     };
 
@@ -364,7 +276,6 @@ async fn test_reembedding_efficiency() {
     assert_eq!(first_embed_calls, 10, "first index: all 10 paragraphs embedded");
     assert_eq!(call_count.load(Ordering::SeqCst), 10);
 
-    // Edit paragraph 4 only.
     let edited_doc = Document { body: make_body(true), ..doc.clone() };
     let second_embed_calls =
         index_document_chunks(&edited_doc, &storage, &router).await.unwrap();
@@ -376,19 +287,15 @@ async fn test_reembedding_efficiency() {
     assert_eq!(call_count.load(Ordering::SeqCst), 11);
 }
 
-/// NFR §6.1 (adapted): retrieval over a 100-document corpus (500 chunks) must
-/// complete in under 200 ms on a development machine.
 #[tokio::test]
 async fn test_performance_smoke() {
-    let (_dir, content, db) = temp_env();
-    let adapter = Arc::new(SqliteAdapter::new(content.clone(), &db).await.unwrap());
-    adapter.wait_for_reconciliation().await;
+    let (_dir, db) = temp_db();
+    let adapter = Arc::new(SqliteAdapter::new(&db).await.unwrap());
 
     let (embedder, _) = TopicEmbedder::new();
     let router = make_router(embedder);
     let storage: Arc<dyn StorageAdapter> = adapter;
 
-    // Seed 100 documents with 5 paragraphs each (500 chunks + 500 embeddings).
     let topics = ["alpha", "beta", "gamma"];
     for i in 0..100_usize {
         let topic = topics[i % 3];
@@ -403,7 +310,6 @@ async fn test_performance_smoke() {
             id: Uuid::new_v4(),
             title: format!("Document {i}"),
             body,
-            path: Some(PathBuf::from(format!("doc_{i:03}.md"))),
             ..blank_doc()
         };
 

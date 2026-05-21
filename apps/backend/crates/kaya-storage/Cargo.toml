@@ -18,7 +18,6 @@ anyhow      = { workspace = true }
 sqlx        = { version = "0.8", features = ["sqlite", "mysql", "runtime-tokio"] }
 serde_yaml  = "0.9"
 sha2        = "0.10"
-walkdir     = "2"
 
 [dev-dependencies]
 tempfile    = "3"

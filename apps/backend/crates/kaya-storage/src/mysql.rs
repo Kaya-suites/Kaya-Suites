@@ -8,10 +8,7 @@
 //! - Vector embeddings are stored as MEDIUMBLOB (packed f32 little-endian).
 //! - Upserts use `INSERT INTO ... ON DUPLICATE KEY UPDATE`.
 
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use sqlx::{MySqlPool, Row};
@@ -20,13 +17,12 @@ use uuid::Uuid;
 use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter, StorageError};
 use kaya_core::UserContext;
 
-use crate::document::{sha256_hex, to_markdown};
+use crate::document::sha256_hex;
 
 // ── Inner shared state ────────────────────────────────────────────────────────
 
 struct Inner {
     pool: MySqlPool,
-    content_dir: PathBuf,
     user_context: UserContext,
 }
 
@@ -40,16 +36,8 @@ pub struct MySqlAdapter {
 impl MySqlAdapter {
     /// Construct a new adapter scoped to the given user context.
     pub fn new(pool: MySqlPool, user_context: UserContext) -> Self {
-        let content_dir = PathBuf::from("content");
         Self {
-            inner: Arc::new(Inner { pool, content_dir, user_context }),
-        }
-    }
-
-    /// Construct with an explicit content directory.
-    pub fn with_content_dir(pool: MySqlPool, user_context: UserContext, content_dir: PathBuf) -> Self {
-        Self {
-            inner: Arc::new(Inner { pool, content_dir, user_context }),
+            inner: Arc::new(Inner { pool, user_context }),
         }
     }
 
@@ -62,12 +50,11 @@ impl MySqlAdapter {
                 id               VARCHAR(36)  NOT NULL,
                 user_id          VARCHAR(36)  NOT NULL,
                 title            TEXT         NOT NULL,
-                path             TEXT         NOT NULL,
                 frontmatter_json MEDIUMTEXT   NOT NULL,
                 content_hash     VARCHAR(64)  NOT NULL,
                 updated_at       VARCHAR(32)  NOT NULL,
                 deleted_at       VARCHAR(32),
-                body             MEDIUMTEXT,
+                body             MEDIUMTEXT   NOT NULL DEFAULT '',
                 PRIMARY KEY (id),
                 KEY documents_user_idx (user_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
@@ -75,6 +62,11 @@ impl MySqlAdapter {
         .execute(pool)
         .await
         .map_err(box_err)?;
+
+        // Drop the path column from databases created with the old schema.
+        let _ = sqlx::query("ALTER TABLE documents DROP COLUMN IF EXISTS path")
+            .execute(pool)
+            .await;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS chunks (
@@ -118,7 +110,7 @@ impl MySqlAdapter {
 impl StorageAdapter for MySqlAdapter {
     async fn get_document(&self, id: Uuid) -> Result<Document, StorageError> {
         let row = sqlx::query(
-            "SELECT path, frontmatter_json, body, deleted_at FROM documents
+            "SELECT frontmatter_json, body, deleted_at FROM documents
              WHERE id = ? AND user_id = ?",
         )
         .bind(id.to_string())
@@ -134,55 +126,23 @@ impl StorageAdapter for MySqlAdapter {
             return Err(StorageError::NotFound(id));
         }
 
-        let rel_path: String = row.try_get("path").map_err(box_err)?;
-        let db_body: Option<String> = row.try_get("body").map_err(box_err)?;
-
-        if let Some(body) = db_body {
-            let fm_json: String = row.try_get("frontmatter_json").map_err(box_err)?;
-            if let Ok(mut doc) = serde_json::from_str::<Document>(&fm_json) {
-                doc.body = body;
-                doc.path = Some(PathBuf::from(rel_path));
-                return Ok(doc);
-            }
-        }
-
-        // Fallback: disk read
-        let abs_path = self.inner.content_dir.join(&rel_path);
-        let raw = tokio::fs::read_to_string(&abs_path).await.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                StorageError::NotFound(id)
-            } else {
-                box_err(e)
-            }
-        })?;
-        let (mut doc, _) = crate::document::parse_document(&raw).map_err(box_err)?;
-        doc.path = Some(PathBuf::from(rel_path));
+        let body: String = row.try_get("body").map_err(box_err)?;
+        let fm_json: String = row.try_get("frontmatter_json").map_err(box_err)?;
+        let mut doc: Document = serde_json::from_str(&fm_json).map_err(box_err)?;
+        doc.body = body;
         Ok(doc)
     }
 
     async fn save_document(&self, doc: &Document) -> Result<(), StorageError> {
-        let rel_path = doc
-            .path
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(format!("{}.md", doc.id)));
-        let abs_path = self.inner.content_dir.join(&rel_path);
-        if let Some(parent) = abs_path.parent() {
-            tokio::fs::create_dir_all(parent).await.map_err(box_err)?;
-        }
-        let markdown = to_markdown(doc).map_err(box_err)?;
-        tokio::fs::write(&abs_path, &markdown).await.map_err(box_err)?;
-
-        let rel_str = rel_path.to_string_lossy().to_string();
         let hash = sha256_hex(doc.body.as_bytes());
         let fm_json = serde_json::to_string(doc).map_err(box_err)?;
         let now = chrono::Utc::now().to_rfc3339();
 
         sqlx::query(
-            "INSERT INTO documents (id, user_id, title, path, frontmatter_json, content_hash, updated_at, deleted_at, body)
-             VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            "INSERT INTO documents (id, user_id, title, frontmatter_json, content_hash, updated_at, deleted_at, body)
+             VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
              ON DUPLICATE KEY UPDATE
                title            = VALUES(title),
-               path             = VALUES(path),
                frontmatter_json = VALUES(frontmatter_json),
                content_hash     = VALUES(content_hash),
                updated_at       = VALUES(updated_at),
@@ -192,7 +152,6 @@ impl StorageAdapter for MySqlAdapter {
         .bind(doc.id.to_string())
         .bind(self.user_id().to_string())
         .bind(&doc.title)
-        .bind(&rel_str)
         .bind(&fm_json)
         .bind(&hash)
         .bind(&now)
@@ -206,8 +165,8 @@ impl StorageAdapter for MySqlAdapter {
 
     async fn delete_document(&self, id: Uuid) -> Result<(), StorageError> {
         let id_str = id.to_string();
-        let row = sqlx::query(
-            "SELECT path FROM documents WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+        let exists = sqlx::query(
+            "SELECT 1 FROM documents WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
         )
         .bind(&id_str)
         .bind(self.user_id().to_string())
@@ -215,11 +174,7 @@ impl StorageAdapter for MySqlAdapter {
         .await
         .map_err(box_err)?;
 
-        if let Some(row) = row {
-            let path: String = row.try_get("path").map_err(box_err)?;
-            let abs_path = self.inner.content_dir.join(&path);
-            let _ = tokio::fs::remove_file(&abs_path).await;
-
+        if exists.is_some() {
             let now = chrono::Utc::now().to_rfc3339();
             sqlx::query(
                 "UPDATE documents SET deleted_at = ? WHERE id = ? AND user_id = ?",
@@ -247,7 +202,7 @@ impl StorageAdapter for MySqlAdapter {
 
     async fn list_documents(&self) -> Result<Vec<Document>, StorageError> {
         let rows = sqlx::query(
-            "SELECT path, frontmatter_json, body FROM documents
+            "SELECT frontmatter_json, body FROM documents
              WHERE user_id = ? AND deleted_at IS NULL
              ORDER BY updated_at DESC",
         )
@@ -258,17 +213,11 @@ impl StorageAdapter for MySqlAdapter {
 
         let mut docs = Vec::with_capacity(rows.len());
         for row in rows {
-            let rel_path: String = row.try_get("path").map_err(box_err)?;
-            let db_body: Option<String> = row.try_get("body").map_err(box_err)?;
-
-            if let Some(body) = db_body {
-                let fm_json: String = row.try_get("frontmatter_json").map_err(box_err)?;
-                if let Ok(mut doc) = serde_json::from_str::<Document>(&fm_json) {
-                    doc.body = body;
-                    doc.path = Some(PathBuf::from(rel_path));
-                    docs.push(doc);
-                }
-            }
+            let body: String = row.try_get("body").map_err(box_err)?;
+            let fm_json: String = row.try_get("frontmatter_json").map_err(box_err)?;
+            let mut doc: Document = serde_json::from_str(&fm_json).map_err(box_err)?;
+            doc.body = body;
+            docs.push(doc);
         }
         Ok(docs)
     }

@@ -341,7 +341,6 @@ fn row_to_document(row: &sqlx::postgres::PgRow) -> Result<Document, StorageError
         tags,
         related_docs,
         body,
-        path: None,
     })
 }
 

@@ -13,7 +13,6 @@
 //! | `KAYA_PORT`           | Bind port (default: 3001)                                |
 //! | `FRONTEND_URL`        | Allowed CORS origin (default: http://localhost:3000)     |
 //! | `KAYA_CONFIG`         | Path to kaya.yaml for LLM router (optional)              |
-//! | `KAYA_CONTENT_DIR`    | Directory for on-disk document storage (default: content)|
 //! | `PRICING_CONFIG_PATH` | Path to pricing.yaml (optional)                          |
 
 use std::collections::HashMap;
@@ -122,8 +121,8 @@ async fn inject_storage(
                 Arc::new(PostgresAdapter::new(pg.clone(), user_ctx.clone())),
                 Arc::new(PostgresSessionStorage::new(pg.clone(), user.id)),
             ),
-            DbBackend::Sqlite(sqlite, content_dir) => {
-                let adapter = SqliteAdapter::from_pool(sqlite.clone(), content_dir.clone())
+            DbBackend::Sqlite(sqlite) => {
+                let adapter = SqliteAdapter::from_pool(sqlite.clone())
                     .await
                     .expect("sqlite adapter");
                 let sess = SqliteSessionStorage::from_pool(sqlite.clone());
@@ -195,10 +194,6 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("migrations applied");
 
     // -- Build typed pool for storage adapter ----------------------------------
-    let content_dir = std::env::var("KAYA_CONTENT_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("content"));
-
     let db_backend = match dialect {
         Dialect::Postgres => {
             let pg = PgPool::connect(&database_url).await?;
@@ -220,7 +215,7 @@ async fn main() -> anyhow::Result<()> {
             SqliteSessionStorage::migrate(&sqlite)
                 .await
                 .context("sqlite session migrations")?;
-            DbBackend::Sqlite(sqlite, content_dir)
+            DbBackend::Sqlite(sqlite)
         }
         Dialect::Mysql => {
             let mysql = MySqlPool::connect(&database_url).await?;
@@ -241,7 +236,7 @@ async fn main() -> anyhow::Result<()> {
                 .context("postgres session store migrate")?;
             AnySessionStore::Postgres(store)
         }
-        DbBackend::Sqlite(sqlite, _) => {
+        DbBackend::Sqlite(sqlite) => {
             let store = SqliteStore::new(sqlite.clone());
             store
                 .migrate()

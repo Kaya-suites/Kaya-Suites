@@ -78,7 +78,6 @@ pub async fn create_document(
         owner: None,
         last_reviewed: None,
         related_docs: vec![],
-        path: None,
     };
 
     storage

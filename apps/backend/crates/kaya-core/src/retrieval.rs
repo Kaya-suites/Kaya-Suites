@@ -276,7 +276,6 @@ mod tests {
             tags: vec![],
             related_docs: vec![],
             body: body.to_string(),
-            path: None,
         }
     }
 
