@@ -132,7 +132,6 @@ async fn main() {
         tags: vec!["onboarding".into()],
         related_docs: vec![],
         body: "Welcome to the team.\n\nThis guide covers your first week.".into(),
-        path: None,
     };
     let storage = Mem::new(vec![doc]);
 
@@ -150,7 +149,9 @@ async fn main() {
                 tool_name: "propose_edit".into(),
                 arguments: json!({
                     "document_id": doc_id.to_string(),
-                    "new_body": "Welcome to the team.\n\nThis guide covers your first week.\n\nCheck the wiki for more resources.",
+                    "hunks": [
+                        { "old_text": "This guide covers your first week.", "new_text": "This guide covers your first week.\n\nCheck the wiki for more resources." }
+                    ],
                     "reason": "Added wiki link paragraph"
                 }),
             }),

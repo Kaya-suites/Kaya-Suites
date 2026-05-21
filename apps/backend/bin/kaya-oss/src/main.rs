@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use axum::{
-    Json, Router,
+    Json,
     body::Body,
     extract::{Request, State},
     http::{HeaderName, HeaderValue, Method, StatusCode, header},
@@ -38,9 +38,9 @@ use kaya_core::UserContext;
 use rust_embed::RustEmbed;
 use serde_json::{Value, json};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-use sqlx::{AnyPool, MySqlPool, PgPool, SqlitePool};
+use sqlx::{AnyPool, MySqlPool, PgPool};
 use tokio::sync::Mutex;
-use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_sessions::cookie::SameSite;
 use tower_sessions::{Expiry, SessionManagerLayer};
 use tower_sessions_sqlx_store::{MySqlStore, PostgresStore, SqliteStore};

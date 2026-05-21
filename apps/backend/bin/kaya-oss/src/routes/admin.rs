@@ -20,7 +20,7 @@ use axum::{
 use kaya_metering::MeteringService;
 use kaya_auth::{AuthSession, AuthUser, KayaAuthBackend, PasswordAuthService};
 use serde::{Deserialize, Serialize};
-use sqlx::{AnyPool, Row};
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::state::AppState;

@@ -6,7 +6,7 @@ use argon2::{
     Argon2, PasswordHasher,
     password_hash::{SaltString, rand_core::OsRng},
 };
-use sqlx::{AnyPool, Row};
+use sqlx::AnyPool;
 use uuid::Uuid;
 
 use crate::auth_adapter::AuthUser;

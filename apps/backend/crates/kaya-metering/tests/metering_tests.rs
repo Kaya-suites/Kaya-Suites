@@ -23,6 +23,12 @@ async fn test_pool() -> Option<sqlx::PgPool> {
     sqlx::PgPool::connect(&url).await.ok()
 }
 
+async fn test_any_pool() -> Option<sqlx::AnyPool> {
+    let url = std::env::var("PG_TEST_DATABASE_URL").ok()?;
+    sqlx::any::install_default_drivers();
+    sqlx::AnyPool::connect(&url).await.ok()
+}
+
 const PRICING_YAML: &str = r#"
 models:
   test-model:
@@ -49,8 +55,8 @@ fn test_config() -> MeteringConfig {
     }
 }
 
-async fn make_svc(pool: sqlx::PgPool) -> MeteringService {
-    MeteringService::new(pool, test_pricing(), test_config())
+async fn make_svc(any_pool: sqlx::AnyPool) -> MeteringService {
+    MeteringService::new(any_pool, test_pricing(), test_config())
 }
 
 /// Insert a test user and return their UUID.
@@ -99,7 +105,8 @@ fn unknown_model_uses_fallback() {
 #[tokio::test]
 async fn test_record_usage_persists_event() {
     let Some(pool) = test_pool().await else { return };
-    let svc = make_svc(pool.clone()).await;
+    let Some(any_pool) = test_any_pool().await else { return };
+    let svc = make_svc(any_pool).await;
 
     let email = format!("record_{}@test.kaya.io", Uuid::new_v4().simple());
     let user_id = insert_user(&pool, &email).await;
@@ -120,7 +127,8 @@ async fn test_record_usage_persists_event() {
 #[tokio::test]
 async fn test_spend_cap_blocks_at_limit() {
     let Some(pool) = test_pool().await else { return };
-    let svc = make_svc(pool.clone()).await;
+    let Some(any_pool) = test_any_pool().await else { return };
+    let svc = make_svc(any_pool).await;
 
     let email = format!("cap_{}@test.kaya.io", Uuid::new_v4().simple());
     let user_id = insert_user(&pool, &email).await;
@@ -148,7 +156,8 @@ async fn test_spend_cap_blocks_at_limit() {
 #[tokio::test]
 async fn test_rate_limit_hourly() {
     let Some(pool) = test_pool().await else { return };
-    let svc = make_svc(pool.clone()).await;
+    let Some(any_pool) = test_any_pool().await else { return };
+    let svc = make_svc(any_pool).await;
 
     let email = format!("rl_{}@test.kaya.io", Uuid::new_v4().simple());
     let user_id = insert_user(&pool, &email).await;
@@ -174,6 +183,7 @@ async fn test_rate_limit_hourly() {
 #[tokio::test]
 async fn test_circuit_breaker_trips() {
     let Some(pool) = test_pool().await else { return };
+    let Some(any_pool) = test_any_pool().await else { return };
 
     // Low threshold to make it easy to trip.
     let config = MeteringConfig {
@@ -183,7 +193,7 @@ async fn test_circuit_breaker_trips() {
         daily_token_limit: 100_000_000,
         ..Default::default()
     };
-    let svc = MeteringService::new(pool.clone(), test_pricing(), config);
+    let svc = MeteringService::new(any_pool.clone(), test_pricing(), config);
 
     let email = format!("cb_{}@test.kaya.io", Uuid::new_v4().simple());
     let user_id = insert_user(&pool, &email).await;
@@ -194,7 +204,7 @@ async fn test_circuit_breaker_trips() {
     svc.record_usage(user_id, &u).await.unwrap();
 
     // Force the circuit to re-evaluate (clear the cached last_check by creating a new service).
-    let svc2 = MeteringService::new(pool.clone(), test_pricing(), MeteringConfig {
+    let svc2 = MeteringService::new(any_pool.clone(), test_pricing(), MeteringConfig {
         circuit_threshold_usd: 0.001,
         spend_cap_usd: 100.0,
         hourly_token_limit: 10_000_000,
@@ -215,7 +225,8 @@ async fn test_circuit_breaker_trips() {
 #[tokio::test]
 async fn test_monthly_summary_counts_invocations() {
     let Some(pool) = test_pool().await else { return };
-    let svc = make_svc(pool.clone()).await;
+    let Some(any_pool) = test_any_pool().await else { return };
+    let svc = make_svc(any_pool).await;
 
     let email = format!("summary_{}@test.kaya.io", Uuid::new_v4().simple());
     let user_id = insert_user(&pool, &email).await;
@@ -234,7 +245,8 @@ async fn test_monthly_summary_counts_invocations() {
 #[tokio::test]
 async fn test_overage_calculation() {
     let Some(pool) = test_pool().await else { return };
-    let svc = make_svc(pool.clone()).await; // included_invocations = 3
+    let Some(any_pool) = test_any_pool().await else { return };
+    let svc = make_svc(any_pool).await; // included_invocations = 3
 
     let email = format!("overage_{}@test.kaya.io", Uuid::new_v4().simple());
     let user_id = insert_user(&pool, &email).await;

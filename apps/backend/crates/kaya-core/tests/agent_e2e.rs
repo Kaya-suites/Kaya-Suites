@@ -172,7 +172,6 @@ fn make_doc(body: &str) -> Document {
         tags: vec![],
         related_docs: vec![],
         body: body.into(),
-        path: None,
     }
 }
 
@@ -198,7 +197,9 @@ async fn search_then_edit_requires_approval() {
                 tool_name: "propose_edit".into(),
                 arguments: json!({
                     "document_id": doc_id.to_string(),
-                    "new_body": "New paragraph one.\n\nNew paragraph two.",
+                    "hunks": [
+                        { "old_text": "Old paragraph one.\n\nOld paragraph two.", "new_text": "New paragraph one.\n\nNew paragraph two." }
+                    ],
                     "reason": "Updating content"
                 }),
             }),

@@ -41,7 +41,7 @@ fn make_doc() -> Document {
 }
 
 fn make_user_ctx(user_id: Uuid) -> UserContext {
-    UserContext { user_id }
+    UserContext { user_id, tenant_id: Uuid::nil() }
 }
 
 // ── Document isolation ────────────────────────────────────────────────────────
