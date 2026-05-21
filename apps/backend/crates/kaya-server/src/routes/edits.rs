@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use kaya_core::{ProposedEditKind, StorageAdapter, auth::UserSession, edit::commit_edit, model_router::ModelRouter, retrieval::index_document_chunks};
+use kaya_core::{ProposedEditKind, SessionStorage, StorageAdapter, auth::UserSession, edit::commit_edit, model_router::ModelRouter, retrieval::index_document_chunks};
 
 use crate::error::ApiError;
 use crate::state::StoredEdit;
@@ -22,6 +22,7 @@ pub struct ApproveBody {
 
 pub async fn approve_edit(
     Extension(storage): Extension<Arc<dyn StorageAdapter>>,
+    Extension(sessions): Extension<Arc<dyn SessionStorage>>,
     Extension(llm): Extension<Option<Arc<ModelRouter>>>,
     Extension(pending_edits): Extension<Arc<Mutex<HashMap<Uuid, StoredEdit>>>>,
     Path(edit_id): Path<Uuid>,
@@ -50,10 +51,11 @@ pub async fn approve_edit(
 
     if let (Some(doc_id), Some(router)) = (affected_doc_id, llm) {
         let storage = storage.clone();
+        let sessions = sessions.clone();
         tokio::spawn(async move {
             match storage.get_document(doc_id).await {
                 Ok(doc) => {
-                    if let Err(e) = index_document_chunks(&doc, &storage, &router).await {
+                    if let Err(e) = index_document_chunks(&doc, &storage, &router, Some(sessions.as_ref())).await {
                         tracing::error!(document_id = %doc_id, error = %e, "reindex failed after approve");
                     }
                 }

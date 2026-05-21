@@ -10,7 +10,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use kaya_core::{StorageAdapter, model_router::ModelRouter, retrieval::index_document_chunks};
+use kaya_core::{SessionStorage, StorageAdapter, model_router::ModelRouter, retrieval::index_document_chunks};
 
 use crate::error::ApiError;
 
@@ -67,6 +67,7 @@ pub(crate) struct DocumentResponse {
 
 pub async fn create_document(
     Extension(storage): Extension<Arc<dyn StorageAdapter>>,
+    Extension(sessions): Extension<Arc<dyn SessionStorage>>,
     Extension(llm): Extension<Option<Arc<ModelRouter>>>,
     Json(body): Json<CreateDocumentBody>,
 ) -> Result<(StatusCode, Json<DocumentResponse>), ApiError> {
@@ -95,9 +96,10 @@ pub async fn create_document(
 
     if let Some(router) = llm {
         let storage = storage.clone();
+        let sessions = sessions.clone();
         let id = doc.id;
         tokio::spawn(async move {
-            if let Err(e) = index_document_chunks(&doc, &storage, &router).await {
+            if let Err(e) = index_document_chunks(&doc, &storage, &router, Some(sessions.as_ref())).await {
                 tracing::error!(document_id = %id, error = %e, "reindex failed after create");
             }
         });
@@ -137,6 +139,7 @@ pub struct UpdateDocumentBody {
 
 pub async fn update_document(
     Extension(storage): Extension<Arc<dyn StorageAdapter>>,
+    Extension(sessions): Extension<Arc<dyn SessionStorage>>,
     Extension(llm): Extension<Option<Arc<ModelRouter>>>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateDocumentBody>,
@@ -171,8 +174,9 @@ pub async fn update_document(
 
     if let Some(router) = llm {
         let storage = storage.clone();
+        let sessions = sessions.clone();
         tokio::spawn(async move {
-            if let Err(e) = index_document_chunks(&doc, &storage, &router).await {
+            if let Err(e) = index_document_chunks(&doc, &storage, &router, Some(sessions.as_ref())).await {
                 tracing::error!(document_id = %id, error = %e, "reindex failed after update");
             }
         });

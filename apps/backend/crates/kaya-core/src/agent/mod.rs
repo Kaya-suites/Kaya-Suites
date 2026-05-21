@@ -52,6 +52,7 @@ use crate::auth::UserSession;
 use crate::edit::ProposedEdit;
 use crate::error::KayaError;
 use crate::model_router::{ModelRouter, OperationType, ToolCallRequest, ToolDefinition};
+use crate::session::SessionStorage;
 use crate::storage::StorageAdapter;
 use crate::token_counter::count_tokens;
 
@@ -60,6 +61,7 @@ use crate::token_counter::count_tokens;
 /// Shared context threaded through every tool invocation.
 pub struct AgentContext {
     pub storage: Arc<dyn StorageAdapter>,
+    pub sessions: Arc<dyn SessionStorage>,
     pub router: Arc<ModelRouter>,
     pub session: UserSession,
 }

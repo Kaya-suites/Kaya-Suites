@@ -4,7 +4,7 @@
 //! UUID columns are VARCHAR(36) in the kaya-db schema; bind/decode as strings.
 
 use async_trait::async_trait;
-use kaya_core::session::{MessageRecord, ModelUsage, Session, SessionError, SessionStorage, SessionTokenUsage, UsageSummary};
+use kaya_core::session::{EmbeddingModelUsage, MessageRecord, ModelUsage, Session, SessionError, SessionStorage, SessionTokenUsage, UsageSummary};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -367,6 +367,52 @@ impl SessionStorage for PostgresSessionStorage {
             })
             .collect::<Result<_, _>>()?;
 
-        Ok(UsageSummary { total_input_tokens, total_output_tokens, by_model, sessions })
+        let emb_rows = sqlx::query(
+            "SELECT model, SUM(tokens)::int4 AS total_tokens
+             FROM embedding_calls
+             WHERE user_id = $1 AND model != ''
+             GROUP BY model
+             ORDER BY total_tokens DESC",
+        )
+        .bind(self.user_id.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(box_err)?;
+
+        let by_embedding_model: Vec<EmbeddingModelUsage> = emb_rows
+            .iter()
+            .map(|row| -> Result<EmbeddingModelUsage, SessionError> {
+                let total: i32 = row.try_get("total_tokens").map_err(box_err)?;
+                Ok(EmbeddingModelUsage {
+                    model: row.try_get("model").map_err(box_err)?,
+                    tokens: total as u32,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        let total_embedding_tokens: u32 = by_embedding_model.iter().map(|m| m.tokens).sum();
+
+        Ok(UsageSummary {
+            total_input_tokens,
+            total_output_tokens,
+            by_model,
+            sessions,
+            total_embedding_tokens,
+            by_embedding_model,
+        })
+    }
+
+    async fn save_embedding_call(&self, model: &str, tokens: u32) -> Result<(), SessionError> {
+        sqlx::query(
+            "INSERT INTO embedding_calls (id, user_id, model, tokens) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(self.user_id.to_string())
+        .bind(model)
+        .bind(tokens as i32)
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(())
     }
 }

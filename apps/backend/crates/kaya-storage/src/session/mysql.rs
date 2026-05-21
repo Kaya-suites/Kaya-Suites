@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use kaya_core::session::{
-    MessageRecord, ModelUsage, Session, SessionError, SessionStorage, SessionTokenUsage,
-    UsageSummary,
+    EmbeddingModelUsage, MessageRecord, ModelUsage, Session, SessionError, SessionStorage,
+    SessionTokenUsage, UsageSummary,
 };
 use sqlx::{MySqlPool, Row};
 use uuid::Uuid;
@@ -54,6 +54,20 @@ impl MySqlSessionStorage {
                 model         VARCHAR(200) NOT NULL DEFAULT '',
                 PRIMARY KEY (id),
                 KEY idx_chat_messages_session (session_id, user_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS embedding_calls (
+                id         VARCHAR(36)  NOT NULL,
+                user_id    VARCHAR(36)  NOT NULL,
+                model      VARCHAR(200) NOT NULL,
+                tokens     INT          NOT NULL DEFAULT 0,
+                created_at BIGINT       NOT NULL,
+                PRIMARY KEY (id),
+                KEY idx_embedding_calls_user (user_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
         )
         .execute(pool)
@@ -390,6 +404,54 @@ impl SessionStorage for MySqlSessionStorage {
             })
             .collect::<Result<_, _>>()?;
 
-        Ok(UsageSummary { total_input_tokens, total_output_tokens, by_model, sessions })
+        let emb_rows = sqlx::query(
+            "SELECT model, SUM(tokens) AS total_tokens
+             FROM embedding_calls
+             WHERE user_id = ? AND model != ''
+             GROUP BY model
+             ORDER BY total_tokens DESC",
+        )
+        .bind(self.user_id.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(box_err)?;
+
+        let by_embedding_model: Vec<EmbeddingModelUsage> = emb_rows
+            .into_iter()
+            .map(|row| -> Result<EmbeddingModelUsage, SessionError> {
+                let total: i64 = row.try_get("total_tokens").map_err(box_err)?;
+                Ok(EmbeddingModelUsage {
+                    model: row.try_get("model").map_err(box_err)?,
+                    tokens: total as u32,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        let total_embedding_tokens: u32 = by_embedding_model.iter().map(|m| m.tokens).sum();
+
+        Ok(UsageSummary {
+            total_input_tokens,
+            total_output_tokens,
+            by_model,
+            sessions,
+            total_embedding_tokens,
+            by_embedding_model,
+        })
+    }
+
+    async fn save_embedding_call(&self, model: &str, tokens: u32) -> Result<(), SessionError> {
+        let now = Utc::now().timestamp_millis();
+        sqlx::query(
+            "INSERT INTO embedding_calls (id, user_id, model, tokens, created_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(self.user_id.to_string())
+        .bind(model)
+        .bind(tokens as i32)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(())
     }
 }

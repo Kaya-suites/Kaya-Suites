@@ -29,6 +29,7 @@ use uuid::Uuid;
 
 use crate::error::KayaError;
 use crate::model_router::ModelRouter;
+use crate::session::SessionStorage;
 use crate::storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter};
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -99,6 +100,7 @@ pub async fn index_document_chunks(
     doc: &Document,
     storage: &Arc<dyn StorageAdapter>,
     router: &ModelRouter,
+    sessions: Option<&dyn SessionStorage>,
 ) -> Result<usize, KayaError> {
     let new_chunks = chunk_document(doc);
 
@@ -134,6 +136,9 @@ pub async fn index_document_chunks(
     let mut new_embeddings: Vec<Embedding> = Vec::with_capacity(embed_count);
     for chunk in &to_embed {
         let resp = router.embed(&chunk.content).await?;
+        if let Some(s) = sessions {
+            let _ = s.save_embedding_call(&resp.usage.model, resp.usage.input_tokens).await;
+        }
         new_embeddings.push(Embedding {
             document_id: chunk.document_id,
             paragraph_id: chunk.paragraph_id.clone(),

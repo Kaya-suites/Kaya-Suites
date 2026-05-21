@@ -42,6 +42,8 @@ pub struct UsageSummary {
     pub total_output_tokens: u32,
     pub by_model: Vec<ModelUsage>,
     pub sessions: Vec<SessionTokenUsage>,
+    pub total_embedding_tokens: u32,
+    pub by_embedding_model: Vec<EmbeddingModelUsage>,
 }
 
 /// Per-model token breakdown.
@@ -51,6 +53,14 @@ pub struct ModelUsage {
     pub model: String,
     pub input_tokens: u32,
     pub output_tokens: u32,
+}
+
+/// Per-embedding-model token breakdown.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddingModelUsage {
+    pub model: String,
+    pub tokens: u32,
 }
 
 /// Per-session token totals (for the usage table).
@@ -102,6 +112,8 @@ pub trait SessionStorage: Send + Sync {
         model: &str,
     ) -> Result<(), SessionError>;
     async fn get_usage_summary(&self) -> Result<UsageSummary, SessionError>;
+    /// Record a single embedding API call (tokens used, model name).
+    async fn save_embedding_call(&self, model: &str, tokens: u32) -> Result<(), SessionError>;
     /// Update the session's `updated_at` timestamp (and `message_count` where tracked).
     async fn touch_session(&self, session_id: Uuid) -> Result<(), SessionError>;
     /// Rename the session, replacing its current title.

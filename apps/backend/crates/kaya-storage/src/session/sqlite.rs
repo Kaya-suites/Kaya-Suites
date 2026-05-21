@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use kaya_core::session::{
-    MessageRecord, ModelUsage, Session, SessionError, SessionStorage, SessionTokenUsage,
-    UsageSummary,
+    EmbeddingModelUsage, MessageRecord, ModelUsage, Session, SessionError, SessionStorage,
+    SessionTokenUsage, UsageSummary,
 };
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
@@ -74,6 +74,17 @@ impl SqliteSessionStorage {
         ] {
             let _ = sqlx::query(stmt).execute(pool).await;
         }
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS embedding_calls (
+                id         TEXT    PRIMARY KEY,
+                model      TEXT    NOT NULL,
+                tokens     INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
+            )",
+        )
+        .execute(pool)
+        .await?;
 
         Ok(())
     }
@@ -311,6 +322,21 @@ impl SessionStorage for SqliteSessionStorage {
         Ok(())
     }
 
+    async fn save_embedding_call(&self, model: &str, tokens: u32) -> Result<(), SessionError> {
+        let now = chrono::Utc::now().timestamp_millis();
+        sqlx::query(
+            "INSERT INTO embedding_calls (id, model, tokens, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(model)
+        .bind(tokens as i64)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(())
+    }
+
     async fn get_usage_summary(&self) -> Result<UsageSummary, SessionError> {
         let model_rows = sqlx::query(
             "SELECT model, SUM(input_tokens) AS total_in, SUM(output_tokens) AS total_out
@@ -364,6 +390,36 @@ impl SessionStorage for SqliteSessionStorage {
             })
             .collect::<Result<_, _>>()?;
 
-        Ok(UsageSummary { total_input_tokens, total_output_tokens, by_model, sessions })
+        let emb_rows = sqlx::query(
+            "SELECT model, SUM(tokens) AS total_tokens
+             FROM embedding_calls
+             WHERE model != ''
+             GROUP BY model
+             ORDER BY total_tokens DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(box_err)?;
+
+        let by_embedding_model: Vec<EmbeddingModelUsage> = emb_rows
+            .into_iter()
+            .map(|row| -> Result<EmbeddingModelUsage, SessionError> {
+                Ok(EmbeddingModelUsage {
+                    model: row.try_get("model").map_err(box_err)?,
+                    tokens: row.try_get::<i64, _>("total_tokens").map_err(box_err)? as u32,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        let total_embedding_tokens: u32 = by_embedding_model.iter().map(|m| m.tokens).sum();
+
+        Ok(UsageSummary {
+            total_input_tokens,
+            total_output_tokens,
+            by_model,
+            sessions,
+            total_embedding_tokens,
+            by_embedding_model,
+        })
     }
 }

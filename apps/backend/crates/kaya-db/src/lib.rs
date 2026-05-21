@@ -26,6 +26,8 @@ impl Dialect {
             Ok(Self::Mysql)
         } else {
             // plain path → treat as sqlite file
+            println!("Unknown URL: {url}");
+            println!("GOING WITH DEFAULT SQLITE DATABASE");
             Ok(Self::Sqlite)
         }
     }
@@ -34,8 +36,8 @@ impl Dialect {
 pub async fn run_migrations(pool: &AnyPool, dialect: Dialect) -> anyhow::Result<()> {
     match dialect {
         Dialect::Postgres => run_postgres(pool).await,
-        Dialect::Sqlite   => run_sqlite(pool).await,
-        Dialect::Mysql    => run_mysql(pool).await,
+        Dialect::Sqlite => run_sqlite(pool).await,
+        Dialect::Mysql => run_mysql(pool).await,
     }
 }
 
@@ -52,7 +54,9 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
     exec(pool, "CREATE EXTENSION IF NOT EXISTS vector").await?;
 
     // users — VARCHAR(36) for id so AnyPool string bindings work uniformly
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS users (
             id            VARCHAR(36)  NOT NULL,
             email         TEXT         NOT NULL,
@@ -64,10 +68,14 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
             PRIMARY KEY (id),
             UNIQUE (email)
         )
-    ").await?;
+    ",
+    )
+    .await?;
 
     // documents
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS documents (
             id            VARCHAR(36)  NOT NULL,
             user_id       VARCHAR(36)  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -83,11 +91,15 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
             deleted_at    TIMESTAMPTZ,
             PRIMARY KEY (id)
         )
-    ").await?;
+    ",
+    )
+    .await?;
     exec(pool, "CREATE INDEX IF NOT EXISTS documents_user_active ON documents (user_id, updated_at DESC) WHERE deleted_at IS NULL").await?;
 
     // document_versions
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS document_versions (
             id           VARCHAR(36)  NOT NULL,
             document_id  VARCHAR(36)  NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -97,10 +109,14 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
             created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
             PRIMARY KEY (id)
         )
-    ").await?;
+    ",
+    )
+    .await?;
 
     // chunks — TSVECTOR generated column for BM25
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS chunks (
             user_id      VARCHAR(36)  NOT NULL REFERENCES users(id)      ON DELETE CASCADE,
             document_id  VARCHAR(36)  NOT NULL REFERENCES documents(id)  ON DELETE CASCADE,
@@ -111,11 +127,19 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
             tsv          TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', content)) STORED,
             PRIMARY KEY (user_id, document_id, paragraph_id)
         )
-    ").await?;
-    exec(pool, "CREATE INDEX IF NOT EXISTS chunks_tsv ON chunks USING GIN (tsv)").await?;
+    ",
+    )
+    .await?;
+    exec(
+        pool,
+        "CREATE INDEX IF NOT EXISTS chunks_tsv ON chunks USING GIN (tsv)",
+    )
+    .await?;
 
     // chunk_embeddings — pgvector HNSW index
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS chunk_embeddings (
             user_id      VARCHAR(36)  NOT NULL REFERENCES users(id)      ON DELETE CASCADE,
             document_id  VARCHAR(36)  NOT NULL REFERENCES documents(id)  ON DELETE CASCADE,
@@ -123,11 +147,15 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
             vector       VECTOR(1536) NOT NULL,
             PRIMARY KEY (user_id, document_id, paragraph_id)
         )
-    ").await?;
+    ",
+    )
+    .await?;
     exec(pool, "CREATE INDEX IF NOT EXISTS chunk_embeddings_hnsw ON chunk_embeddings USING hnsw (vector vector_cosine_ops)").await?;
 
     // chat_sessions
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS chat_sessions (
             id                  VARCHAR(36)  NOT NULL,
             user_id             VARCHAR(36)  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -138,8 +166,14 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
             updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
             PRIMARY KEY (id)
         )
-    ").await?;
-    exec(pool, "CREATE INDEX IF NOT EXISTS chat_sessions_user ON chat_sessions (user_id, updated_at DESC)").await?;
+    ",
+    )
+    .await?;
+    exec(
+        pool,
+        "CREATE INDEX IF NOT EXISTS chat_sessions_user ON chat_sessions (user_id, updated_at DESC)",
+    )
+    .await?;
 
     // chat_messages
     exec(pool, "
@@ -160,7 +194,9 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
     exec(pool, "CREATE INDEX IF NOT EXISTS chat_messages_session ON chat_messages (session_id, user_id, created_at ASC)").await?;
 
     // tool_invocations
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS tool_invocations (
             id          VARCHAR(36)  NOT NULL,
             session_id  VARCHAR(36)  NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
@@ -172,10 +208,14 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
             finished_at TIMESTAMPTZ,
             PRIMARY KEY (id)
         )
-    ").await?;
+    ",
+    )
+    .await?;
 
     // usage_counters
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS usage_counters (
             id                 VARCHAR(36) NOT NULL,
             user_id            VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -187,10 +227,14 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
             PRIMARY KEY (id),
             UNIQUE (user_id, period_start)
         )
-    ").await?;
+    ",
+    )
+    .await?;
 
     // usage_events
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS usage_events (
             id            VARCHAR(36)      NOT NULL,
             user_id       VARCHAR(36)      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -202,12 +246,20 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
             recorded_at   TIMESTAMPTZ      NOT NULL DEFAULT now(),
             PRIMARY KEY (id)
         )
-    ").await?;
+    ",
+    )
+    .await?;
     exec(pool, "CREATE INDEX IF NOT EXISTS usage_events_user_period ON usage_events (user_id, recorded_at DESC)").await?;
-    exec(pool, "CREATE INDEX IF NOT EXISTS usage_events_daily ON usage_events (recorded_at DESC)").await?;
+    exec(
+        pool,
+        "CREATE INDEX IF NOT EXISTS usage_events_daily ON usage_events (recorded_at DESC)",
+    )
+    .await?;
 
     // rate_limit_windows
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS rate_limit_windows (
             user_id      VARCHAR(36)  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             window_type  TEXT         NOT NULL CHECK (window_type IN ('hourly','daily')),
@@ -215,20 +267,28 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
             tokens_used  BIGINT       NOT NULL DEFAULT 0,
             PRIMARY KEY (user_id, window_type, window_start)
         )
-    ").await?;
+    ",
+    )
+    .await?;
 
     // system_flags
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS system_flags (
             key        TEXT        NOT NULL,
             value      TEXT        NOT NULL,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             PRIMARY KEY (key)
         )
-    ").await?;
+    ",
+    )
+    .await?;
 
     // subscriptions
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS subscriptions (
             id                 VARCHAR(36)  NOT NULL,
             user_id            VARCHAR(36)  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -239,14 +299,35 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
             PRIMARY KEY (id),
             UNIQUE (user_id)
         )
-    ").await?;
+    ",
+    )
+    .await?;
+
+    // embedding_calls
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS embedding_calls (
+            id         VARCHAR(36)  NOT NULL,
+            user_id    VARCHAR(36)  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            model      TEXT         NOT NULL,
+            tokens     INTEGER      NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
+            PRIMARY KEY (id)
+        )
+    ",
+    )
+    .await?;
+    exec(pool, "CREATE INDEX IF NOT EXISTS embedding_calls_user ON embedding_calls (user_id, created_at DESC)").await?;
 
     tracing::info!("Postgres migrations applied");
     Ok(())
 }
 
 async fn run_sqlite(pool: &AnyPool) -> anyhow::Result<()> {
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS users (
             id            TEXT    NOT NULL PRIMARY KEY,
             email         TEXT    NOT NULL UNIQUE,
@@ -256,9 +337,13 @@ async fn run_sqlite(pool: &AnyPool) -> anyhow::Result<()> {
             created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
             updated_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
         )
-    ").await?;
+    ",
+    )
+    .await?;
 
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS usage_events (
             id            TEXT    NOT NULL PRIMARY KEY,
             user_id       TEXT    NOT NULL,
@@ -269,11 +354,19 @@ async fn run_sqlite(pool: &AnyPool) -> anyhow::Result<()> {
             cost_usd      REAL    NOT NULL,
             recorded_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
         )
-    ").await?;
+    ",
+    )
+    .await?;
     exec(pool, "CREATE INDEX IF NOT EXISTS usage_events_user_period ON usage_events (user_id, recorded_at DESC)").await?;
-    exec(pool, "CREATE INDEX IF NOT EXISTS usage_events_daily ON usage_events (recorded_at DESC)").await?;
+    exec(
+        pool,
+        "CREATE INDEX IF NOT EXISTS usage_events_daily ON usage_events (recorded_at DESC)",
+    )
+    .await?;
 
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS usage_counters (
             id                TEXT    NOT NULL PRIMARY KEY,
             user_id           TEXT    NOT NULL,
@@ -284,9 +377,13 @@ async fn run_sqlite(pool: &AnyPool) -> anyhow::Result<()> {
             agent_invocations INTEGER NOT NULL DEFAULT 0,
             UNIQUE (user_id, period_start)
         )
-    ").await?;
+    ",
+    )
+    .await?;
 
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS rate_limit_windows (
             user_id      TEXT    NOT NULL,
             window_type  TEXT    NOT NULL,
@@ -294,17 +391,25 @@ async fn run_sqlite(pool: &AnyPool) -> anyhow::Result<()> {
             tokens_used  INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (user_id, window_type, window_start)
         )
-    ").await?;
+    ",
+    )
+    .await?;
 
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS system_flags (
             key        TEXT NOT NULL PRIMARY KEY,
             value      TEXT NOT NULL,
             updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
         )
-    ").await?;
+    ",
+    )
+    .await?;
 
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS subscriptions (
             id                 TEXT    NOT NULL PRIMARY KEY,
             user_id            TEXT    NOT NULL UNIQUE,
@@ -313,14 +418,33 @@ async fn run_sqlite(pool: &AnyPool) -> anyhow::Result<()> {
             created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
             updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
         )
-    ").await?;
+    ",
+    )
+    .await?;
+
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS embedding_calls (
+            id         TEXT    NOT NULL PRIMARY KEY,
+            user_id    TEXT    NOT NULL,
+            model      TEXT    NOT NULL,
+            tokens     INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+        )
+    ",
+    )
+    .await?;
+    exec(pool, "CREATE INDEX IF NOT EXISTS embedding_calls_user ON embedding_calls (user_id, created_at DESC)").await?;
 
     tracing::info!("SQLite migrations applied");
     Ok(())
 }
 
 async fn run_mysql(pool: &AnyPool) -> anyhow::Result<()> {
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS users (
             id            VARCHAR(36)  NOT NULL,
             email         TEXT         NOT NULL,
@@ -332,9 +456,13 @@ async fn run_mysql(pool: &AnyPool) -> anyhow::Result<()> {
             PRIMARY KEY (id),
             UNIQUE KEY users_email_uk (email(255))
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    ").await?;
+    ",
+    )
+    .await?;
 
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS usage_events (
             id            VARCHAR(36)    NOT NULL,
             user_id       VARCHAR(36)    NOT NULL,
@@ -348,9 +476,13 @@ async fn run_mysql(pool: &AnyPool) -> anyhow::Result<()> {
             KEY usage_events_user_period (user_id, recorded_at DESC),
             KEY usage_events_daily (recorded_at DESC)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    ").await?;
+    ",
+    )
+    .await?;
 
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS usage_counters (
             id                VARCHAR(36) NOT NULL,
             user_id           VARCHAR(36) NOT NULL,
@@ -362,9 +494,13 @@ async fn run_mysql(pool: &AnyPool) -> anyhow::Result<()> {
             PRIMARY KEY (id),
             UNIQUE KEY uc_user_period (user_id, period_start)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    ").await?;
+    ",
+    )
+    .await?;
 
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS rate_limit_windows (
             user_id      VARCHAR(36) NOT NULL,
             window_type  VARCHAR(16) NOT NULL,
@@ -372,17 +508,25 @@ async fn run_mysql(pool: &AnyPool) -> anyhow::Result<()> {
             tokens_used  BIGINT      NOT NULL DEFAULT 0,
             PRIMARY KEY (user_id, window_type, window_start)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    ").await?;
+    ",
+    )
+    .await?;
 
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS system_flags (
             `key`      VARCHAR(128) NOT NULL PRIMARY KEY,
             value      TEXT         NOT NULL,
             updated_at DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    ").await?;
+    ",
+    )
+    .await?;
 
-    exec(pool, "
+    exec(
+        pool,
+        "
         CREATE TABLE IF NOT EXISTS subscriptions (
             id                 VARCHAR(36)  NOT NULL,
             user_id            VARCHAR(36)  NOT NULL,
@@ -393,7 +537,25 @@ async fn run_mysql(pool: &AnyPool) -> anyhow::Result<()> {
             PRIMARY KEY (id),
             UNIQUE KEY subscriptions_user_uk (user_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    ").await?;
+    ",
+    )
+    .await?;
+
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS embedding_calls (
+            id         VARCHAR(36)  NOT NULL,
+            user_id    VARCHAR(36)  NOT NULL,
+            model      VARCHAR(200) NOT NULL,
+            tokens     INT          NOT NULL DEFAULT 0,
+            created_at DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+            PRIMARY KEY (id),
+            KEY embedding_calls_user (user_id, created_at DESC)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+    )
+    .await?;
 
     tracing::info!("MySQL migrations applied");
     Ok(())

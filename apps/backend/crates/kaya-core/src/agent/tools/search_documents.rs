@@ -46,6 +46,7 @@ impl Tool for SearchDocuments {
 
         // Embed the query and run vector search.
         let emb = ctx.router.embed(query.clone()).await?;
+        let _ = ctx.sessions.save_embedding_call(&emb.usage.model, emb.usage.input_tokens).await;
         let hits = ctx.storage.search_embeddings(&emb.embedding, limit).await?;
 
         // Fetch full documents for each hit, deduplicate by document ID.

@@ -194,7 +194,7 @@ async fn test_retrieval_seed_corpus() {
     let storage: Arc<dyn StorageAdapter> = adapter;
     for doc in [&doc_a, &doc_b, &doc_c] {
         storage.save_document(doc).await.unwrap();
-        index_document_chunks(doc, &storage, &router).await.unwrap();
+        index_document_chunks(doc, &storage, &router, None).await.unwrap();
     }
 
     let results = retrieve("alpha", 3, &storage, &router).await.unwrap();
@@ -225,7 +225,7 @@ async fn test_citation_round_trip() {
 
     let storage: Arc<dyn StorageAdapter> = adapter;
     storage.save_document(&doc).await.unwrap();
-    index_document_chunks(&doc, &storage, &router).await.unwrap();
+    index_document_chunks(&doc, &storage, &router, None).await.unwrap();
 
     let results = retrieve("alpha", 1, &storage, &router).await.unwrap();
     assert!(!results.is_empty(), "retrieve must return a result");
@@ -272,13 +272,13 @@ async fn test_reembedding_efficiency() {
 
     let storage: Arc<dyn StorageAdapter> = adapter;
     storage.save_document(&doc).await.unwrap();
-    let first_embed_calls = index_document_chunks(&doc, &storage, &router).await.unwrap();
+    let first_embed_calls = index_document_chunks(&doc, &storage, &router, None).await.unwrap();
     assert_eq!(first_embed_calls, 10, "first index: all 10 paragraphs embedded");
     assert_eq!(call_count.load(Ordering::SeqCst), 10);
 
     let edited_doc = Document { body: make_body(true), ..doc.clone() };
     let second_embed_calls =
-        index_document_chunks(&edited_doc, &storage, &router).await.unwrap();
+        index_document_chunks(&edited_doc, &storage, &router, None).await.unwrap();
 
     assert_eq!(
         second_embed_calls, 1,
@@ -314,7 +314,7 @@ async fn test_performance_smoke() {
         };
 
         storage.save_document(&doc).await.unwrap();
-        index_document_chunks(&doc, &storage, &router).await.unwrap();
+        index_document_chunks(&doc, &storage, &router, None).await.unwrap();
     }
 
     let start = Instant::now();

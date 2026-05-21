@@ -9,6 +9,11 @@ interface ModelUsage {
   outputTokens: number;
 }
 
+interface EmbeddingModelUsage {
+  model: string;
+  tokens: number;
+}
+
 interface SessionTokenUsage {
   sessionId: string;
   title: string;
@@ -22,6 +27,8 @@ interface UsageSummary {
   totalOutputTokens: number;
   byModel: ModelUsage[];
   sessions: SessionTokenUsage[];
+  totalEmbeddingTokens: number;
+  byEmbeddingModel: EmbeddingModelUsage[];
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
@@ -202,60 +209,132 @@ function fmtTokens(n: number): string {
 }
 
 function TokenUsageCard({ summary }: { summary: UsageSummary | null }) {
+  const [activeTab, setActiveTab] = useState<"chat" | "embedding">("chat");
+
   if (!summary) return null;
-  const total = summary.totalInputTokens + summary.totalOutputTokens;
+  const chatTotal = summary.totalInputTokens + summary.totalOutputTokens;
+  const hasChat = chatTotal > 0 || summary.byModel.length > 0;
+  const hasEmbeddings = summary.totalEmbeddingTokens > 0 || summary.byEmbeddingModel.length > 0;
+
+  const tabClass = (active: boolean) =>
+    `px-4 py-2 text-xs font-bold uppercase tracking-wider border-2 border-black transition-all font-mono ${
+      active
+        ? "bg-black text-white"
+        : "bg-[var(--color-surface)] text-black hover:bg-[var(--color-muted-bg)]"
+    }`;
 
   return (
     <div
-      className="bg-[var(--color-surface)] border-2 border-black p-6 space-y-5 font-mono"
+      className="bg-[var(--color-surface)] border-2 border-black font-mono"
       style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
     >
-      <h2 className="font-bold text-xs uppercase tracking-wider text-black">Token usage</h2>
-
-      <div className="grid grid-cols-3 gap-4 text-center">
-        {[
-          { label: "Total", value: fmtTokens(total) },
-          { label: "Input", value: fmtTokens(summary.totalInputTokens) },
-          { label: "Output", value: fmtTokens(summary.totalOutputTokens) },
-        ].map(({ label, value }) => (
-          <div key={label} className="border-2 border-black p-3" style={{ borderRadius: "var(--border-radius)", background: "var(--color-muted-bg)" }}>
-            <p className="text-xs text-[var(--color-muted)] mb-1 uppercase">{label}</p>
-            <p className="text-lg font-black tabular-nums">{value}</p>
-          </div>
-        ))}
+      {/* Header + tabs */}
+      <div className="px-6 pt-6 pb-0 space-y-4">
+        <h2 className="font-bold text-xs uppercase tracking-wider text-black">Token usage</h2>
+        <div className="flex gap-0 border-b-2 border-black -mx-6 px-6">
+          <button
+            onClick={() => setActiveTab("chat")}
+            className={tabClass(activeTab === "chat")}
+            style={{ borderBottomColor: activeTab === "chat" ? "black" : "transparent", borderRadius: 0 }}
+          >
+            Chat models
+          </button>
+          <button
+            onClick={() => setActiveTab("embedding")}
+            className={tabClass(activeTab === "embedding")}
+            style={{ borderBottomColor: activeTab === "embedding" ? "black" : "transparent", borderRadius: 0 }}
+          >
+            Embedding models
+          </button>
+        </div>
       </div>
 
-      {summary.byModel.length > 0 && (
-        <div>
-          <p className="text-xs font-bold text-[var(--color-muted)] uppercase tracking-wider mb-2">By model</p>
-          <table className="w-full text-xs border-2 border-black" style={{ borderRadius: "var(--border-radius)" }}>
-            <thead>
-              <tr className="border-b-2 border-black text-left" style={{ background: "var(--color-muted-bg)" }}>
-                <th className="pb-1 font-bold px-3 py-2 uppercase">Model</th>
-                <th className="pb-1 font-bold text-right px-3 py-2 uppercase">Input</th>
-                <th className="pb-1 font-bold text-right px-3 py-2 uppercase">Output</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y-2 divide-black">
-              {summary.byModel.map((m) => (
-                <tr key={m.model}>
-                  <td className="py-2 px-3 font-mono text-xs text-black">{m.model}</td>
-                  <td className="py-2 px-3 tabular-nums text-right font-bold">{fmtTokens(m.inputTokens)}</td>
-                  <td className="py-2 px-3 tabular-nums text-right font-bold">{fmtTokens(m.outputTokens)}</td>
-                </tr>
+      <div className="p-6 space-y-5">
+        {activeTab === "chat" && (
+          <>
+            <div className="grid grid-cols-3 gap-4 text-center">
+              {[
+                { label: "Total", value: fmtTokens(chatTotal) },
+                { label: "Input", value: fmtTokens(summary.totalInputTokens) },
+                { label: "Output", value: fmtTokens(summary.totalOutputTokens) },
+              ].map(({ label, value }) => (
+                <div key={label} className="border-2 border-black p-3" style={{ borderRadius: "var(--border-radius)", background: "var(--color-muted-bg)" }}>
+                  <p className="text-xs text-[var(--color-muted)] mb-1 uppercase">{label}</p>
+                  <p className="text-lg font-black tabular-nums">{value}</p>
+                </div>
               ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+            </div>
 
-      {total === 0 && (
-        <p className="text-xs text-[var(--color-muted)]">No conversations yet. Start chatting to see token usage.</p>
-      )}
+            {summary.byModel.length > 0 && (
+              <table className="w-full text-xs border-2 border-black" style={{ borderRadius: "var(--border-radius)" }}>
+                <thead>
+                  <tr className="border-b-2 border-black text-left" style={{ background: "var(--color-muted-bg)" }}>
+                    <th className="font-bold px-3 py-2 uppercase">Model</th>
+                    <th className="font-bold text-right px-3 py-2 uppercase">Input</th>
+                    <th className="font-bold text-right px-3 py-2 uppercase">Output</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y-2 divide-black">
+                  {summary.byModel.map((m) => (
+                    <tr key={m.model}>
+                      <td className="py-2 px-3 text-xs">{m.model}</td>
+                      <td className="py-2 px-3 tabular-nums text-right font-bold">{fmtTokens(m.inputTokens)}</td>
+                      <td className="py-2 px-3 tabular-nums text-right font-bold">{fmtTokens(m.outputTokens)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
 
-      <p className="text-xs text-[var(--color-muted)]">
-        Counts are estimates computed locally from message text using BPE tokenization.
-      </p>
+            {!hasChat && (
+              <p className="text-xs text-[var(--color-muted)]">No conversations yet. Start chatting to see token usage.</p>
+            )}
+          </>
+        )}
+
+        {activeTab === "embedding" && (
+          <>
+            <div className="grid grid-cols-2 gap-4 text-center">
+              {[
+                { label: "Total tokens", value: fmtTokens(summary.totalEmbeddingTokens) },
+                { label: "Models used", value: String(summary.byEmbeddingModel.length) },
+              ].map(({ label, value }) => (
+                <div key={label} className="border-2 border-black p-3" style={{ borderRadius: "var(--border-radius)", background: "var(--color-muted-bg)" }}>
+                  <p className="text-xs text-[var(--color-muted)] mb-1 uppercase">{label}</p>
+                  <p className="text-lg font-black tabular-nums">{value}</p>
+                </div>
+              ))}
+            </div>
+
+            {summary.byEmbeddingModel.length > 0 && (
+              <table className="w-full text-xs border-2 border-black" style={{ borderRadius: "var(--border-radius)" }}>
+                <thead>
+                  <tr className="border-b-2 border-black text-left" style={{ background: "var(--color-muted-bg)" }}>
+                    <th className="font-bold px-3 py-2 uppercase">Model</th>
+                    <th className="font-bold text-right px-3 py-2 uppercase">Tokens</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y-2 divide-black">
+                  {summary.byEmbeddingModel.map((m) => (
+                    <tr key={m.model}>
+                      <td className="py-2 px-3 text-xs">{m.model}</td>
+                      <td className="py-2 px-3 tabular-nums text-right font-bold">{fmtTokens(m.tokens)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {!hasEmbeddings && (
+              <p className="text-xs text-[var(--color-muted)]">No embedding calls recorded yet. Upload or search documents to see usage.</p>
+            )}
+          </>
+        )}
+
+        <p className="text-xs text-[var(--color-muted)]">
+          Chat token counts are estimates using BPE tokenization. Embedding tokens are reported by the provider API.
+        </p>
+      </div>
     </div>
   );
 }

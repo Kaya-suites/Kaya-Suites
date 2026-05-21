@@ -19,8 +19,8 @@ use uuid::Uuid;
 
 use kaya_core::{
     ParagraphChange, ProposedEdit, ProposedEditKind, SessionStorage, StorageAdapter,
-    agent::{AgentContext, AgentEvent, AgentLoop, InvocationLog},
     agent::tools::default_tools,
+    agent::{AgentContext, AgentEvent, AgentLoop, InvocationLog},
     auth::UserSession,
     model_router::ModelRouter,
 };
@@ -101,9 +101,12 @@ async fn run_agent_stream(
     is_first_turn: bool,
     tx: tokio::sync::mpsc::Sender<Bytes>,
 ) {
-    let session = UserSession { user_id: Uuid::nil() };
+    let session = UserSession {
+        user_id: Uuid::nil(),
+    };
     let ctx = Arc::new(AgentContext {
         storage: storage.clone(),
+        sessions: sessions.clone(),
         router: router.clone(),
         session,
     });
@@ -135,6 +138,8 @@ async fn run_agent_stream(
             }
 
             Ok(AgentEvent::ToolResult { name, output, .. }) => {
+                println!("RESULT: ");
+                println!("name:{} ", name.to_string());
                 match name.as_str() {
                     "search_documents" => {
                         if let Some(arr) = output.get("documents").and_then(|v| v.as_array()) {
@@ -163,9 +168,7 @@ async fn run_agent_stream(
             }
 
             Ok(AgentEvent::ProposedEditEmitted { edit }) => {
-                if let Some(sse_data) =
-                    build_edit_sse(&storage, &pending_edits, &edit).await
-                {
+                if let Some(sse_data) = build_edit_sse(&storage, &pending_edits, &edit).await {
                     send!(sse_data);
                 }
             }
@@ -215,7 +218,11 @@ async fn run_agent_stream(
                 assistant_text = clean_text;
             }
 
-            Ok(AgentEvent::Usage { input_tokens, output_tokens, model }) => {
+            Ok(AgentEvent::Usage {
+                input_tokens,
+                output_tokens,
+                model,
+            }) => {
                 turn_input_tokens = input_tokens;
                 turn_output_tokens = output_tokens;
                 turn_model = model;
@@ -246,13 +253,23 @@ async fn run_agent_stream(
                  for a conversation that starts with this user message:\n\n{message}\n\nTitle:"
             );
             if let Ok(resp) = router
-                .complete(kaya_core::model_router::OperationType::RetrievalClassification, naming_prompt)
+                .complete(
+                    kaya_core::model_router::OperationType::RetrievalClassification,
+                    naming_prompt,
+                )
                 .await
             {
-                let title = resp.content.trim().trim_matches('"').trim_matches('\'').to_string();
+                let title = resp
+                    .content
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string();
                 if !title.is_empty() {
                     let _ = sessions.rename_session(session_id, title.clone()).await;
-                    send!(json!({"type": "SessionRenamed", "sessionId": session_id, "title": title}));
+                    send!(
+                        json!({"type": "SessionRenamed", "sessionId": session_id, "title": title})
+                    );
                 }
             }
         }
@@ -312,9 +329,16 @@ async fn build_edit_sse(
     edit: &ProposedEdit,
 ) -> Option<Value> {
     let (doc_id, para_id, original, proposed) = match &edit.kind {
-        ProposedEditKind::Modify { document_id, diff, .. } => {
+        ProposedEditKind::Modify {
+            document_id, diff, ..
+        } => {
             let first = diff.changes.iter().find_map(|c| {
-                if let ParagraphChange::Modify { paragraph_id, old_text, new_text } = c {
+                if let ParagraphChange::Modify {
+                    paragraph_id,
+                    old_text,
+                    new_text,
+                } = c
+                {
                     Some((paragraph_id.clone(), old_text.clone(), new_text.clone()))
                 } else {
                     None
@@ -325,9 +349,15 @@ async fn build_edit_sse(
         ProposedEditKind::Create { title: _, body } => {
             (None, "p0".to_string(), String::new(), body.clone())
         }
-        ProposedEditKind::UpdateContent { document_id, new_content } => {
-            (Some(*document_id), "p0".to_string(), String::new(), new_content.clone())
-        }
+        ProposedEditKind::UpdateContent {
+            document_id,
+            new_content,
+        } => (
+            Some(*document_id),
+            "p0".to_string(),
+            String::new(),
+            new_content.clone(),
+        ),
         ProposedEditKind::DeleteDocument { document_id } => {
             let doc_title = storage
                 .get_document(*document_id)
@@ -352,7 +382,11 @@ async fn build_edit_sse(
     };
 
     let doc_title = if let Some(id) = doc_id {
-        storage.get_document(id).await.map(|d| d.title).unwrap_or_default()
+        storage
+            .get_document(id)
+            .await
+            .map(|d| d.title)
+            .unwrap_or_default()
     } else {
         String::new()
     };
