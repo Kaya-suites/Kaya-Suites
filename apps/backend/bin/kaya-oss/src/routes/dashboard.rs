@@ -15,7 +15,7 @@ use axum::{
 };
 use chrono::Datelike as _;
 use kaya_metering::MeteringService;
-use kaya_tenant::{AuthSession, KayaAuthBackend};
+use kaya_auth::{AuthSession, KayaAuthBackend};
 use serde::Serialize;
 
 use crate::state::AppState;

@@ -35,15 +35,16 @@ use kaya_metering::{MeteringService, pricing::PricingConfig, service::MeteringCo
 use kaya_postgres_storage::{PostgresAdapter, PostgresSessionStorage};
 use kaya_server::state::StoredEdit;
 use kaya_storage::{MySqlAdapter, SqliteAdapter, SqliteSessionStorage};
-use kaya_tenant::{KayaAuthBackend, PasswordAuthService, UserContext};
+use kaya_auth::{KayaAuthBackend, PasswordAuthService};
+use kaya_core::UserContext;
 use rust_embed::RustEmbed;
 use serde_json::{Value, json};
-use sqlx::{AnyPool, MySqlPool, PgPool, SqlitePool};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use sqlx::{AnyPool, MySqlPool, PgPool, SqlitePool};
 use tokio::sync::Mutex;
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
-use tower_sessions::{Expiry, SessionManagerLayer};
 use tower_sessions::cookie::SameSite;
+use tower_sessions::{Expiry, SessionManagerLayer};
 use tower_sessions_sqlx_store::{PostgresStore, SqliteStore};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 use utoipa::OpenApi;
@@ -76,9 +77,15 @@ struct Assets;
 
 async fn static_handler(uri: axum::http::Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
-    for candidate in &[path.to_string(), format!("{path}.html"), "index.html".to_string()] {
+    for candidate in &[
+        path.to_string(),
+        format!("{path}.html"),
+        "index.html".to_string(),
+    ] {
         if let Some(content) = Assets::get(candidate) {
-            let mime = mime_guess::from_path(candidate).first_or_octet_stream().to_string();
+            let mime = mime_guess::from_path(candidate)
+                .first_or_octet_stream()
+                .to_string();
             return Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, mime)
@@ -104,7 +111,10 @@ async fn inject_storage(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let user_ctx = UserContext { user_id: user.id, tenant_id: user.id };
+    let user_ctx = UserContext {
+        user_id: user.id,
+        tenant_id: user.id,
+    };
 
     let (storage, sessions): (Arc<dyn StorageAdapter>, Arc<dyn SessionStorage>) =
         match &state.db_backend {
@@ -157,18 +167,16 @@ async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
     // -- Required env vars -----------------------------------------------------
-    let database_url = std::env::var("DATABASE_URL")
-        .context("DATABASE_URL is required")?;
-    let admin_email = std::env::var("ADMIN_EMAIL")
-        .unwrap_or_else(|_| "admin@kaya.local".into());
-    let superadmin_email = std::env::var("SUPERADMIN_EMAIL")
-        .unwrap_or_else(|_| "admin@kaya.local".into());
+    let database_url = std::env::var("DATABASE_URL").context("DATABASE_URL is required")?;
+    let admin_email = std::env::var("ADMIN_EMAIL").unwrap_or_else(|_| "admin@kaya.local".into());
+    let superadmin_email =
+        std::env::var("SUPERADMIN_EMAIL").unwrap_or_else(|_| "admin@kaya.local".into());
     let port: u16 = std::env::var("KAYA_PORT")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(3001);
-    let frontend_url = std::env::var("FRONTEND_URL")
-        .unwrap_or_else(|_| "http://localhost:3000".into());
+    let frontend_url =
+        std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".into());
     let pricing_config_path = std::env::var("PRICING_CONFIG_PATH")
         .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/config/pricing.yaml").into());
 
@@ -206,13 +214,19 @@ async fn main() -> anyhow::Result<()> {
                 .create_if_missing(true)
                 .journal_mode(SqliteJournalMode::Wal);
             let sqlite = SqlitePoolOptions::new().connect_with(opts).await?;
-            SqliteAdapter::run_migrations(&sqlite).await.context("sqlite storage migrations")?;
-            SqliteSessionStorage::migrate(&sqlite).await.context("sqlite session migrations")?;
+            SqliteAdapter::run_migrations(&sqlite)
+                .await
+                .context("sqlite storage migrations")?;
+            SqliteSessionStorage::migrate(&sqlite)
+                .await
+                .context("sqlite session migrations")?;
             DbBackend::Sqlite(sqlite, content_dir)
         }
         Dialect::Mysql => {
             let mysql = MySqlPool::connect(&database_url).await?;
-            MySqlAdapter::run_migrations(&mysql).await.context("mysql storage migrations")?;
+            MySqlAdapter::run_migrations(&mysql)
+                .await
+                .context("mysql storage migrations")?;
             DbBackend::Mysql(mysql)
         }
     };
@@ -221,17 +235,26 @@ async fn main() -> anyhow::Result<()> {
     let session_store: AnySessionStore = match &db_backend {
         DbBackend::Postgres(pg) => {
             let store = PostgresStore::new(pg.clone());
-            store.migrate().await.context("postgres session store migrate")?;
+            store
+                .migrate()
+                .await
+                .context("postgres session store migrate")?;
             AnySessionStore::Postgres(store)
         }
         DbBackend::Sqlite(sqlite, _) => {
             let store = SqliteStore::new(sqlite.clone());
-            store.migrate().await.context("sqlite session store migrate")?;
+            store
+                .migrate()
+                .await
+                .context("sqlite session store migrate")?;
             AnySessionStore::Sqlite(store)
         }
         DbBackend::Mysql(mysql) => {
             let store = session_store::MysqlSessionStore::new(mysql.clone());
-            store.migrate().await.context("mysql session store migrate")?;
+            store
+                .migrate()
+                .await
+                .context("mysql session store migrate")?;
             AnySessionStore::Mysql(store)
         }
     };
@@ -247,7 +270,9 @@ async fn main() -> anyhow::Result<()> {
     let pricing_path = std::path::Path::new(&pricing_config_path);
     let pricing = PricingConfig::from_yaml_file(pricing_path).unwrap_or_else(|e| {
         tracing::warn!(error = %e, "pricing config not found, using empty config");
-        PricingConfig { models: Default::default() }
+        PricingConfig {
+            models: Default::default(),
+        }
     });
 
     let metering_config = MeteringConfig {
@@ -261,7 +286,11 @@ async fn main() -> anyhow::Result<()> {
         resend_from: std::env::var("RESEND_FROM").unwrap_or_default(),
         admin_email: admin_email.clone(),
     };
-    let metering_svc = Arc::new(MeteringService::new(any_pool.clone(), pricing, metering_config));
+    let metering_svc = Arc::new(MeteringService::new(
+        any_pool.clone(),
+        pricing,
+        metering_config,
+    ));
 
     // -- LLM router (optional) ------------------------------------------------
     let config_path = std::env::var("KAYA_CONFIG")
@@ -301,8 +330,7 @@ async fn main() -> anyhow::Result<()> {
         ));
 
     let auth_backend = KayaAuthBackend::new(any_pool.clone());
-    let auth_layer =
-        axum_login::AuthManagerLayerBuilder::new(auth_backend, session_layer).build();
+    let auth_layer = axum_login::AuthManagerLayerBuilder::new(auth_backend, session_layer).build();
 
     // -- CORS ------------------------------------------------------------------
     let cors_origin: HeaderValue = frontend_url
@@ -326,11 +354,10 @@ async fn main() -> anyhow::Result<()> {
         .allow_credentials(true);
 
     // -- Shared routes (auth-gated) --------------------------------------------
-    let shared_routes = kaya_server::router()
-        .route_layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            inject_storage,
-        ));
+    let shared_routes = kaya_server::router().route_layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        inject_storage,
+    ));
 
     // -- Full router ----------------------------------------------------------
     let app = oa_router

@@ -5,7 +5,7 @@ members = [
   "crates/kaya-core",
   "crates/kaya-storage",
   "crates/kaya-server",
-  "crates/kaya-tenant",
+  "crates/kaya-auth",
   "crates/kaya-metering",
   "crates/kaya-postgres-storage",
   "crates/kaya-db",

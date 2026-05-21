@@ -14,7 +14,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use kaya_tenant::{AuthSession, KayaAuthBackend};
+use kaya_auth::{AuthSession, KayaAuthBackend};
 use serde::{Deserialize, Serialize};
 use sqlx::{AnyPool, Row};
 use uuid::Uuid;

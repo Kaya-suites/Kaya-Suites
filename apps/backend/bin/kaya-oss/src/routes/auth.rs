@@ -16,7 +16,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use kaya_tenant::{AuthSession, KayaAuthBackend, PasswordAuthService, RegisterError};
+use kaya_auth::{AuthSession, KayaAuthBackend, PasswordAuthService, RegisterError};
 use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
@@ -91,7 +91,7 @@ async fn login(
     mut auth: AuthSession<KayaAuthBackend>,
     Json(body): Json<LoginBody>,
 ) -> Response {
-    use kaya_tenant::PasswordCredentials;
+    use kaya_auth::PasswordCredentials;
 
     let creds = PasswordCredentials { email: body.email, password: body.password };
 

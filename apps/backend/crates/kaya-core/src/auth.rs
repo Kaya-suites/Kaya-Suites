@@ -11,6 +11,16 @@ pub struct UserSession {
     pub user_id: Uuid,
 }
 
+/// Per-request tenant/user context threaded into storage adapters.
+///
+/// Every SQL query in the storage layer unconditionally filters by `user_id`,
+/// ensuring data isolation between users sharing the same database.
+#[derive(Debug, Clone)]
+pub struct UserContext {
+    pub tenant_id: Uuid,
+    pub user_id: Uuid,
+}
+
 /// Abstracts authentication between the OSS single-user mode and cloud
 /// magic-link sessions.
 ///

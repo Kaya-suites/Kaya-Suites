@@ -18,7 +18,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use kaya_metering::MeteringService;
-use kaya_tenant::{AuthSession, AuthUser, KayaAuthBackend, PasswordAuthService};
+use kaya_auth::{AuthSession, AuthUser, KayaAuthBackend, PasswordAuthService};
 use serde::{Deserialize, Serialize};
 use sqlx::{AnyPool, Row};
 use uuid::Uuid;
@@ -31,7 +31,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/circuit-breaker/reset", post(reset_circuit_breaker))
         .route("/admin/users", get(list_users))
         .route("/admin/users", post(create_user))
-        .route("/admin/users/:id", delete(delete_user))
+        .route("/admin/users/{id}", delete(delete_user))
 }
 
 fn is_founder(user: &AuthUser, admin_email: &str) -> bool {
@@ -103,10 +103,7 @@ fn decode_bool_row(row: &sqlx::any::AnyRow, col: &str) -> bool {
         .unwrap_or(false)
 }
 
-async fn list_users(
-    State(state): State<AppState>,
-    auth: AuthSession<KayaAuthBackend>,
-) -> Response {
+async fn list_users(State(state): State<AppState>, auth: AuthSession<KayaAuthBackend>) -> Response {
     let user = match auth.user {
         Some(u) => u,
         None => return StatusCode::UNAUTHORIZED.into_response(),
@@ -130,9 +127,7 @@ async fn list_users(
                     email: r.try_get("email").unwrap_or_default(),
                     username: r.try_get("username").unwrap_or(None),
                     is_superadmin: decode_bool_row(r, "is_superadmin"),
-                    created_at: r
-                        .try_get::<String, _>("created_at")
-                        .unwrap_or_default(),
+                    created_at: r.try_get::<String, _>("created_at").unwrap_or_default(),
                 })
                 .collect();
             (StatusCode::OK, Json(users)).into_response()
@@ -172,14 +167,14 @@ async fn create_user(
         .await
     {
         Ok(u) => u,
-        Err(kaya_tenant::RegisterError::EmailAlreadyExists) => {
+        Err(kaya_auth::RegisterError::EmailAlreadyExists) => {
             return (
                 StatusCode::CONFLICT,
                 Json(serde_json::json!({"error": "email_already_exists"})),
             )
                 .into_response();
         }
-        Err(kaya_tenant::RegisterError::UsernameTaken) => {
+        Err(kaya_auth::RegisterError::UsernameTaken) => {
             return (
                 StatusCode::CONFLICT,
                 Json(serde_json::json!({"error": "username_taken"})),

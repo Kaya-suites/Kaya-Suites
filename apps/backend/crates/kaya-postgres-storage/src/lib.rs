@@ -21,7 +21,7 @@ pub use session::PostgresSessionStorage;
 
 use async_trait::async_trait;
 use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter, StorageError};
-use kaya_tenant::UserContext;
+use kaya_core::UserContext;
 use pgvector::Vector;
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};

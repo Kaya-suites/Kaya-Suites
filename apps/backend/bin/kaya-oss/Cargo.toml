@@ -11,7 +11,7 @@ description = "Unified self-hosted binary for Kaya Suites (Apache 2.0)"
 kaya-core              = { path = "../../crates/kaya-core" }
 kaya-storage           = { path = "../../crates/kaya-storage" }
 kaya-server            = { path = "../../crates/kaya-server" }
-kaya-tenant            = { path = "../../crates/kaya-tenant" }
+kaya-auth              = { path = "../../crates/kaya-auth" }
 kaya-metering          = { path = "../../crates/kaya-metering" }
 kaya-postgres-storage  = { path = "../../crates/kaya-postgres-storage" }
 kaya-db                = { path = "../../crates/kaya-db" }

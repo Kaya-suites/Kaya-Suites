@@ -7,7 +7,6 @@ description = "SQLite and MySQL storage adapters for Kaya Suites OSS (Apache 2.0
 
 [dependencies]
 kaya-core   = { path = "../kaya-core" }
-kaya-tenant = { path = "../kaya-tenant" }
 async-trait = { workspace = true }
 thiserror   = { workspace = true }
 uuid        = { workspace = true }

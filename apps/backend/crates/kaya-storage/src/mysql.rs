@@ -18,7 +18,7 @@ use sqlx::{MySqlPool, Row};
 use uuid::Uuid;
 
 use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter, StorageError};
-use kaya_tenant::UserContext;
+use kaya_core::UserContext;
 
 use crate::document::{sha256_hex, to_markdown};
 

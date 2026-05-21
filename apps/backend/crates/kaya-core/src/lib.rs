@@ -11,7 +11,7 @@ pub mod token_counter;
 // agent is declared here; populated in the next step
 pub mod agent;
 
-pub use auth::{AuthAdapter, UserSession};
+pub use auth::{AuthAdapter, UserContext, UserSession};
 pub use diff::{ParagraphChange, ParagraphDiff};
 pub use edit::{ApprovalToken, ProposedEdit, ProposedEditKind, commit_edit};
 pub use error::KayaError;

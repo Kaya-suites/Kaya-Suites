@@ -1,9 +1,9 @@
 [package]
-name        = "kaya-tenant"
+name        = "kaya-auth"
 version     = "0.1.0"
 edition     = "2024"
 license     = "Apache-2.0"
-description = "Password-based auth and multi-tenant context for Kaya Suites"
+description = "Password-based authentication for Kaya Suites"
 
 [dependencies]
 kaya-core   = { path = "../kaya-core" }
@@ -29,9 +29,3 @@ argon2 = { version = "0.5", features = ["std"] }
 
 # Observability
 tracing = "0.1"
-
-[dev-dependencies]
-tokio = { workspace = true }
-sqlx  = { version = "0.8", features = [
-    "any", "postgres", "sqlite", "mysql", "runtime-tokio", "chrono",
-] }
