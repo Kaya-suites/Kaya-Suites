@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { DocumentList } from "@/components/shared/DocumentList";
 
 type DocumentSummary = {
@@ -78,6 +79,13 @@ export default function DocumentsPage() {
             >
               {showForm ? "Cancel" : "Import"}
             </button>
+            <Link
+              href="/documents/new"
+              className="text-xs px-3 py-1.5 border-2 border-black font-bold uppercase tracking-wider font-mono bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity"
+              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
+            >
+              New
+            </Link>
           </div>
         </div>
       </div>
