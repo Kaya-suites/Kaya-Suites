@@ -8,8 +8,8 @@
 //! 2. Run storage migrations (kaya-postgres-storage MIGRATOR).
 //! 3. Run session-store migration (tower-sessions-sqlx-store).
 //! 4. Load pricing config (PRICING_CONFIG_PATH or the bundled default).
-//! 5. Build service layer: PasswordAuth, Billing, Metering.
-//! 6. Mount auth, account, billing, admin, and shared kaya-server routes.
+//! 5. Build service layer: PasswordAuth, Metering.
+//! 6. Mount auth, account, admin, and shared kaya-server routes.
 //! 7. Bind and serve.
 //!
 //! # Environment variables
@@ -17,10 +17,6 @@
 //! | Variable                  | Description                                              |
 //! |---------------------------|----------------------------------------------------------|
 //! | `NEON_DATABASE_URL`       | Postgres connection string (required)                    |
-//! | `PADDLE_API_KEY`          | Paddle API key for REST calls (required)                 |
-//! | `PADDLE_WEBHOOK_SECRET`   | Paddle webhook signing secret (required)                 |
-//! | `PADDLE_API_BASE`         | Paddle API base URL (default: sandbox)                   |
-//! | `PADDLE_OVERAGE_PRICE_ID` | Paddle price ID for overage billing (optional)           |
 //! | `ADMIN_EMAIL`             | Hardcoded admin email for founder dashboard (required)   |
 //! | `PRICING_CONFIG_PATH`     | Path to pricing.yaml (default: bin/kaya-cloud/config/pricing.yaml) |
 //! | `PORT`                    | Bind port (default: 3001)                               |
@@ -40,7 +36,6 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use kaya_billing::BillingService;
 use kaya_core::{SessionStorage, StorageAdapter, model_router::ModelRouter};
 use kaya_metering::pricing::PricingConfig;
 use kaya_metering::service::MeteringConfig;
@@ -60,13 +55,6 @@ mod state;
 
 use state::AppState;
 
-// ── Per-request storage injection ─────────────────────────────────────────────
-
-/// Middleware that creates per-request `StorageAdapter` and `SessionStorage`
-/// extensions scoped to the authenticated user.
-///
-/// Must run after `auth_layer` so the `AuthSession` extension is present.
-/// Returns 401 if the user is not authenticated.
 async fn inject_storage(
     State(state): State<AppState>,
     auth: axum_login::AuthSession<KayaAuthBackend>,
@@ -92,8 +80,6 @@ async fn inject_storage(
     next.run(request).await
 }
 
-// ── Entry point ───────────────────────────────────────────────────────────────
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::from_path(concat!(env!("CARGO_MANIFEST_DIR"), "/.env")).ok();
@@ -105,12 +91,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let database_url = require_env("NEON_DATABASE_URL")?;
-    let paddle_api_key = require_env("PADDLE_API_KEY")?;
-    let paddle_webhook_secret = require_env("PADDLE_WEBHOOK_SECRET")?;
     let admin_email = require_env("ADMIN_EMAIL")?;
-    let paddle_api_base = std::env::var("PADDLE_API_BASE")
-        .unwrap_or_else(|_| "https://sandbox-api.paddle.com".into());
-    let paddle_overage_price_id = std::env::var("PADDLE_OVERAGE_PRICE_ID").ok();
     let pricing_config_path = std::env::var("PRICING_CONFIG_PATH")
         .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/config/pricing.yaml").into());
     let port: u16 = std::env::var("PORT")
@@ -139,13 +120,6 @@ async fn main() -> anyhow::Result<()> {
 
     let password_auth_svc = Arc::new(PasswordAuthService::new(pool.clone()));
 
-    let billing_svc = Arc::new(BillingService::new(
-        pool.clone(),
-        paddle_api_key.clone(),
-        paddle_api_base.clone(),
-        paddle_webhook_secret,
-    ));
-
     let pricing = PricingConfig::from_yaml_file(Path::new(&pricing_config_path))
         .unwrap_or_else(|e| {
             tracing::warn!(error = %e, "pricing config not found, using empty config");
@@ -159,16 +133,12 @@ async fn main() -> anyhow::Result<()> {
         hourly_token_limit: 100_000,
         daily_token_limit: 500_000,
         circuit_threshold_usd: 50.00,
-        paddle_api_key: paddle_api_key.clone(),
-        paddle_api_base: paddle_api_base.clone(),
-        paddle_overage_price_id,
         resend_api_key: std::env::var("RESEND_API_KEY").unwrap_or_default(),
         resend_from: std::env::var("RESEND_FROM").unwrap_or_default(),
         admin_email: admin_email.clone(),
     };
     let metering_svc = Arc::new(MeteringService::new(pool.clone(), pricing, metering_config));
 
-    // ── LLM router (optional) ─────────────────────────────────────────────────
     let config_path = std::env::var("KAYA_CONFIG")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from("kaya.yaml"));
@@ -189,7 +159,6 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         pool: pool.clone(),
         password_auth_svc,
-        billing_svc,
         metering_svc,
         admin_email,
         llm,
@@ -231,7 +200,6 @@ async fn main() -> anyhow::Result<()> {
         ])
         .allow_credentials(true);
 
-    // kaya-server routes get per-request storage injection (requires auth).
     let shared_routes = kaya_server::router()
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -241,7 +209,6 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .merge(routes::auth::router())
         .merge(routes::account::router())
-        .merge(routes::billing::router())
         .merge(routes::dashboard::router())
         .merge(routes::admin::router())
         .merge(shared_routes)

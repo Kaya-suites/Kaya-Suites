@@ -4149,25 +4149,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kaya-billing"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "hex",
- "hmac 0.12.1",
- "kaya-core",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sqlx",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "kaya-cloud"
 version = "0.1.0"
 dependencies = [
@@ -4176,7 +4157,6 @@ dependencies = [
  "axum-login",
  "chrono",
  "dotenvy",
- "kaya-billing",
  "kaya-core",
  "kaya-metering",
  "kaya-postgres-storage",
@@ -4225,7 +4205,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "kaya-core",
- "reqwest 0.12.28",
  "serde",
  "serde_json",
  "serde_yaml",
