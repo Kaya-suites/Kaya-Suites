@@ -2,6 +2,8 @@
 //!
 //! axum-login backend and `CloudAuthAdapter`.
 //!
+//! Uses `AnyPool` so it works with Postgres, SQLite, and MySQL.
+//!
 //! # Type map
 //!
 //! ```text
@@ -16,7 +18,7 @@ use async_trait::async_trait;
 use axum_login::{AuthSession, AuthUser as AxumAuthUser};
 use kaya_core::{AuthAdapter, KayaError, UserSession};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Row};
+use sqlx::{AnyPool, Row};
 use uuid::Uuid;
 
 use crate::error::AuthError;
@@ -49,15 +51,14 @@ impl AxumAuthUser for AuthUser {
 
 /// axum-login backend wired into the tower layer stack.
 ///
-/// `authenticate` is the credential-based path (email + password → user).
-/// `get_user` is the session-restore path (user_id → user, called on every request).
+/// Uses `AnyPool` for database-agnostic operation (Postgres, SQLite, MySQL).
 #[derive(Clone)]
 pub struct KayaAuthBackend {
-    pool: PgPool,
+    pool: AnyPool,
 }
 
 impl KayaAuthBackend {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: AnyPool) -> Self {
         Self { pool }
     }
 }
@@ -67,6 +68,22 @@ impl KayaAuthBackend {
 pub struct PasswordCredentials {
     pub email: String,
     pub password: String,
+}
+
+/// Decode a bool column that may be stored as BOOLEAN, INTEGER (SQLite), or TINYINT (MySQL).
+fn decode_bool(row: &sqlx::any::AnyRow, col: &str) -> bool {
+    row.try_get::<bool, _>(col)
+        .or_else(|_| row.try_get::<i64, _>(col).map(|n| n != 0))
+        .or_else(|_| row.try_get::<i32, _>(col).map(|n| n != 0))
+        .unwrap_or(false)
+}
+
+/// Decode a UUID column stored as VARCHAR(36) / TEXT.
+fn decode_uuid(row: &sqlx::any::AnyRow, col: &str) -> Uuid {
+    row.try_get::<String, _>(col)
+        .ok()
+        .and_then(|s| Uuid::parse_str(&s).ok())
+        .unwrap_or_default()
 }
 
 #[async_trait]
@@ -80,7 +97,7 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
         creds: Self::Credentials,
     ) -> Result<Option<Self::User>, Self::Error> {
         let row = sqlx::query(
-            "SELECT id, email, username, password_hash, is_superadmin FROM users WHERE email = $1",
+            "SELECT id, email, username, password_hash, is_superadmin FROM users WHERE email = ?",
         )
         .bind(&creds.email)
         .fetch_optional(&self.pool)
@@ -106,10 +123,10 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
         }
 
         Ok(Some(AuthUser {
-            id: row.try_get("id").unwrap(),
-            email: row.try_get("email").unwrap(),
+            id: decode_uuid(&row, "id"),
+            email: row.try_get("email").unwrap_or_default(),
             username: row.try_get("username").unwrap_or(None),
-            is_superadmin: row.try_get("is_superadmin").unwrap_or(false),
+            is_superadmin: decode_bool(&row, "is_superadmin"),
         }))
     }
 
@@ -118,17 +135,17 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
         user_id: &axum_login::UserId<Self>,
     ) -> Result<Option<Self::User>, Self::Error> {
         let row = sqlx::query(
-            "SELECT id, email, username, is_superadmin FROM users WHERE id = $1",
+            "SELECT id, email, username, is_superadmin FROM users WHERE id = ?",
         )
-        .bind(user_id)
+        .bind(user_id.to_string())
         .fetch_optional(&self.pool)
         .await?;
 
         Ok(row.map(|r| AuthUser {
-            id: r.try_get("id").unwrap(),
-            email: r.try_get("email").unwrap(),
+            id: decode_uuid(&r, "id"),
+            email: r.try_get("email").unwrap_or_default(),
             username: r.try_get("username").unwrap_or(None),
-            is_superadmin: r.try_get("is_superadmin").unwrap_or(false),
+            is_superadmin: decode_bool(&r, "is_superadmin"),
         }))
     }
 }

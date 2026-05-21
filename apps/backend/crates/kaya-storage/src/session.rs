@@ -16,6 +16,11 @@ impl SqliteSessionStorage {
         Self { pool }
     }
 
+    /// Construct from an existing pool (alias for `new`).
+    pub fn from_pool(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
     /// Create the `sessions` and `messages` tables if they do not exist,
     /// and add token columns to existing tables.
     pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {

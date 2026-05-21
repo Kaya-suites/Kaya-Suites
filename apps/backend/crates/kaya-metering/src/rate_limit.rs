@@ -2,26 +2,11 @@
 //!
 //! Hourly and daily token-bucket rate limits (FR-36).
 //!
-//! # Implementation choice: Postgres (not Redis)
-//!
-//! v0 uses Postgres `rate_limit_windows` rows as token buckets.  Each row
-//! covers one user × one window type × one window_start timestamp.  Upserts
-//! with `ON CONFLICT … DO UPDATE` are atomic under Postgres' default READ
-//! COMMITTED isolation, which is sufficient for soft rate-limiting.
-//!
-//! Upgrade path: replace `check_and_record` with Redis INCR + EXPIRE calls
-//! when sub-millisecond latency or strict atomicity is required.
-//!
-//! # Bucket lifecycle
-//!
-//! The check precedes the LLM call: we record the expected token budget
-//! (zero for a pre-check) and verify the current window usage is below the
-//! limit.  After the call, `record_usage` increments the bucket by the actual
-//! token count.  A user can therefore overshoot by one invocation — acceptable
-//! for a soft limit.
+//! Uses `AnyPool` and `?` placeholders for Postgres/SQLite/MySQL portability.
+//! Replaces `ON CONFLICT … DO UPDATE` with transaction-based upserts.
 
 use chrono::{DateTime, TimeZone, Utc};
-use sqlx::PgPool;
+use sqlx::{AnyPool, Row};
 use uuid::Uuid;
 
 use crate::error::MeteringError;
@@ -41,19 +26,19 @@ fn truncate_to_day(dt: DateTime<Utc>) -> DateTime<Utc> {
 }
 
 async fn window_usage(
-    pool: &PgPool,
+    pool: &AnyPool,
     user_id: Uuid,
     window_type: &str,
     window_start: DateTime<Utc>,
 ) -> Result<i64, MeteringError> {
-    let used: i64 = sqlx::query_scalar(
+    let used: i64 = sqlx::query_scalar::<_, i64>(
         "SELECT COALESCE(tokens_used, 0)
          FROM rate_limit_windows
-         WHERE user_id = $1 AND window_type = $2 AND window_start = $3",
+         WHERE user_id = ? AND window_type = ? AND window_start = ?",
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(window_type)
-    .bind(window_start)
+    .bind(window_start.to_rfc3339())
     .fetch_one(pool)
     .await
     .unwrap_or(0i64);
@@ -62,24 +47,51 @@ async fn window_usage(
 }
 
 async fn increment_window(
-    pool: &PgPool,
+    pool: &AnyPool,
     user_id: Uuid,
     window_type: &str,
     window_start: DateTime<Utc>,
     tokens: i64,
 ) -> Result<(), MeteringError> {
-    sqlx::query(
-        "INSERT INTO rate_limit_windows (user_id, window_type, window_start, tokens_used)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (user_id, window_type, window_start)
-         DO UPDATE SET tokens_used = rate_limit_windows.tokens_used + EXCLUDED.tokens_used",
+    let window_start_str = window_start.to_rfc3339();
+    let mut tx = pool.begin().await?;
+
+    let existing = sqlx::query(
+        "SELECT tokens_used FROM rate_limit_windows
+         WHERE user_id = ? AND window_type = ? AND window_start = ?",
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(window_type)
-    .bind(window_start)
-    .bind(tokens)
-    .execute(pool)
+    .bind(&window_start_str)
+    .fetch_optional(&mut *tx)
     .await?;
+
+    if let Some(row) = existing {
+        let prev: i64 = row.try_get("tokens_used").unwrap_or(0);
+        sqlx::query(
+            "UPDATE rate_limit_windows SET tokens_used = ?
+             WHERE user_id = ? AND window_type = ? AND window_start = ?",
+        )
+        .bind(prev + tokens)
+        .bind(user_id.to_string())
+        .bind(window_type)
+        .bind(&window_start_str)
+        .execute(&mut *tx)
+        .await?;
+    } else {
+        sqlx::query(
+            "INSERT INTO rate_limit_windows (user_id, window_type, window_start, tokens_used)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(user_id.to_string())
+        .bind(window_type)
+        .bind(&window_start_str)
+        .bind(tokens)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
     Ok(())
 }
 
@@ -88,7 +100,7 @@ async fn increment_window(
 /// Does NOT modify any counters.  Call `record_usage` after the LLM call
 /// completes to increment the buckets.
 pub async fn check_rate_limit(
-    pool: &PgPool,
+    pool: &AnyPool,
     user_id: Uuid,
     hourly_limit: i64,
     daily_limit: i64,
@@ -122,7 +134,7 @@ pub async fn check_rate_limit(
 ///
 /// Call after a successful LLM call to keep buckets accurate.
 pub async fn record_usage(
-    pool: &PgPool,
+    pool: &AnyPool,
     user_id: Uuid,
     tokens: i64,
 ) -> Result<(), MeteringError> {

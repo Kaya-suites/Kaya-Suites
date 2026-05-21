@@ -3,10 +3,11 @@ name    = "kaya-storage"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "SQLite storage adapter for Kaya Suites OSS (Apache 2.0)"
+description = "SQLite and MySQL storage adapters for Kaya Suites OSS (Apache 2.0)"
 
 [dependencies]
 kaya-core   = { path = "../kaya-core" }
+kaya-tenant = { path = "../kaya-tenant" }
 async-trait = { workspace = true }
 thiserror   = { workspace = true }
 uuid        = { workspace = true }
@@ -15,7 +16,7 @@ serde_json  = { workspace = true }
 chrono      = { workspace = true }
 tokio       = { workspace = true }
 anyhow      = { workspace = true }
-sqlx        = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
+sqlx        = { version = "0.8", features = ["sqlite", "mysql", "runtime-tokio"] }
 serde_yaml  = "0.9"
 sha2        = "0.10"
 walkdir     = "2"

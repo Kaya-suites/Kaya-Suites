@@ -16,9 +16,9 @@ uuid       = { workspace = true }
 tokio      = { workspace = true }
 tracing    = "0.1"
 
-# Database
+# Database — AnyPool supports Postgres, SQLite, and MySQL
 sqlx = { version = "0.8", features = [
-    "postgres", "runtime-tokio", "uuid", "chrono",
+    "any", "postgres", "sqlite", "mysql", "runtime-tokio", "chrono",
 ] }
 
 [dev-dependencies]

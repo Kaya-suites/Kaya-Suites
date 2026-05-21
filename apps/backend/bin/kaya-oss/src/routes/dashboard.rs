@@ -1,4 +1,4 @@
-// Copyright 2024 Kaya Suites. All rights reserved. — BSL 1.1
+// Copyright 2024 Kaya Suites. Licensed under the Apache License, Version 2.0.
 //!
 //! User-facing dashboard routes.
 //!
@@ -13,9 +13,9 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
+use chrono::Datelike as _;
 use kaya_metering::MeteringService;
 use kaya_tenant::{AuthSession, KayaAuthBackend};
-use chrono::Datelike as _;
 use serde::Serialize;
 
 use crate::state::AppState;
@@ -24,8 +24,6 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/metering/summary", get(metering_summary))
 }
-
-// ── GET /metering/summary ─────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 struct MeteringSummary {
@@ -60,7 +58,7 @@ async fn metering_summary(
                 StatusCode::OK,
                 Json(MeteringSummary {
                     agent_invocations_used: summary.agent_invocations,
-                    agent_invocations_limit: metering_svc.included_invocations() as i64,
+                    agent_invocations_limit: metering_svc.included_invocations(),
                     spend_usd: summary.cost_usd,
                     spend_cap_usd: metering_svc.spend_cap_usd(),
                     period_start,

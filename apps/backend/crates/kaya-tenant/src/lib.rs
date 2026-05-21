@@ -1,6 +1,6 @@
 // Copyright 2024 Kaya Suites. Licensed under the Apache License, Version 2.0.
 //!
-//! Password-based authentication and multi-tenant context for Kaya Suites cloud.
+//! Password-based authentication and multi-tenant context for Kaya Suites.
 //!
 //! # Crate layout
 //!
@@ -8,6 +8,8 @@
 //! - [`password_auth`] — user registration with argon2 password hashing.
 //! - [`auth_adapter`] — axum-login backend + `CloudAuthAdapter`.
 //! - [`error`] — `RegisterError` and `AuthError`.
+//!
+//! Uses `AnyPool` so it works with Postgres, SQLite, and MySQL at runtime.
 
 use uuid::Uuid;
 
@@ -25,7 +27,8 @@ pub use password_auth::{PasswordAuthService, SeedError};
 
 pub use axum_login::AuthSession;
 pub use tower_sessions::{Expiry, SessionManagerLayer};
-pub use tower_sessions_sqlx_store::PostgresStore;
+// Note: PostgresStore is no longer re-exported here; import from
+// tower_sessions_sqlx_store directly in the binary.
 
 // ── UserContext ───────────────────────────────────────────────────────────────
 

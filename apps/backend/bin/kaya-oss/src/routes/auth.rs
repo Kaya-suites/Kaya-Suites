@@ -1,4 +1,4 @@
-// Copyright 2024 Kaya Suites. All rights reserved. — BSL 1.1
+// Copyright 2024 Kaya Suites. Licensed under the Apache License, Version 2.0.
 //!
 //! Password-based auth routes.
 //!
@@ -28,8 +28,6 @@ pub fn router() -> Router<AppState> {
         .route("/auth/me", get(me))
         .route("/auth/logout", post(logout))
 }
-
-// ── POST /auth/register ───────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct RegisterBody {
@@ -83,8 +81,6 @@ async fn register(
     }
 }
 
-// ── POST /auth/login ──────────────────────────────────────────────────────────
-
 #[derive(Deserialize)]
 struct LoginBody {
     email: String,
@@ -124,8 +120,6 @@ async fn login(
     }
 }
 
-// ── GET /auth/me ──────────────────────────────────────────────────────────────
-
 async fn me(auth: AuthSession<KayaAuthBackend>) -> Response {
     match auth.user {
         Some(user) => Json(UserResponse {
@@ -137,8 +131,6 @@ async fn me(auth: AuthSession<KayaAuthBackend>) -> Response {
         None => StatusCode::UNAUTHORIZED.into_response(),
     }
 }
-
-// ── POST /auth/logout ─────────────────────────────────────────────────────────
 
 async fn logout(mut auth: AuthSession<KayaAuthBackend>) -> Response {
     if let Err(e) = auth.logout().await {

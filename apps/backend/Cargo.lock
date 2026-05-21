@@ -4149,37 +4149,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kaya-cloud"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "axum-login",
- "chrono",
- "dotenvy",
- "kaya-core",
- "kaya-metering",
- "kaya-postgres-storage",
- "kaya-server",
- "kaya-storage",
- "kaya-tenant",
- "serde",
- "serde_json",
- "serde_yaml",
- "sqlx",
- "tokio",
- "tower-http",
- "tower-sessions",
- "tower-sessions-sqlx-store",
- "tracing",
- "tracing-subscriber",
- "utoipa",
- "utoipa-axum",
- "uuid",
- "zip",
-]
-
-[[package]]
 name = "kaya-core"
 version = "0.1.0"
 dependencies = [
@@ -4197,6 +4166,15 @@ dependencies = [
  "tokio",
  "trybuild",
  "uuid",
+]
+
+[[package]]
+name = "kaya-db"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sqlx",
+ "tracing",
 ]
 
 [[package]]
@@ -4219,19 +4197,36 @@ dependencies = [
 name = "kaya-oss"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
  "axum",
+ "axum-login",
+ "chrono",
+ "dotenvy",
  "kaya-core",
+ "kaya-db",
+ "kaya-metering",
+ "kaya-postgres-storage",
  "kaya-server",
  "kaya-storage",
+ "kaya-tenant",
  "mime_guess",
+ "rmp-serde",
  "rust-embed",
+ "serde",
  "serde_json",
+ "serde_yaml",
  "sqlx",
  "tokio",
  "tower-http",
+ "tower-sessions",
+ "tower-sessions-sqlx-store",
+ "tracing",
+ "tracing-subscriber",
  "utoipa",
  "utoipa-axum",
  "uuid",
+ "zip",
 ]
 
 [[package]]
@@ -4279,6 +4274,7 @@ dependencies = [
  "chrono",
  "futures",
  "kaya-core",
+ "kaya-tenant",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -6882,7 +6878,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

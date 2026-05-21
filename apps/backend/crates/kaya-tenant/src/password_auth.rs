@@ -1,12 +1,13 @@
 // Copyright 2024 Kaya Suites. Licensed under the Apache License, Version 2.0.
 //!
-//! Password registration for Kaya Suites cloud.
+//! Password registration for Kaya Suites — uses AnyPool for all three backends.
 
 use argon2::{
     Argon2, PasswordHasher,
     password_hash::{SaltString, rand_core::OsRng},
 };
-use sqlx::{PgPool, Row};
+use sqlx::{AnyPool, Row};
+use uuid::Uuid;
 
 use crate::auth_adapter::AuthUser;
 use crate::error::RegisterError;
@@ -23,11 +24,11 @@ pub enum SeedError {
 /// Service for registering new users with a hashed password.
 #[derive(Clone)]
 pub struct PasswordAuthService {
-    pool: PgPool,
+    pool: AnyPool,
 }
 
 impl PasswordAuthService {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: AnyPool) -> Self {
         Self { pool }
     }
 
@@ -48,31 +49,48 @@ impl PasswordAuthService {
             .map_err(|e| RegisterError::PasswordHash(e.to_string()))?
             .to_string();
 
-        let row = sqlx::query(
-            "INSERT INTO users (email, username, password_hash)
-             VALUES ($1, $2, $3)
-             RETURNING id, email, username",
+        // Check if email already exists
+        let email_count: i64 = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM users WHERE email = ?",
         )
+        .bind(email)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
+        if email_count > 0 {
+            return Err(RegisterError::EmailAlreadyExists);
+        }
+
+        // Check if username already exists
+        if let Some(uname) = username {
+            let uname_count: i64 = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM users WHERE username = ?",
+            )
+            .bind(uname)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
+            if uname_count > 0 {
+                return Err(RegisterError::UsernameTaken);
+            }
+        }
+
+        let id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO users (id, email, username, password_hash) VALUES (?, ?, ?, ?)",
+        )
+        .bind(id.to_string())
         .bind(email)
         .bind(username)
         .bind(&hash)
-        .fetch_one(&self.pool)
+        .execute(&self.pool)
         .await
-        .map_err(|e| {
-            if let sqlx::Error::Database(ref db_err) = e {
-                match db_err.constraint() {
-                    Some("users_email_key") => return RegisterError::EmailAlreadyExists,
-                    Some("users_username_key") => return RegisterError::UsernameTaken,
-                    _ => {}
-                }
-            }
-            RegisterError::Database(e)
-        })?;
+        .map_err(RegisterError::Database)?;
 
         Ok(AuthUser {
-            id: row.try_get("id").unwrap(),
-            email: row.try_get("email").unwrap(),
-            username: row.try_get("username").unwrap_or(None),
+            id,
+            email: email.to_string(),
+            username: username.map(|s| s.to_string()),
             is_superadmin: false,
         })
     }
@@ -86,14 +104,15 @@ impl PasswordAuthService {
         username: &str,
         password: &str,
     ) -> Result<(), SeedError> {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)",
+        let exists: i64 = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM users WHERE username = ?",
         )
         .bind(username)
         .fetch_one(&self.pool)
-        .await?;
+        .await
+        .unwrap_or(0);
 
-        if exists {
+        if exists > 0 {
             return Ok(());
         }
 
@@ -103,14 +122,15 @@ impl PasswordAuthService {
             .map_err(|e| SeedError::PasswordHash(e.to_string()))?
             .to_string();
 
+        let id = Uuid::new_v4();
         sqlx::query(
-            "INSERT INTO users (email, username, password_hash, is_superadmin)
-             VALUES ($1, $2, $3, TRUE)
-             ON CONFLICT DO NOTHING",
+            "INSERT INTO users (id, email, username, password_hash, is_superadmin) VALUES (?, ?, ?, ?, ?)",
         )
+        .bind(id.to_string())
         .bind(email)
         .bind(username)
         .bind(&hash)
+        .bind(true)
         .execute(&self.pool)
         .await?;
 

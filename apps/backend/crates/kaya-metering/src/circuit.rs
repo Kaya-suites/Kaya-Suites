@@ -2,18 +2,14 @@
 //!
 //! Global daily spend circuit breaker (BRD §12.5).
 //!
-//! When aggregate daily spend across all users exceeds `threshold_usd`, new
-//! agent invocations are rejected with `MeteringError::CircuitBreakerOpen`.
-//!
-//! State is cached in an `AtomicBool` and refreshed from the DB at most once
-//! per `check_interval` (default: 60 s).  On trip the state is also written
-//! to `system_flags` for persistence across restarts and to trigger an alert.
+//! Uses `AnyPool` and `?` placeholders for portability across
+//! Postgres, SQLite, and MySQL.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use sqlx::PgPool;
+use sqlx::AnyPool;
 use tracing::{error, info, warn};
 
 use crate::error::MeteringError;
@@ -37,10 +33,7 @@ impl CircuitBreaker {
 
     /// Check the circuit breaker.  Returns `MeteringError::CircuitBreakerOpen`
     /// if the daily aggregate spend has breached the threshold.
-    ///
-    /// The DB is queried at most once per `check_interval`; subsequent calls
-    /// within the window use the cached `AtomicBool`.
-    pub async fn check(&self, pool: &PgPool) -> Result<(), MeteringError> {
+    pub async fn check(&self, pool: &AnyPool) -> Result<(), MeteringError> {
         if self.tripped.load(Ordering::Relaxed) {
             let daily = self.daily_spend(pool).await.unwrap_or(f64::MAX);
             return Err(MeteringError::CircuitBreakerOpen {
@@ -79,7 +72,7 @@ impl CircuitBreaker {
     }
 
     /// Reset the circuit breaker (founder-initiated, after investigating the anomaly).
-    pub async fn reset(&self, pool: &PgPool) {
+    pub async fn reset(&self, pool: &AnyPool) {
         self.tripped.store(false, Ordering::Relaxed);
         *self.last_check.lock().expect("circuit lock poisoned") = None;
         let _ = sqlx::query(
@@ -94,26 +87,59 @@ impl CircuitBreaker {
         self.tripped.load(Ordering::Relaxed)
     }
 
-    async fn daily_spend(&self, pool: &PgPool) -> Result<f64, MeteringError> {
-        let spend: f64 = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(cost_usd), 0.0)::float8
-             FROM usage_events
-             WHERE recorded_at >= date_trunc('day', now() AT TIME ZONE 'UTC')",
+    async fn daily_spend(&self, pool: &AnyPool) -> Result<f64, MeteringError> {
+        // Compute day boundary in Rust to avoid DB-specific date functions
+        let day_start = chrono::Utc::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+
+        let spend: f64 = sqlx::query_scalar::<_, f64>(
+            "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE recorded_at >= ?",
         )
+        .bind(day_start.to_rfc3339())
         .fetch_one(pool)
         .await?;
         Ok(spend)
     }
 
-    async fn persist_trip(&self, pool: &PgPool, daily_usd: f64) {
+    async fn persist_trip(&self, pool: &AnyPool, daily_usd: f64) {
         let value = format!("{:.6}", daily_usd);
-        let res = sqlx::query(
-            "INSERT INTO system_flags (key, value) VALUES ('circuit_breaker_tripped', $1)
-             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()",
-        )
-        .bind(&value)
-        .execute(pool)
+        let now = chrono::Utc::now();
+
+        // Transaction-based upsert (works on all 3 DBs)
+        let res = async {
+            let mut tx = pool.begin().await?;
+            let existing = sqlx::query(
+                "SELECT key FROM system_flags WHERE key = 'circuit_breaker_tripped'",
+            )
+            .fetch_optional(&mut *tx)
+            .await?;
+
+            let now_str = now.to_rfc3339();
+            if existing.is_some() {
+                sqlx::query(
+                    "UPDATE system_flags SET value = ?, updated_at = ? WHERE key = 'circuit_breaker_tripped'",
+                )
+                .bind(&value)
+                .bind(&now_str)
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                sqlx::query(
+                    "INSERT INTO system_flags (key, value, updated_at) VALUES ('circuit_breaker_tripped', ?, ?)",
+                )
+                .bind(&value)
+                .bind(&now_str)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+            Ok::<_, sqlx::Error>(())
+        }
         .await;
+
         if let Err(e) = res {
             error!(error = %e, "failed to persist circuit breaker state");
         }

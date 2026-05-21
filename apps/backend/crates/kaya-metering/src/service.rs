@@ -2,28 +2,13 @@
 //!
 //! [`MeteringService`] — public façade for all metering operations.
 //!
-//! # Agent loop wiring
-//!
-//! The agent layer (not yet built) should call these methods in order:
-//!
-//! ```text
-//! // Before invocation:
-//! svc.pre_invocation_check(user_id).await?;
-//!
-//! // After each LLM call returns:
-//! svc.record_usage(user_id, &token_usage).await?;
-//! ```
-//!
-//! `pre_invocation_check` is a single gate that runs all three checks
-//! (circuit breaker → spend cap → rate limit) and returns on the first
-//! failure.  Any `MeteringError` variant should be surfaced to the user
-//! with a clear message.
+//! Uses `AnyPool` for database-agnostic operation.
 
 use std::sync::Arc;
 
 use chrono::NaiveDate;
 use kaya_core::TokenUsage;
-use sqlx::PgPool;
+use sqlx::AnyPool;
 use tracing::info;
 use uuid::Uuid;
 
@@ -75,14 +60,14 @@ impl Default for MeteringConfig {
 
 #[derive(Clone)]
 pub struct MeteringService {
-    pool: PgPool,
+    pool: AnyPool,
     pricing: Arc<PricingConfig>,
     config: Arc<MeteringConfig>,
     circuit: Arc<CircuitBreaker>,
 }
 
 impl MeteringService {
-    pub fn new(pool: PgPool, pricing: PricingConfig, config: MeteringConfig) -> Self {
+    pub fn new(pool: AnyPool, pricing: PricingConfig, config: MeteringConfig) -> Self {
         let circuit = CircuitBreaker::new(config.circuit_threshold_usd);
         Self {
             pool,
@@ -94,14 +79,6 @@ impl MeteringService {
 
     // ── Pre-invocation gate ───────────────────────────────────────────────────
 
-    /// Run all pre-invocation checks in priority order:
-    ///
-    /// 1. Global circuit breaker (BRD §12.5)
-    /// 2. Per-user spend cap (FR-35)
-    /// 3. Per-user rate limits (FR-36)
-    ///
-    /// Returns the first error encountered.  On `Ok` the invocation may
-    /// proceed.
     pub async fn pre_invocation_check(&self, user_id: Uuid) -> Result<(), MeteringError> {
         self.circuit.check(&self.pool).await?;
         check_spend_cap(&self.pool, user_id, self.config.spend_cap_usd).await?;
@@ -117,9 +94,6 @@ impl MeteringService {
 
     // ── Usage recording ───────────────────────────────────────────────────────
 
-    /// Persist a single LLM call's token usage and increment rate-limit buckets.
-    ///
-    /// Call once per `TokenUsage` returned by the model router.
     pub async fn record_usage(
         &self,
         user_id: Uuid,
@@ -181,8 +155,6 @@ impl MeteringService {
 
     // ── Internal ─────────────────────────────────────────────────────────────
 
-    /// Check whether the user has crossed the 80% alert threshold and log it.
-    /// A production build would send a Resend email here.
     async fn maybe_send_spend_alert(&self, user_id: Uuid) {
         let Ok(spent) = crate::caps::current_period_spend(&self.pool, user_id).await else {
             return;

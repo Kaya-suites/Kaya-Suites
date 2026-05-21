@@ -1,5 +1,7 @@
 // Copyright 2024 Kaya Suites. Licensed under the Apache License, Version 2.0.
 //! Postgres-backed [`SessionStorage`] implementation.
+//!
+//! UUID columns are VARCHAR(36) in the kaya-db schema; bind/decode as strings.
 
 use async_trait::async_trait;
 use kaya_core::session::{MessageRecord, ModelUsage, Session, SessionError, SessionStorage, SessionTokenUsage, UsageSummary};
@@ -30,7 +32,7 @@ fn ts_millis(ts: chrono::DateTime<chrono::Utc>) -> i64 {
 impl SessionStorage for PostgresSessionStorage {
     async fn list_sessions(&self) -> Result<Vec<Session>, SessionError> {
         let rows = sqlx::query(
-            "SELECT s.id,
+            "SELECT s.id::text,
                     COALESCE(s.title, 'Untitled') AS title,
                     s.created_at,
                     s.updated_at,
@@ -44,14 +46,15 @@ impl SessionStorage for PostgresSessionStorage {
              GROUP BY s.id
              ORDER BY s.updated_at DESC",
         )
-        .bind(self.user_id)
+        .bind(self.user_id.to_string())
         .fetch_all(&self.pool)
         .await
         .map_err(box_err)?;
 
         rows.iter()
             .map(|row| -> Result<Session, SessionError> {
-                let id: Uuid = row.try_get("id").map_err(box_err)?;
+                let id_str: String = row.try_get("id").map_err(box_err)?;
+                let id = Uuid::parse_str(&id_str).unwrap_or_default();
                 let title: String = row.try_get("title").map_err(box_err)?;
                 let created_at: chrono::DateTime<chrono::Utc> =
                     row.try_get("created_at").map_err(box_err)?;
@@ -84,8 +87,8 @@ impl SessionStorage for PostgresSessionStorage {
             "INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at)
              VALUES ($1, $2, $3, $4, $4)",
         )
-        .bind(id)
-        .bind(self.user_id)
+        .bind(id.to_string())
+        .bind(self.user_id.to_string())
         .bind(&title)
         .bind(now)
         .execute(&self.pool)
@@ -110,8 +113,8 @@ impl SessionStorage for PostgresSessionStorage {
              WHERE session_id = $1 AND user_id = $2
              ORDER BY created_at ASC",
         )
-        .bind(session_id)
-        .bind(self.user_id)
+        .bind(session_id.to_string())
+        .bind(self.user_id.to_string())
         .fetch_all(&self.pool)
         .await
         .map_err(box_err)?;
@@ -151,8 +154,8 @@ impl SessionStorage for PostgresSessionStorage {
              WHERE session_id = $1 AND user_id = $2
              ORDER BY created_at ASC",
         )
-        .bind(session_id)
-        .bind(self.user_id)
+        .bind(session_id.to_string())
+        .bind(self.user_id.to_string())
         .fetch_all(&self.pool)
         .await
         .map_err(box_err)?;
@@ -180,9 +183,9 @@ impl SessionStorage for PostgresSessionStorage {
                  (id, session_id, user_id, role, content, citations, created_at)
              VALUES ($1, $2, $3, 'user', $4, '[]', $5)",
         )
-        .bind(msg_id)
-        .bind(session_id)
-        .bind(self.user_id)
+        .bind(msg_id.to_string())
+        .bind(session_id.to_string())
+        .bind(self.user_id.to_string())
         .bind(content)
         .bind(now)
         .execute(&self.pool)
@@ -211,9 +214,9 @@ impl SessionStorage for PostgresSessionStorage {
                   input_tokens, output_tokens, model)
              VALUES ($1, $2, $3, 'assistant', $4, $5, $6, $7, $8, $9)",
         )
-        .bind(msg_id)
-        .bind(session_id)
-        .bind(self.user_id)
+        .bind(msg_id.to_string())
+        .bind(session_id.to_string())
+        .bind(self.user_id.to_string())
         .bind(content)
         .bind(citations)
         .bind(now)
@@ -232,8 +235,8 @@ impl SessionStorage for PostgresSessionStorage {
         )
         .bind(input_tokens as i32)
         .bind(output_tokens as i32)
-        .bind(session_id)
-        .bind(self.user_id)
+        .bind(session_id.to_string())
+        .bind(self.user_id.to_string())
         .execute(&self.pool)
         .await
         .map_err(box_err)?;
@@ -247,8 +250,8 @@ impl SessionStorage for PostgresSessionStorage {
             "UPDATE chat_sessions SET updated_at = $1 WHERE id = $2 AND user_id = $3",
         )
         .bind(now)
-        .bind(session_id)
-        .bind(self.user_id)
+        .bind(session_id.to_string())
+        .bind(self.user_id.to_string())
         .execute(&self.pool)
         .await
         .map_err(box_err)?;
@@ -260,8 +263,8 @@ impl SessionStorage for PostgresSessionStorage {
             "UPDATE chat_sessions SET title = $1 WHERE id = $2 AND user_id = $3",
         )
         .bind(&title)
-        .bind(session_id)
-        .bind(self.user_id)
+        .bind(session_id.to_string())
+        .bind(self.user_id.to_string())
         .execute(&self.pool)
         .await
         .map_err(box_err)?;
@@ -278,7 +281,7 @@ impl SessionStorage for PostgresSessionStorage {
              GROUP BY model
              ORDER BY total_in DESC",
         )
-        .bind(self.user_id)
+        .bind(self.user_id.to_string())
         .fetch_all(&self.pool)
         .await
         .map_err(box_err)?;
@@ -307,7 +310,7 @@ impl SessionStorage for PostgresSessionStorage {
                AND (total_input_tokens > 0 OR total_output_tokens > 0)
              ORDER BY updated_at DESC",
         )
-        .bind(self.user_id)
+        .bind(self.user_id.to_string())
         .fetch_all(&self.pool)
         .await
         .map_err(box_err)?;

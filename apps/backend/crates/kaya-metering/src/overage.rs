@@ -1,7 +1,7 @@
 // Copyright 2024 Kaya Suites. Licensed under the Apache License, Version 2.0.
 
 use chrono::NaiveDate;
-use sqlx::{PgPool, Row};
+use sqlx::{AnyPool, Row};
 use tracing::info;
 use uuid::Uuid;
 
@@ -10,18 +10,18 @@ use crate::error::MeteringError;
 const COST_PER_OVERAGE_INVOCATION_USD: f64 = 0.10;
 
 pub async fn report_period_overage(
-    pool: &PgPool,
+    pool: &AnyPool,
     user_id: Uuid,
     period_start: NaiveDate,
     included_invocations: i64,
 ) -> Result<(), MeteringError> {
     let row = sqlx::query(
         "SELECT agent_invocations FROM usage_counters
-         WHERE user_id = $1 AND period_start = $2
+         WHERE user_id = ? AND period_start = ?
          LIMIT 1",
     )
-    .bind(user_id)
-    .bind(period_start)
+    .bind(user_id.to_string())
+    .bind(period_start.to_string())
     .fetch_optional(pool)
     .await?;
 

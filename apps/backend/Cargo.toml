@@ -8,8 +8,8 @@ members = [
   "crates/kaya-tenant",
   "crates/kaya-metering",
   "crates/kaya-postgres-storage",
+  "crates/kaya-db",
   "bin/kaya-oss",
-  "bin/kaya-cloud",
 ]
 resolver = "2"
 

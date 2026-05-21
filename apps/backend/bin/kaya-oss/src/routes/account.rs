@@ -1,4 +1,4 @@
-// Copyright 2024 Kaya Suites. All rights reserved. — BSL 1.1
+// Copyright 2024 Kaya Suites. Licensed under the Apache License, Version 2.0.
 //!
 //! Account management routes (FR-30, FR-31).
 //!
@@ -16,7 +16,7 @@ use axum::{
 };
 use kaya_tenant::{AuthSession, KayaAuthBackend};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Row};
+use sqlx::{AnyPool, Row};
 use uuid::Uuid;
 
 use crate::state::AppState;
@@ -41,7 +41,7 @@ struct DeleteResponse {
 }
 
 async fn delete_account(
-    State(pool): State<PgPool>,
+    State(state): State<AppState>,
     mut auth: AuthSession<KayaAuthBackend>,
     Json(body): Json<DeleteAccountBody>,
 ) -> Response {
@@ -58,10 +58,9 @@ async fn delete_account(
             .into_response();
     }
 
-    // Deleting the users row cascades to all user-scoped tables (FK ON DELETE CASCADE).
-    match sqlx::query("DELETE FROM users WHERE id = $1")
-        .bind(user.id)
-        .execute(&pool)
+    match sqlx::query("DELETE FROM users WHERE id = ?")
+        .bind(user.id.to_string())
+        .execute(&state.pool)
         .await
     {
         Ok(_) => {}
@@ -71,7 +70,6 @@ async fn delete_account(
         }
     }
 
-    // Destroy the session so the cookie is immediately invalid.
     let _ = auth.logout().await;
 
     tracing::info!(user_id = %user.id, "account deleted");
@@ -81,7 +79,7 @@ async fn delete_account(
 // ── GET /account/export ───────────────────────────────────────────────────────
 
 async fn export_account(
-    State(pool): State<PgPool>,
+    State(state): State<AppState>,
     auth: AuthSession<KayaAuthBackend>,
 ) -> Response {
     let user = match auth.user {
@@ -89,7 +87,7 @@ async fn export_account(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    match build_export(&pool, user.id, &user.email).await {
+    match build_export(&state.pool, user.id, &user.email).await {
         Ok(bytes) => (
             StatusCode::OK,
             [
@@ -114,10 +112,10 @@ async fn export_account(
 #[derive(Debug)]
 struct DocRow {
     #[allow(dead_code)]
-    id: Uuid,
+    id: String,
     title: String,
     body: String,
-    updated_at: chrono::DateTime<chrono::Utc>,
+    updated_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -129,68 +127,71 @@ struct ChatMsg {
 
 #[derive(Debug, Serialize)]
 struct ChatSession {
-    id: Uuid,
+    id: String,
     title: Option<String>,
     messages: Vec<ChatMsg>,
 }
 
 async fn build_export(
-    pool: &PgPool,
+    pool: &AnyPool,
     user_id: Uuid,
     email: &str,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    // Fetch documents.
     let doc_rows = sqlx::query(
-        "SELECT id, title, body, updated_at
-         FROM documents
-         WHERE user_id = $1 AND deleted_at IS NULL
+        "SELECT id, title, body, updated_at FROM documents
+         WHERE user_id = ? AND deleted_at IS NULL
          ORDER BY updated_at DESC",
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .fetch_all(pool)
     .await?;
 
     let docs: Vec<DocRow> = doc_rows
         .iter()
-        .map(|r| DocRow {
-            id: r.try_get("id").unwrap(),
-            title: r.try_get("title").unwrap(),
-            body: r.try_get("body").unwrap(),
-            updated_at: r.try_get("updated_at").unwrap(),
+        .map(|r| {
+            let updated_at = r
+                .try_get::<String, _>("updated_at")
+                .unwrap_or_default();
+            DocRow {
+                id: r.try_get::<String, _>("id").unwrap_or_default(),
+                title: r.try_get("title").unwrap_or_default(),
+                body: r.try_get("body").unwrap_or_default(),
+                updated_at,
+            }
         })
         .collect();
 
-    // Fetch chat sessions + messages.
     let session_rows = sqlx::query(
-        "SELECT id, title FROM chat_sessions WHERE user_id = $1 ORDER BY created_at DESC",
+        "SELECT id, title FROM chat_sessions WHERE user_id = ? ORDER BY created_at DESC",
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .fetch_all(pool)
     .await?;
 
     let mut chat_sessions: Vec<ChatSession> = Vec::new();
     for sr in &session_rows {
-        let sid: Uuid = sr.try_get("id").unwrap();
+        let sid: String = sr.try_get("id").unwrap_or_default();
         let msg_rows = sqlx::query(
-            "SELECT role, content, created_at
-             FROM chat_messages
-             WHERE session_id = $1 AND user_id = $2
+            "SELECT role, content, created_at FROM chat_messages
+             WHERE session_id = ? AND user_id = ?
              ORDER BY created_at ASC",
         )
-        .bind(sid)
-        .bind(user_id)
+        .bind(&sid)
+        .bind(user_id.to_string())
         .fetch_all(pool)
         .await?;
 
         let messages = msg_rows
             .iter()
-            .map(|m| ChatMsg {
-                role: m.try_get("role").unwrap(),
-                content: m.try_get("content").unwrap(),
-                created_at: m
-                    .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-                    .unwrap()
-                    .to_rfc3339(),
+            .map(|m| {
+                let created_at = m
+                    .try_get::<String, _>("created_at")
+                    .unwrap_or_default();
+                ChatMsg {
+                    role: m.try_get("role").unwrap_or_default(),
+                    content: m.try_get("content").unwrap_or_default(),
+                    created_at,
+                }
             })
             .collect();
 
@@ -204,7 +205,6 @@ async fn build_export(
     let email_owned = email.to_owned();
     let now = chrono::Utc::now();
 
-    // ZIP creation is synchronous — run in a blocking thread.
     let bytes = tokio::task::spawn_blocking(move || {
         create_zip(&docs, &chat_sessions, &email_owned, now)
     })
@@ -224,7 +224,6 @@ fn create_zip(
     let opts =
         zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
 
-    // manifest.json
     zip.start_file("manifest.json", opts)?;
     let manifest = serde_json::json!({
         "exported_at": exported_at.to_rfc3339(),
@@ -234,7 +233,6 @@ fn create_zip(
     });
     zip.write_all(serde_json::to_string_pretty(&manifest)?.as_bytes())?;
 
-    // documents/{title}.md
     for doc in docs {
         let safe_title = sanitize_filename(&doc.title);
         let filename = format!("documents/{safe_title}.md");
@@ -242,13 +240,12 @@ fn create_zip(
         let header = format!(
             "# {}\n\n> Last updated: {}\n\n",
             doc.title,
-            doc.updated_at.format("%Y-%m-%d")
+            doc.updated_at,
         );
         zip.write_all(header.as_bytes())?;
         zip.write_all(doc.body.as_bytes())?;
     }
 
-    // chat_history.json
     zip.start_file("chat_history.json", opts)?;
     zip.write_all(serde_json::to_string_pretty(chats)?.as_bytes())?;
 

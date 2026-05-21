@@ -3,23 +3,57 @@ name    = "kaya-oss"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "OSS self-hosted binary for Kaya Suites (Apache 2.0)"
+description = "Unified self-hosted binary for Kaya Suites (Apache 2.0)"
 
 # IMPORTANT: only Apache-licensed crates may appear here.
 # BSL crates (anything under crates/ee/) must never be listed as dependencies.
 [dependencies]
-kaya-core    = { path = "../../crates/kaya-core" }
-kaya-storage = { path = "../../crates/kaya-storage" }
-kaya-server  = { path = "../../crates/kaya-server" }
+kaya-core              = { path = "../../crates/kaya-core" }
+kaya-storage           = { path = "../../crates/kaya-storage" }
+kaya-server            = { path = "../../crates/kaya-server" }
+kaya-tenant            = { path = "../../crates/kaya-tenant" }
+kaya-metering          = { path = "../../crates/kaya-metering" }
+kaya-postgres-storage  = { path = "../../crates/kaya-postgres-storage" }
+kaya-db                = { path = "../../crates/kaya-db" }
 
 axum         = { workspace = true, features = ["macros"] }
 tokio        = { workspace = true }
+serde        = { workspace = true }
 serde_json   = { workspace = true }
+serde_yaml   = { workspace = true }
+anyhow       = { workspace = true }
+uuid         = { workspace = true }
+chrono       = { workspace = true }
 utoipa       = { workspace = true }
 utoipa-axum  = { workspace = true }
-uuid         = { workspace = true }
+dotenvy      = { workspace = true }
 
-tower-http   = { version = "0.6", features = ["cors"] }
-sqlx         = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
-rust-embed   = { version = "8", features = ["axum"] }
-mime_guess   = "2"
+# Auth + sessions
+axum-login                = "0.17"
+tower-sessions            = "0.14"
+tower-sessions-sqlx-store = { version = "0.15", features = ["postgres", "sqlite"] }
+
+# Database
+sqlx = { version = "0.8", features = [
+    "any", "postgres", "sqlite", "mysql", "runtime-tokio", "uuid", "chrono", "tls-rustls",
+] }
+
+# Async trait
+async-trait = { workspace = true }
+
+# Session serialization
+rmp-serde = "1"
+
+# Export archive
+zip = "2"
+
+# Middleware
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# Observability
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Embedded frontend
+rust-embed  = { version = "8", features = ["axum"] }
+mime_guess  = "2"

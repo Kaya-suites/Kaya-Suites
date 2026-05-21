@@ -17,11 +17,11 @@ tokio       = { workspace = true }
 # Auth session management
 axum-login                = "0.17"
 tower-sessions            = "0.14"
-tower-sessions-sqlx-store = { version = "0.15", features = ["postgres"] }
+tower-sessions-sqlx-store = { version = "0.15", features = ["postgres", "sqlite"] }
 
-# Database
+# Database — AnyPool supports all three backends
 sqlx = { version = "0.8", features = [
-    "postgres", "runtime-tokio", "uuid", "chrono",
+    "any", "postgres", "sqlite", "mysql", "runtime-tokio", "chrono",
 ] }
 
 # Password hashing
@@ -33,5 +33,5 @@ tracing = "0.1"
 [dev-dependencies]
 tokio = { workspace = true }
 sqlx  = { version = "0.8", features = [
-    "postgres", "runtime-tokio", "uuid", "chrono",
+    "any", "postgres", "sqlite", "mysql", "runtime-tokio", "chrono",
 ] }

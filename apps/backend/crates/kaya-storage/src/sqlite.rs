@@ -101,6 +101,41 @@ impl SqliteAdapter {
         Ok(Self { inner, reconciled_rx: rx })
     }
 
+    /// Construct from an existing `SqlitePool` (e.g. from the unified main pool).
+    ///
+    /// Migrations are assumed to have been run separately (or are idempotent).
+    /// Reconciliation starts in the background immediately.
+    pub async fn from_pool(
+        pool: SqlitePool,
+        content_dir: PathBuf,
+    ) -> Result<Self, StorageError> {
+        tokio::fs::create_dir_all(&content_dir)
+            .await
+            .map_err(box_err)?;
+
+        run_migrations(&pool).await?;
+
+        let inner = Arc::new(Inner { pool, content_dir });
+
+        let (tx, rx) = watch::channel(false);
+        let inner_bg = Arc::clone(&inner);
+        tokio::spawn(async move {
+            if let Err(e) = reconcile(&inner_bg).await {
+                eprintln!("[kaya-storage] reconciliation error: {e:#}");
+            }
+            let _ = tx.send(true);
+        });
+
+        Ok(Self { inner, reconciled_rx: rx })
+    }
+
+    /// Run SQLite storage migrations on an existing pool.
+    ///
+    /// Idempotent — safe to call on every startup.
+    pub async fn run_migrations(pool: &SqlitePool) -> Result<(), StorageError> {
+        run_migrations(pool).await
+    }
+
     /// Block until the initial reconciliation pass has finished.
     pub async fn wait_for_reconciliation(&self) {
         let mut rx = self.reconciled_rx.clone();
