@@ -65,7 +65,13 @@ export default function SettingsPage() {
       setMetering(await mRes.json());
       fetch("/api/usage")
         .then((r) => (r.ok ? r.json() : null))
-        .then((data) => { if (data) setTokenUsage(data); })
+        .then((data) => {
+          if (data) setTokenUsage({
+            ...data,
+            totalEmbeddingTokens: data.totalEmbeddingTokens ?? 0,
+            byEmbeddingModel: data.byEmbeddingModel ?? [],
+          });
+        })
         .catch(() => {});
     }
     load();
