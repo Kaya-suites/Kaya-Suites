@@ -86,3 +86,57 @@ body {
   text-transform: uppercase;
   letter-spacing: var(--letter-spacing-wide);
 }
+
+[contenteditable="true"]:empty::before {
+  content: attr(data-placeholder);
+  color: var(--color-muted);
+}
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #6b7280;
+}
+
+.token.punctuation {
+  color: #111827;
+}
+
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  color: #b91c1c;
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  color: #0f766e;
+}
+
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  color: #1d4ed8;
+}
+
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #7c3aed;
+}
+
+.token.function,
+.token.class-name {
+  color: #ea580c;
+}

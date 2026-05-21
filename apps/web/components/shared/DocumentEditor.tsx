@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import type { MDXEditorMethods } from "@mdxeditor/editor";
 import type { KayaDocument } from "@/types/chat";
 
 const MDXEditorClient = dynamic(
@@ -22,7 +21,6 @@ export function DocumentEditor({ doc }: Props) {
   const [body, setBody] = useState(doc.body);
   const [tagsInput, setTagsInput] = useState(doc.tags.join(", "));
   const [status, setStatus] = useState<SaveStatus>("idle");
-  const editorRef = useRef<MDXEditorMethods>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isDirty =
@@ -114,8 +112,8 @@ export function DocumentEditor({ doc }: Props) {
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto [&_.mdxeditor]:h-full [&_.mdxeditor-root-contenteditable]:min-h-full">
-        <MDXEditorClient markdown={body} onChange={setBody} editorRef={editorRef} />
+      <div className="flex-1 overflow-y-auto">
+        <MDXEditorClient markdown={body} onChange={setBody} />
       </div>
     </div>
   );

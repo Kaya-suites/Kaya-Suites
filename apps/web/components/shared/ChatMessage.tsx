@@ -1,12 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import type { Components } from "react-markdown";
 import type { ChatMessageData, CitationRef } from "@/types/chat";
 import { DiffReview } from "./DiffReview";
 import { DeleteReview } from "./DeleteReview";
+import { MarkdownContent } from "./markdown/MarkdownContent";
 
 type Props = {
   message: ChatMessageData;
@@ -76,89 +74,6 @@ export function ChatMessage({
   const [approveAllLoading, setApproveAllLoading] = useState(false);
   const isUser = message.role === "user";
 
-  const components: Components = {
-    p({ children }) {
-      const text = typeof children === "string" ? children : null;
-      if (text) {
-        return (
-          <p className="mb-3 last:mb-0 font-mono">
-            <CitationText citations={message.citations} onCitationClick={onCitationClick}>
-              {text}
-            </CitationText>
-          </p>
-        );
-      }
-      const nodes = Array.isArray(children) ? children : [children];
-      return (
-        <p className="mb-3 last:mb-0 font-mono">
-          {nodes.map((child, i) =>
-            typeof child === "string" ? (
-              <CitationText key={i} citations={message.citations} onCitationClick={onCitationClick}>
-                {child}
-              </CitationText>
-            ) : (
-              child
-            ),
-          )}
-        </p>
-      );
-    },
-    code({ children, className }) {
-      const isBlock = className?.startsWith("language-");
-      if (isBlock) {
-        return (
-          <code className="block bg-[var(--color-muted-bg)] border-2 border-black p-3 text-xs font-mono text-black overflow-x-auto whitespace-pre">
-            {children}
-          </code>
-        );
-      }
-      return (
-        <code className="bg-[var(--color-muted-bg)] border border-black px-1 py-0.5 text-xs font-mono text-black">
-          {children}
-        </code>
-      );
-    },
-    pre({ children }) {
-      return <pre className="mb-3 last:mb-0">{children}</pre>;
-    },
-    ul({ children }) {
-      return <ul className="list-disc pl-5 mb-3 last:mb-0 space-y-1 font-mono">{children}</ul>;
-    },
-    ol({ children }) {
-      return <ol className="list-decimal pl-5 mb-3 last:mb-0 space-y-1 font-mono">{children}</ol>;
-    },
-    li({ children }) {
-      return <li className="text-black font-mono">{children}</li>;
-    },
-    strong({ children }) {
-      return <strong className="font-bold text-black">{children}</strong>;
-    },
-    a({ href, children }) {
-      return (
-        <a href={href} className="text-[var(--color-accent)] underline font-bold hover:opacity-70">
-          {children}
-        </a>
-      );
-    },
-    table({ children }) {
-      return (
-        <div className="overflow-x-auto mb-3 last:mb-0">
-          <table className="text-xs border-collapse w-full border-2 border-black font-mono">{children}</table>
-        </div>
-      );
-    },
-    th({ children }) {
-      return (
-        <th className="border-2 border-black px-3 py-1.5 bg-[var(--color-muted-bg)] text-left font-bold text-black text-xs uppercase tracking-wide">
-          {children}
-        </th>
-      );
-    },
-    td({ children }) {
-      return <td className="border-2 border-black px-3 py-1.5 text-black font-mono">{children}</td>;
-    },
-  };
-
   if (isUser) {
     return (
       <div className="flex justify-end mb-4">
@@ -200,9 +115,14 @@ export function ChatMessage({
           style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-bubble)" }}
         >
           {message.content ? (
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-              {message.content}
-            </ReactMarkdown>
+            <MarkdownContent
+              markdown={message.content}
+              decorateText={(text) => (
+                <CitationText citations={message.citations} onCitationClick={onCitationClick}>
+                  {text}
+                </CitationText>
+              )}
+            />
           ) : null}
 
           {isStreaming && (

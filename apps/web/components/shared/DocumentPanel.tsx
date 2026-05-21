@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type { KayaDocument } from "@/types/chat";
+import { MarkdownContent } from "./markdown/MarkdownContent";
 
 type Props = {
   docId: string | null;
@@ -135,7 +134,7 @@ export function DocumentPanel({ docId, scrollToParagraphId, refreshKey, onClose 
         )}
         {!loading && doc && (
           <div className="prose max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{doc.body}</ReactMarkdown>
+            <MarkdownContent markdown={doc.body} />
           </div>
         )}
       </div>

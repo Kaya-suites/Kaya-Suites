@@ -1,10 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import type { MDXEditorMethods } from "@mdxeditor/editor";
 
 const MDXEditorClient = dynamic(
   () => import("@/components/shared/MDXEditorClient").then((m) => m.MDXEditorClient),
@@ -13,7 +12,6 @@ const MDXEditorClient = dynamic(
 
 export default function NewDocumentPage() {
   const router = useRouter();
-  const editorRef = useRef<MDXEditorMethods>(null);
   const [title, setTitle] = useState("");
   const [tagsInput, setTagsInput] = useState("");
   const [body, setBody] = useState("");
@@ -103,8 +101,8 @@ export default function NewDocumentPage() {
       </div>
 
       {/* Editor */}
-      <div className="flex-1 overflow-y-auto [&_.mdxeditor]:h-full [&_.mdxeditor-root-contenteditable]:min-h-full">
-        <MDXEditorClient markdown={body} onChange={setBody} editorRef={editorRef} />
+      <div className="flex-1 overflow-y-auto">
+        <MDXEditorClient markdown={body} onChange={setBody} />
       </div>
     </div>
   );

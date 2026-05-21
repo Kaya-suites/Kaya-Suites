@@ -191,6 +191,8 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
   const [dropIndicator, setDropIndicator] = useState<DropIndicatorState | null>(null);
   const [blockMenuOpen, setBlockMenuOpen] = useState<string | null>(null);
   const [slashMenuPos, setSlashMenuPos] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
+  const [canUndo, setCanUndo] = useState(false);
+  const undoStackRef = useRef<MarkdownBlock[][]>([]);
   const dragIndexRef = useRef<number | null>(null);
   const lastEmittedRef = useRef(markdown);
   const editableRefs = useRef(new Map<string, HTMLDivElement>());
@@ -238,6 +240,28 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
     return () => document.removeEventListener("click", handleGlobalClick);
   }, [blockMenuOpen]);
 
+  useEffect(() => {
+    function handleKeyDown(e: Event) {
+      const ke = e as globalThis.KeyboardEvent;
+      if (!(ke.ctrlKey || ke.metaKey) || ke.key !== "z" || ke.shiftKey) return;
+      if ((document.activeElement as HTMLElement)?.isContentEditable) return;
+      ke.preventDefault();
+      const stack = undoStackRef.current;
+      if (stack.length === 0) return;
+      const snapshot = stack[stack.length - 1];
+      undoStackRef.current = stack.slice(0, -1);
+      setCanUndo(undoStackRef.current.length > 0);
+      setBlocks(snapshot);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  function pushHistory(current: MarkdownBlock[]) {
+    undoStackRef.current = [...undoStackRef.current.slice(-49), current];
+    setCanUndo(true);
+  }
+
   function updateBlock(blockId: string, updater: (block: MarkdownBlock) => MarkdownBlock) {
     setBlocks((current) =>
       current.map((block) => (block.id === blockId ? normalizeBlockHtml(updater(block)) : block)),
@@ -246,6 +270,7 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
 
   function insertBlockAfter(blockId: string, block: MarkdownBlock) {
     setBlocks((current) => {
+      pushHistory(current);
       const index = current.findIndex((item) => item.id === blockId);
       if (index === -1) return [...current, block];
       const next = [...current];
@@ -256,12 +281,16 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
   }
 
   function replaceBlock(blockId: string, nextBlock: MarkdownBlock) {
-    setBlocks((current) => current.map((block) => (block.id === blockId ? nextBlock : block)));
+    setBlocks((current) => {
+      pushHistory(current);
+      return current.map((block) => (block.id === blockId ? nextBlock : block));
+    });
     setActiveBlockId(nextBlock.id);
   }
 
   function removeBlock(blockId: string) {
     setBlocks((current) => {
+      pushHistory(current);
       if (current.length === 1) return [createDefaultBlock("paragraph")];
       return current.filter((block) => block.id !== blockId);
     });
@@ -470,6 +499,15 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
             {renderBlockTypeOptions()}
           </select>
 
+          <ToolbarButton label="↩ Undo" onClick={() => {
+            const stack = undoStackRef.current;
+            if (stack.length === 0) return;
+            const snapshot = stack[stack.length - 1];
+            undoStackRef.current = stack.slice(0, -1);
+            setCanUndo(undoStackRef.current.length > 0);
+            setBlocks(snapshot);
+          }} disabled={!canUndo} />
+          <div className="h-5 w-px bg-black/20" />
           <ToolbarButton label="B" onClick={() => applyInlineCommand("bold")} />
           <ToolbarButton label="I" onClick={() => applyInlineCommand("italic")} />
           <ToolbarButton label="S" onClick={() => applyInlineCommand("strikeThrough")} />
@@ -626,7 +664,10 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
                     setDropIndicator(null);
                     return;
                   }
-                  setBlocks((current) => moveBlock(current, fromIndex, adjustedIndex));
+                  setBlocks((current) => {
+                    pushHistory(current);
+                    return moveBlock(current, fromIndex, adjustedIndex);
+                  });
                   dragIndexRef.current = null;
                   setDraggingBlockId(null);
                   setDropIndicator(null);
@@ -805,13 +846,14 @@ function BlockShell({
   );
 }
 
-function ToolbarButton({ label, onClick }: { label: string; onClick: () => void }) {
+function ToolbarButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
   return (
     <button
       type="button"
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
-      className="border-2 border-black bg-white px-2 py-1 text-[11px] font-bold uppercase tracking-wide font-mono"
+      disabled={disabled}
+      className="border-2 border-black bg-white px-2 py-1 text-[11px] font-bold uppercase tracking-wide font-mono disabled:opacity-35 disabled:cursor-not-allowed"
       style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
     >
       {label}
