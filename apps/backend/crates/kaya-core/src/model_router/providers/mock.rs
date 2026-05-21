@@ -7,8 +7,8 @@ use futures::stream::BoxStream;
 
 use crate::error::KayaError;
 
-use super::meter::TokenUsage;
-use super::{
+use super::super::meter::TokenUsage;
+use super::super::{
     CompletionRequest, CompletionResponse, EmbeddingRequest, EmbeddingResponse, LlmProvider,
     OperationType, StreamChunk, StreamItem, ToolCallRequest, ToolCallResponse,
 };
@@ -70,9 +70,7 @@ impl LlmProvider for MockProvider {
         let mut items: Vec<Result<StreamItem, KayaError>> = self
             .stream_chunks
             .iter()
-            .map(|s| {
-                Ok(StreamItem::Chunk(StreamChunk { delta: s.clone() }))
-            })
+            .map(|s| Ok(StreamItem::Chunk(StreamChunk { delta: s.clone() })))
             .collect();
 
         items.push(Ok(StreamItem::Usage(TokenUsage {

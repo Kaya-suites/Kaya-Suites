@@ -1,43 +1,42 @@
-//! OpenAI provider backed by `rig-core`.
+//! Anthropic provider backed by `rig-core`.
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use futures::StreamExt;
-use rig_core::client::{CompletionClient, EmbeddingsClient};
+use rig_core::client::CompletionClient;
 use rig_core::completion::{CompletionModel, GetTokenUsage, ToolDefinition as RigToolDefinition};
-use rig_core::embeddings::EmbeddingModel;
 use rig_core::message::AssistantContent;
-use rig_core::providers::openai;
-use rig_core::providers::openai::responses_api::CompletionResponse as OpenAIResponse;
+use rig_core::providers::anthropic;
+use rig_core::providers::anthropic::completion::CompletionResponse as AnthropicResponse;
 use rig_core::streaming::StreamedAssistantContent;
 
 use crate::error::KayaError;
 
-use super::meter::TokenUsage;
-use super::{
+use super::super::meter::TokenUsage;
+use super::super::{
     CompletionRequest as KayaCompletionRequest, CompletionResponse, EmbeddingRequest,
-    EmbeddingResponse, LlmProvider, OperationType, StreamChunk, StreamItem, ToolCallRequest,
-    ToolCallResponse, ToolCallResult,
+    EmbeddingResponse, LlmProvider, StreamChunk, StreamItem, ToolCallRequest, ToolCallResponse,
+    ToolCallResult,
 };
 
 const DEFAULT_MAX_TOKENS: u32 = 4096;
 
-pub struct OpenAIProvider {
+pub struct AnthropicProvider {
     api_key: String,
 }
 
-impl OpenAIProvider {
+impl AnthropicProvider {
     pub fn new(api_key: String) -> Self {
         Self { api_key }
     }
 
-    fn client(&self) -> Result<openai::Client, KayaError> {
-        openai::Client::new(&self.api_key)
+    fn client(&self) -> Result<anthropic::Client, KayaError> {
+        anthropic::Client::new(&self.api_key)
             .map_err(|e| KayaError::Internal(e.to_string()))
     }
 }
 
-fn rig_tools(tools: &[super::ToolDefinition]) -> Vec<RigToolDefinition> {
+fn rig_tools(tools: &[super::super::ToolDefinition]) -> Vec<RigToolDefinition> {
     tools
         .iter()
         .map(|t| RigToolDefinition {
@@ -85,12 +84,12 @@ fn extract_tool_or_text(
     (None, None)
 }
 
-fn completion_usage(raw: &OpenAIResponse) -> (u32, u32, String) {
-    let model = raw.model.clone();
-    match raw.usage.as_ref().and_then(|u| u.token_usage()) {
-        Some(u) => (u.input_tokens as u32, u.output_tokens as u32, model),
-        None => (0, 0, model),
-    }
+fn completion_usage(raw: &AnthropicResponse) -> (u32, u32, String) {
+    (
+        raw.usage.input_tokens as u32,
+        raw.usage.output_tokens as u32,
+        raw.model.clone(),
+    )
 }
 
 fn streaming_usage<R: GetTokenUsage>(raw: &R, model_fallback: &str) -> (u32, u32, String) {
@@ -105,7 +104,7 @@ fn streaming_usage<R: GetTokenUsage>(raw: &R, model_fallback: &str) -> (u32, u32
 }
 
 #[async_trait]
-impl LlmProvider for OpenAIProvider {
+impl LlmProvider for AnthropicProvider {
     async fn complete(
         &self,
         request: KayaCompletionRequest,
@@ -174,23 +173,12 @@ impl LlmProvider for OpenAIProvider {
         Ok(Box::pin(adapted))
     }
 
-    async fn embed(&self, request: EmbeddingRequest) -> Result<EmbeddingResponse, KayaError> {
-        let client = self.client()?;
-        let model = client.embedding_model(&request.model);
-        let embedding = model
-            .embed_text(&request.text)
-            .await
-            .map_err(|e| KayaError::Internal(e.to_string()))?;
-
-        Ok(EmbeddingResponse {
-            embedding: embedding.vec.iter().map(|&v| v as f32).collect(),
-            usage: TokenUsage {
-                input_tokens: 0,
-                output_tokens: 0,
-                model: request.model,
-                operation: OperationType::Embedding,
-            },
-        })
+    async fn embed(&self, _request: EmbeddingRequest) -> Result<EmbeddingResponse, KayaError> {
+        Err(KayaError::Internal(
+            "Anthropic does not provide an embeddings endpoint; \
+             route OperationType::Embedding to OpenAI or Gemini"
+                .to_owned(),
+        ))
     }
 
     async fn tool_call(

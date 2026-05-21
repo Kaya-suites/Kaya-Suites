@@ -14,34 +14,31 @@
 //!     provider: anthropic
 //!     model: claude-opus-4-6
 //!   stale_detection:
-//!     provider: openai
-//!     model: gpt-4o-mini
+//!     provider: gemini
+//!     model: gemini-2.0-flash
 //!   embedding:
-//!     provider: openai
-//!     model: text-embedding-3-small
+//!     provider: gemini
+//!     model: text-embedding-004
 //!
 //! providers:
 //!   openai:
 //!     api_key_env: OPENAI_API_KEY
 //!   anthropic:
 //!     api_key_env: ANTHROPIC_API_KEY
+//!   gemini:
+//!     api_key_env: GEMINI_API_KEY
 //! ```
 //!
 //! # Rule
 //!
-//! **No code outside a provider implementation file (`anthropic.rs`, `openai.rs`) may
-//! import a vendor SDK.** All LLM calls in business logic must go through
-//! [`LlmProvider`] or [`ModelRouter`].
+//! **No code outside a provider implementation file (`providers/anthropic.rs`,
+//! `providers/openai.rs`, `providers/gemini.rs`) may import a vendor SDK.**
+//! All LLM calls in business logic must go through [`LlmProvider`] or [`ModelRouter`].
 
 pub mod config;
 pub mod meter;
+pub mod providers;
 pub mod router;
-
-mod anthropic;
-mod openai;
-
-#[cfg(test)]
-pub mod mock;
 
 pub use config::ConfigError;
 pub use meter::{Meter, TokenUsage};
@@ -188,7 +185,7 @@ mod tests {
 
     use futures::StreamExt;
 
-    use super::mock::MockProvider;
+    use super::providers::mock::MockProvider;
     use super::*;
 
     fn router_with_mock(mock: Arc<MockProvider>) -> ModelRouter {

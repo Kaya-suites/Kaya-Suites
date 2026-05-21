@@ -12,10 +12,11 @@ use futures::stream::BoxStream;
 
 use crate::error::KayaError;
 
-use super::anthropic::AnthropicProvider;
 use super::config::{ConfigError, RoutingConfig};
 use super::meter::Meter;
-use super::openai::OpenAIProvider;
+use super::providers::anthropic::AnthropicProvider;
+use super::providers::gemini::GeminiProvider;
+use super::providers::openai::OpenAIProvider;
 use super::{
     CompletionRequest, CompletionResponse, EmbeddingRequest, EmbeddingResponse, LlmProvider,
     OperationType, StreamItem, ToolCallRequest, ToolCallResponse,
@@ -45,6 +46,7 @@ impl ModelRouter {
             let api_key = config.resolve_api_key(name)?;
             let provider: Arc<dyn LlmProvider> = match name.as_str() {
                 "anthropic" => Arc::new(AnthropicProvider::new(api_key)),
+                "gemini" => Arc::new(GeminiProvider::new(api_key)),
                 "openai" => Arc::new(OpenAIProvider::new(api_key)),
                 other => return Err(ConfigError::UnknownProvider(other.to_owned())),
             };
