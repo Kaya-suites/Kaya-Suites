@@ -85,3 +85,12 @@
   --font-family-mono:   var(--font-mono);
   --radius-DEFAULT:     var(--border-radius);
 }
+/**         STYLES FOR THE DATA TABLE */
+
+th:not([data-tool-cell="true"]) {
+   background-color: #E8F4F8;
+   border-style: undefined
+}
+tbody td:not([data-tool-cell])[data-active="false"] {
+   border: #000000
+}

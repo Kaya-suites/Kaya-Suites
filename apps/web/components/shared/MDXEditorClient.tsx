@@ -1,6 +1,7 @@
 "use client";
 
 import "@mdxeditor/editor/style.css";
+
 import {
   MDXEditor,
   type MDXEditorMethods,
@@ -32,13 +33,15 @@ type Props = {
   editorRef?: ForwardedRef<MDXEditorMethods>;
 };
 
+
+
 export function MDXEditorClient({ markdown, onChange, editorRef }: Props) {
   return (
     <MDXEditor
       ref={editorRef}
       markdown={markdown}
       onChange={onChange}
-      contentEditableClassName="prose prose-stone max-w-none min-h-full px-6 py-4 focus:outline-none"
+      contentEditableClassName=" max-w-none min-h-full px-6 py-4 focus:outline-none"
       plugins={[
         headingsPlugin(),
         listsPlugin(),

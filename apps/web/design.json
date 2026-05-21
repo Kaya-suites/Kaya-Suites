@@ -78,5 +78,16 @@
       "assistantForeground": "#000000",
       "shadow":              "3px 3px 0px #000000"
     }
+  },
+  "mdxEditor": {
+    "table": {
+      "dataToolCellTrue":{
+        "border": "none",
+        "background": "#E8F4F8"
+      },
+      "dataToolCellFalse": {
+        "border": "#000000"
+      }
+    }
   }
 }
