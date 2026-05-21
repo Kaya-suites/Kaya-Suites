@@ -7,6 +7,7 @@ mod list_documents;
 mod propose_edit;
 mod read_document;
 mod search_documents;
+mod update_document;
 
 pub use create_document::CreateDocument;
 pub use delete_document::DeleteDocument;
@@ -15,6 +16,7 @@ pub use list_documents::ListDocuments;
 pub use propose_edit::ProposeEdit;
 pub use read_document::ReadDocument;
 pub use search_documents::SearchDocuments;
+pub use update_document::UpdateDocument;
 
 use std::sync::Arc;
 use super::tool::Tool;
@@ -28,6 +30,7 @@ pub fn default_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(CreateDocument),
         Arc::new(DeleteDocument),
         Arc::new(ProposeEdit),
+        Arc::new(UpdateDocument),
         Arc::new(FindStaleReferences),
     ]
 }

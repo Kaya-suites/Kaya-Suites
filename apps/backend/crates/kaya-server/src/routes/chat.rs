@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use kaya_core::{
     ParagraphChange, ProposedEdit, ProposedEditKind, SessionStorage, StorageAdapter,
+    diff::compute_paragraph_diff,
     agent::tools::default_tools,
     agent::{AgentContext, AgentEvent, AgentLoop, InvocationLog},
     auth::UserSession,
@@ -332,19 +333,37 @@ async fn build_edit_sse(
         ProposedEditKind::Modify {
             document_id, diff, ..
         } => {
-            let first = diff.changes.iter().find_map(|c| {
-                if let ParagraphChange::Modify {
-                    paragraph_id,
-                    old_text,
-                    new_text,
-                } = c
-                {
-                    Some((paragraph_id.clone(), old_text.clone(), new_text.clone()))
-                } else {
-                    None
+            if diff.changes.is_empty() {
+                return None;
+            }
+            // Aggregate all changed paragraphs so the review card shows the full diff.
+            let mut old_parts: Vec<&str> = Vec::new();
+            let mut new_parts: Vec<&str> = Vec::new();
+            for c in &diff.changes {
+                match c {
+                    ParagraphChange::Modify { old_text, new_text, .. } => {
+                        old_parts.push(old_text.as_str());
+                        new_parts.push(new_text.as_str());
+                    }
+                    ParagraphChange::Remove { text, .. } => {
+                        old_parts.push(text.as_str());
+                    }
+                    ParagraphChange::Add { text, .. } => {
+                        new_parts.push(text.as_str());
+                    }
                 }
-            })?;
-            (Some(*document_id), first.0, first.1, first.2)
+            }
+            let first_id = match &diff.changes[0] {
+                ParagraphChange::Modify { paragraph_id, .. } => paragraph_id.clone(),
+                ParagraphChange::Remove { paragraph_id, .. } => paragraph_id.clone(),
+                ParagraphChange::Add { paragraph_id, .. } => paragraph_id.clone(),
+            };
+            (
+                Some(*document_id),
+                first_id,
+                old_parts.join("\n\n"),
+                new_parts.join("\n\n"),
+            )
         }
         ProposedEditKind::Create { title: _, body } => {
             (None, "p0".to_string(), String::new(), body.clone())
@@ -352,12 +371,36 @@ async fn build_edit_sse(
         ProposedEditKind::UpdateContent {
             document_id,
             new_content,
-        } => (
-            Some(*document_id),
-            "p0".to_string(),
-            String::new(),
-            new_content.clone(),
-        ),
+        } => {
+            let old_body = storage
+                .get_document(*document_id)
+                .await
+                .map(|d| d.body)
+                .unwrap_or_default();
+            let diff = compute_paragraph_diff(&old_body, new_content);
+            let mut old_parts: Vec<&str> = Vec::new();
+            let mut new_parts: Vec<&str> = Vec::new();
+            for c in &diff.changes {
+                match c {
+                    ParagraphChange::Modify { old_text, new_text, .. } => {
+                        old_parts.push(old_text.as_str());
+                        new_parts.push(new_text.as_str());
+                    }
+                    ParagraphChange::Remove { text, .. } => {
+                        old_parts.push(text.as_str());
+                    }
+                    ParagraphChange::Add { text, .. } => {
+                        new_parts.push(text.as_str());
+                    }
+                }
+            }
+            (
+                Some(*document_id),
+                "p0".to_string(),
+                old_parts.join("\n\n"),
+                new_parts.join("\n\n"),
+            )
+        }
         ProposedEditKind::DeleteDocument { document_id } => {
             let doc_title = storage
                 .get_document(*document_id)
