@@ -35,10 +35,7 @@ export function OnboardingChecklist({
     if (ahaComplete && !prevAha.current) {
       prevAha.current = true;
       setCelebrating(true);
-      const t = setTimeout(() => {
-        setCelebrating(false);
-        setExpanded(false);
-      }, 2000);
+      const t = setTimeout(() => { setCelebrating(false); setExpanded(false); }, 2000);
       return () => clearTimeout(t);
     }
   }, [ahaComplete]);
@@ -52,149 +49,134 @@ export function OnboardingChecklist({
 
   async function handleSeedDemo() {
     setSeeding(true);
-    try {
-      await onSeedDemo();
-    } finally {
-      setSeeding(false);
-    }
+    try { await onSeedDemo(); } finally { setSeeding(false); }
   }
 
   if (!expanded) {
     return (
       <button
         onClick={() => setExpanded(true)}
-        className="fixed bottom-4 left-4 z-50 flex items-center gap-2 bg-white border border-stone-200 rounded-full px-3 py-1.5 shadow-sm text-sm text-stone-700 hover:bg-stone-50 transition-colors"
+        className="fixed bottom-4 left-4 z-50 flex items-center gap-2 bg-[var(--color-surface)] border-2 border-black px-3 py-1.5 text-xs text-black font-bold font-mono uppercase tracking-wider hover:bg-[var(--color-muted-bg)] transition-all"
+        style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
       >
         <svg viewBox="0 0 20 20" className="w-4 h-4 -rotate-90 flex-shrink-0">
-          <circle cx="10" cy="10" r="8" fill="none" stroke="#e7e5e4" strokeWidth="2.5" />
+          <circle cx="10" cy="10" r="8" fill="none" stroke="#000" strokeWidth="2.5" />
           <circle
-            cx="10"
-            cy="10"
-            r="8"
-            fill="none"
-            stroke={allDone ? "#16a34a" : "#44403c"}
+            cx="10" cy="10" r="8" fill="none"
+            stroke={allDone ? "var(--color-success)" : "var(--color-accent)"}
             strokeWidth="2.5"
             strokeDasharray={`${(progressPct / 100) * 50.3} 50.3`}
             strokeLinecap="round"
           />
         </svg>
-        <span className="font-medium">{doneCount} / {totalCount} steps complete</span>
+        <span>{doneCount} / {totalCount} steps</span>
       </button>
     );
   }
 
   return (
-    <div className="fixed bottom-4 left-4 z-50 w-[280px]">
+    <div className="fixed bottom-4 left-4 z-50 w-[290px]">
       <div
-        className={`bg-white border rounded-xl shadow-md overflow-hidden ${
-          celebrating ? "border-green-300" : "border-stone-200"
-        }`}
+        className="bg-[var(--color-surface)] border-2 overflow-hidden"
+        style={{
+          borderColor: celebrating ? "var(--color-success)" : "var(--color-border)",
+          borderRadius: "var(--border-radius)",
+          boxShadow: celebrating ? "4px 4px 0px var(--color-success)" : "var(--shadow-card)",
+        }}
       >
-        {/* Header */}
         <div
-          className={`flex items-center justify-between px-4 py-3 border-b ${
-            celebrating ? "bg-green-50 border-green-200" : "border-stone-100"
-          }`}
+          className="flex items-center justify-between px-4 py-3 border-b-2"
+          style={{ borderColor: celebrating ? "var(--color-success)" : "var(--color-border)", background: celebrating ? "#C8F0D8" : "var(--color-background)" }}
         >
           <div className="flex items-center gap-2">
-            <div className="w-5 h-5 rounded-full bg-stone-800 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
+            <div
+              className="w-5 h-5 border-2 border-black bg-black flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 font-mono"
+              style={{ borderRadius: "var(--border-radius)" }}
+            >
               K
             </div>
-            <span className="text-sm font-semibold text-stone-800">
-              {celebrating ? "Great work — keep going!" : "Get started with Kaya"}
+            <span className="text-xs font-bold text-black uppercase tracking-wider font-mono">
+              {celebrating ? "GREAT WORK!" : "GET STARTED"}
             </span>
           </div>
           <button
             onClick={onDismiss}
-            className="text-stone-400 hover:text-stone-600 transition-colors flex-shrink-0"
+            className="text-black hover:text-[var(--color-muted)] transition-colors flex-shrink-0 border-2 border-transparent hover:border-black p-0.5"
+            style={{ borderRadius: "var(--border-radius)" }}
             title="Dismiss"
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path
-                d="M1 1l10 10M11 1L1 11"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
+              <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           </button>
         </div>
 
-        {/* Progress bar */}
-        <div className="h-0.5 bg-stone-100">
+        <div className="h-1 bg-[var(--color-muted-bg)]">
           <div
-            className={`h-full transition-all duration-500 ${
-              allDone ? "bg-green-500" : "bg-stone-700"
-            }`}
-            style={{ width: `${progressPct}%` }}
+            className="h-full transition-all duration-500"
+            style={{ width: `${progressPct}%`, background: allDone ? "var(--color-success)" : "var(--color-accent)" }}
           />
         </div>
 
-        {/* Steps */}
         <div className="px-4 py-3 space-y-3">
           {steps.map((step) => (
             <div key={step.id}>
               <div className="flex items-start gap-2.5">
                 <div
-                  className={`mt-0.5 w-4 h-4 rounded-full border flex-shrink-0 flex items-center justify-center transition-colors ${
-                    step.done
-                      ? "bg-stone-800 border-stone-800"
-                      : "border-stone-300"
-                  }`}
+                  className="mt-0.5 w-4 h-4 border-2 flex-shrink-0 flex items-center justify-center transition-colors"
+                  style={{
+                    background: step.done ? "var(--color-accent)" : "transparent",
+                    borderColor: step.done ? "var(--color-accent)" : "var(--color-border)",
+                    borderRadius: "var(--border-radius)",
+                  }}
                 >
                   {step.done && (
                     <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
-                      <path
-                        d="M1 3l2 2 4-4"
-                        stroke="white"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
+                      <path d="M1 3l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   )}
                 </div>
                 <span
-                  className={`text-sm leading-tight ${
-                    step.done ? "line-through text-stone-400" : "text-stone-700"
+                  className={`text-xs leading-tight font-mono ${
+                    step.done ? "line-through text-[var(--color-muted)]" : "text-black font-bold"
                   }`}
                 >
                   {step.label}
                 </span>
               </div>
 
-              {/* add_document CTAs */}
               {step.id === "add_document" && !step.done && (
                 <div className="ml-[26px] mt-2 flex gap-2">
                   <button
                     onClick={handleSeedDemo}
                     disabled={seeding}
-                    className="text-xs px-2.5 py-1 bg-stone-800 text-white rounded-md hover:bg-stone-700 disabled:opacity-50 transition-colors"
+                    className="text-xs px-2.5 py-1 border-2 border-black bg-black text-white font-bold uppercase tracking-wider font-mono disabled:opacity-50 hover:bg-[var(--color-accent)] hover:border-[var(--color-accent)] transition-all"
+                    style={{ borderRadius: "var(--border-radius)" }}
                   >
-                    {seeding ? "Loading…" : "Try a demo doc"}
+                    {seeding ? "Loading…" : "Try demo doc"}
                   </button>
                   <a
                     href="/documents"
-                    className="text-xs px-2.5 py-1 border border-stone-300 text-stone-700 rounded-md hover:bg-stone-50 transition-colors"
+                    className="text-xs px-2.5 py-1 border-2 border-black text-black font-bold uppercase tracking-wider font-mono hover:bg-[var(--color-muted-bg)] transition-all"
+                    style={{ borderRadius: "var(--border-radius)" }}
                   >
-                    Import my own
+                    Import own
                   </a>
                 </div>
               )}
 
-              {/* set_api_key instruction (OSS) */}
               {step.id === "set_api_key" && !step.done && (
                 <div className="ml-[26px] mt-2 space-y-1.5">
-                  <p className="text-xs text-stone-500">
+                  <p className="text-xs text-[var(--color-muted)] font-mono">
                     Add{" "}
-                    <code className="bg-stone-100 px-1 rounded font-mono">
+                    <code className="bg-[var(--color-muted-bg)] border border-black px-1 font-mono">
                       ANTHROPIC_API_KEY
                     </code>{" "}
-                    to your <code className="bg-stone-100 px-1 rounded font-mono">.env</code> file.
+                    to your <code className="bg-[var(--color-muted-bg)] border border-black px-1 font-mono">.env</code> file.
                   </p>
                   <button
                     onClick={() => onMarkComplete("set_api_key")}
-                    className="text-xs text-stone-500 underline hover:text-stone-700 transition-colors"
+                    className="text-xs text-[var(--color-muted)] underline hover:text-black transition-colors font-mono"
                   >
                     I&apos;ve set it
                   </button>
@@ -204,11 +186,10 @@ export function OnboardingChecklist({
           ))}
         </div>
 
-        {/* Footer */}
         <div className="px-4 pb-3">
           <button
             onClick={() => setExpanded(false)}
-            className="text-xs text-stone-400 hover:text-stone-600 transition-colors"
+            className="text-xs text-[var(--color-muted)] hover:text-black transition-colors font-mono font-bold uppercase tracking-wider"
           >
             Minimize
           </button>

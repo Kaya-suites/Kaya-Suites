@@ -17,7 +17,7 @@ const navItems = [
   },
   {
     href: "/documents",
-    label: "Documents",
+    label: "Docs",
     icon: (
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
@@ -46,25 +46,32 @@ export function AppNav() {
   const pathname = usePathname();
 
   return (
-    <aside className="flex flex-col w-44 shrink-0 min-h-screen border-r border-stone-200 bg-stone-50">
-      <div className="px-4 py-4 border-b border-stone-200">
-        <Link href="/" className="font-semibold text-sm tracking-tight text-stone-900 hover:text-stone-600 transition-colors">
+    <aside
+      className="flex flex-col shrink-0 min-h-screen border-r-2 border-black"
+      style={{ width: "var(--nav-width)", background: "var(--color-background)" }}
+    >
+      <div className="px-4 py-4 border-b-2 border-black">
+        <Link
+          href="/"
+          className="font-bold text-xs tracking-wider text-black uppercase hover:text-[var(--color-accent)] transition-colors"
+        >
           Kaya Suites
         </Link>
       </div>
 
-      <nav className="flex-1 py-3 space-y-0.5 px-2">
+      <nav className="flex-1 py-3 space-y-1 px-2">
         {navItems.map(({ href, label, icon }) => {
           const active = pathname === href || pathname.startsWith(href + "/");
           return (
             <Link
               key={href}
               href={href}
-              className={`flex items-center gap-2.5 px-2 py-2 rounded text-xs transition-colors ${
+              className={`flex items-center gap-2.5 px-2 py-2 text-xs font-bold uppercase tracking-wider transition-all border-2 ${
                 active
-                  ? "bg-stone-200 text-stone-900 font-medium"
-                  : "text-stone-500 hover:bg-stone-100 hover:text-stone-800"
+                  ? "bg-[var(--color-accent)] text-white border-black"
+                  : "border-transparent text-black hover:border-black hover:bg-[var(--color-muted-bg)]"
               }`}
+              style={active ? { boxShadow: "var(--shadow-button)" } : {}}
             >
               {icon}
               {label}
@@ -73,10 +80,10 @@ export function AppNav() {
         })}
       </nav>
 
-      <div className="border-t border-stone-200 p-2">
+      <div className="border-t-2 border-black p-2">
         <button
           onClick={logout}
-          className="flex items-center gap-2.5 w-full px-2 py-2 rounded text-xs text-stone-400 hover:bg-stone-100 hover:text-stone-700 transition-colors"
+          className="flex items-center gap-2.5 w-full px-2 py-2 border-2 border-transparent text-xs font-bold uppercase tracking-wider text-[var(--color-muted)] hover:border-black hover:text-black hover:bg-[var(--color-muted-bg)] transition-all"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />

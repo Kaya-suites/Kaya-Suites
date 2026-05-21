@@ -60,19 +60,21 @@ export default function DocumentsPage() {
     }
   }
 
+  const inputClass = "w-full text-sm border-2 border-black px-3 py-2 focus:outline-none focus:border-[var(--color-accent)] bg-white text-black font-mono placeholder:text-[var(--color-muted)]";
+
   return (
-    <div className="h-full overflow-y-auto bg-stone-50">
-      {/* Header */}
-      <div className="bg-white border-b border-stone-200">
+    <div className="h-full overflow-y-auto" style={{ background: "var(--color-background)" }}>
+      <div className="border-b-2 border-black bg-[var(--color-background)]">
         <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
-          <h1 className="text-sm font-semibold text-stone-900">Documents</h1>
+          <h1 className="text-xs font-bold text-black uppercase tracking-wider font-mono">Documents</h1>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-stone-400">
-              {!loading && `${documents.length} document${documents.length !== 1 ? "s" : ""}`}
+            <span className="text-xs text-[var(--color-muted)] font-mono">
+              {!loading && `${documents.length} doc${documents.length !== 1 ? "s" : ""}`}
             </span>
             <button
               onClick={() => { setShowForm((v) => !v); setError(null); }}
-              className="text-xs px-3 py-1.5 bg-stone-800 text-white rounded-md hover:bg-stone-700 transition-colors"
+              className="text-xs px-3 py-1.5 border-2 border-black font-bold uppercase tracking-wider font-mono transition-all hover:bg-[var(--color-muted-bg)]"
+              style={{ borderRadius: "var(--border-radius)", background: showForm ? "var(--color-muted-bg)" : "var(--color-surface)", boxShadow: "var(--shadow-button)" }}
             >
               {showForm ? "Cancel" : "Import"}
             </button>
@@ -80,12 +82,12 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      {/* Import form */}
       {showForm && (
         <div className="max-w-3xl mx-auto mt-4 px-4">
           <form
             onSubmit={handleSubmit}
-            className="bg-white rounded-lg border border-stone-200 shadow-sm p-5 space-y-3"
+            className="bg-[var(--color-surface)] border-2 border-black p-5 space-y-3"
+            style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
           >
             <input
               ref={titleRef}
@@ -93,7 +95,8 @@ export default function DocumentsPage() {
               placeholder="Document title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full text-sm border border-stone-200 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-stone-400 placeholder:text-stone-400"
+              className={inputClass}
+              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
               required
             />
             <textarea
@@ -101,15 +104,17 @@ export default function DocumentsPage() {
               value={content}
               onChange={(e) => setContent(e.target.value)}
               rows={10}
-              className="w-full text-sm font-mono border border-stone-200 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-stone-400 placeholder:text-stone-400 resize-y"
+              className={`${inputClass} resize-y`}
+              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
               required
             />
-            {error && <p className="text-xs text-red-500">{error}</p>}
+            {error && <p className="text-xs text-[var(--color-danger)] font-mono font-bold">{error}</p>}
             <div className="flex justify-end">
               <button
                 type="submit"
                 disabled={submitting || !title.trim() || !content.trim()}
-                className="text-xs px-4 py-2 bg-stone-800 text-white rounded-md hover:bg-stone-700 disabled:opacity-50 transition-colors"
+                className="text-xs px-4 py-2 border-2 border-black bg-[var(--color-accent)] text-white font-bold uppercase tracking-wider font-mono disabled:opacity-50"
+                style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
               >
                 {submitting ? "Saving…" : "Save document"}
               </button>
@@ -118,8 +123,10 @@ export default function DocumentsPage() {
         </div>
       )}
 
-      {/* List */}
-      <div className="max-w-3xl mx-auto py-4 bg-white rounded-lg mt-4 mx-4 shadow-sm border border-stone-200">
+      <div
+        className="max-w-3xl mx-auto py-0 bg-[var(--color-surface)] mt-4 mx-4 border-2 border-black"
+        style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+      >
         <DocumentList documents={documents} loading={loading} />
       </div>
     </div>

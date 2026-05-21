@@ -8,146 +8,91 @@ export const metadata: Metadata = {
 
 const LAST_UPDATED = "May 13, 2026";
 
+const navLinkClass = "text-xs font-bold uppercase tracking-wider text-black hover:text-[var(--color-accent)] transition-colors font-mono";
+
 export default function PrivacyPage() {
   return (
-    <div className="min-h-screen bg-white text-gray-900 font-sans">
-      <nav className="border-b border-gray-100 px-6 py-4 flex items-center justify-between max-w-6xl mx-auto">
-        <Link href="/" className="font-semibold text-lg tracking-tight">Kaya Suites</Link>
+    <div className="min-h-screen font-mono" style={{ background: "var(--color-background)", color: "var(--color-foreground)" }}>
+      <nav className="border-b-2 border-black px-6 py-4 flex items-center justify-between max-w-6xl mx-auto">
+        <Link href="/" className="font-bold text-sm tracking-wider uppercase hover:text-[var(--color-accent)] transition-colors">Kaya Suites</Link>
         <Link
           href="/auth/signin"
-          className="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-700 transition-colors"
+          className="border-2 border-black bg-black text-white px-4 py-2 text-xs font-bold uppercase tracking-wider hover:bg-[var(--color-accent)] hover:border-[var(--color-accent)] transition-all"
+          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
         >
           Sign in
         </Link>
       </nav>
 
       <main className="max-w-2xl mx-auto px-6 py-20">
-        <h1 className="text-3xl font-bold mb-2">Privacy Policy</h1>
-        <p className="text-sm text-gray-400 mb-12">Last updated: {LAST_UPDATED}</p>
+        <h1 className="text-3xl font-black mb-2 uppercase tracking-tight">Privacy Policy</h1>
+        <p className="text-xs text-[var(--color-muted)] mb-12 uppercase tracking-wider">Last updated: {LAST_UPDATED}</p>
 
-        <div className="prose prose-gray prose-sm max-w-none space-y-10 text-gray-700 leading-relaxed">
-          <Section title="1. What we collect">
-            <p>When you create an account we collect your email address. When you use the cloud service we collect:</p>
-            <ul>
-              <li>Document content you create or import.</li>
-              <li>Usage events (operation type, token counts, model used, timestamp) for billing and rate-limit enforcement.</li>
-              <li>Session tokens stored in an HTTP-only cookie.</li>
-              <li>Subscription and billing information processed by Paddle (we receive a Paddle customer ID and subscription ID; we do not store card numbers).</li>
-            </ul>
-          </Section>
-
-          <Section title="2. How we use your data">
-            <ul>
-              <li>To provide the Kaya Suites service: document storage, AI editing loop, search.</li>
-              <li>To calculate and enforce per-user usage limits and spend caps.</li>
-              <li>To send transactional emails (magic-link sign-in, usage alerts) via Resend.</li>
-              <li>To process subscription payments via Paddle.</li>
-            </ul>
-            <p>We do not use your data for advertising and we do not sell it to third parties.</p>
-          </Section>
-
-          <Section title="3. AI and your document content">
-            <p>
-              Edit proposals and document generation are processed by Anthropic (Claude) and OpenAI APIs.
-              Both providers are configured in <strong>zero-data-retention mode</strong>: your content is
-              not logged by the provider and is not used to train their models. Staleness classification
-              and embedding generation are also sent to these APIs under the same policy.
-            </p>
-            <p>
-              If you use the self-hosted OSS binary, your content goes directly from your server to
-              whichever API you configure. We never see it.
-            </p>
-          </Section>
-
-          <Section title="4. Data storage and security">
-            <p>
-              Cloud data is stored in a managed Postgres instance (Neon). Connections are encrypted with
-              TLS. Backups are taken daily and retained for 7 days. Session cookies are HTTP-only,
-              Secure, and SameSite=Lax.
-            </p>
-          </Section>
-
-          <Section title="5. Data retention and deletion">
-            <p>
-              You may export all documents and usage history from your dashboard at any time. To delete
-              your account, email{" "}
-              <a href="mailto:privacy@kaya-suites.com" className="underline">
-                privacy@kaya-suites.com
-              </a>
-              . Account deletion permanently removes all stored documents, usage records, and personal
-              data within 30 days.
-            </p>
-            <p>
-              After subscription cancellation, read access continues until the end of your billing period.
-              Data is retained for 30 days after that to allow re-activation, then permanently deleted.
-            </p>
-          </Section>
-
-          <Section title="6. Cookies">
-            <p>
-              We use a single session cookie (<code>kaya_session</code>) for authentication. No analytics
-              cookies. No third-party tracking.
-            </p>
-          </Section>
-
-          <Section title="7. Third-party services">
-            <ul>
-              <li><strong>Paddle</strong> — subscription billing and tax collection.</li>
-              <li><strong>Resend</strong> — transactional email delivery.</li>
-              <li><strong>Anthropic</strong> — Claude API for edit proposals and generation.</li>
-              <li><strong>OpenAI</strong> — GPT-4o-mini for classification; text-embedding-3-small for search.</li>
-              <li><strong>Neon</strong> — managed Postgres hosting.</li>
-            </ul>
-          </Section>
-
-          <Section title="8. Your rights">
-            <p>
-              Depending on your jurisdiction you may have rights to access, rectify, or erase your
-              personal data, or to object to processing. To exercise these rights, email{" "}
-              <a href="mailto:privacy@kaya-suites.com" className="underline">
-                privacy@kaya-suites.com
-              </a>
-              .
-            </p>
-          </Section>
-
-          <Section title="9. Changes to this policy">
-            <p>
-              We will post updates here and email registered users for material changes. Continued use
-              after the effective date constitutes acceptance.
-            </p>
-          </Section>
-
-          <Section title="10. Contact">
-            <p>
-              Questions?{" "}
-              <a href="mailto:privacy@kaya-suites.com" className="underline">
-                privacy@kaya-suites.com
-              </a>
-            </p>
-          </Section>
+        <div className="space-y-8">
+          {[
+            {
+              title: "1. What we collect",
+              content: (
+                <>
+                  <p>When you create an account we collect your email address. When you use the cloud service we collect:</p>
+                  <ul>
+                    <li>Document content you create or import.</li>
+                    <li>Usage events (operation type, token counts, model used, timestamp).</li>
+                    <li>Session tokens stored in an HTTP-only cookie.</li>
+                    <li>Subscription and billing information processed by Paddle.</li>
+                  </ul>
+                </>
+              ),
+            },
+            {
+              title: "2. How we use your data",
+              content: (
+                <>
+                  <p>To provide the Kaya Suites service, calculate usage limits, send transactional emails, and process payments. We do not use your data for advertising and we do not sell it to third parties.</p>
+                </>
+              ),
+            },
+            {
+              title: "3. AI and your document content",
+              content: (
+                <p>Edit proposals are processed by Anthropic and OpenAI APIs in <strong>zero-data-retention mode</strong>: your content is not logged and is not used to train their models.</p>
+              ),
+            },
+            {
+              title: "4. Data storage and security",
+              content: <p>Cloud data is stored in a managed Postgres instance (Neon). Connections are encrypted with TLS. Session cookies are HTTP-only, Secure, and SameSite=Lax.</p>,
+            },
+            {
+              title: "5. Data retention and deletion",
+              content: <p>You may export all data from your dashboard. Account deletion removes all data within 30 days. Email <a href="mailto:privacy@kaya-suites.com" className="underline font-bold">privacy@kaya-suites.com</a> to request deletion.</p>,
+            },
+            {
+              title: "6. Cookies",
+              content: <p>We use a single session cookie (<code className="bg-[var(--color-muted-bg)] border border-black px-1">kaya_session</code>) for authentication. No analytics cookies. No third-party tracking.</p>,
+            },
+            {
+              title: "7. Contact",
+              content: <p>Questions? <a href="mailto:privacy@kaya-suites.com" className="underline font-bold hover:text-[var(--color-accent)]">privacy@kaya-suites.com</a></p>,
+            },
+          ].map(({ title, content }) => (
+            <section key={title} className="border-2 border-black p-6" style={{ borderRadius: "var(--border-radius)", background: "var(--color-surface)", boxShadow: "var(--shadow-card)" }}>
+              <h2 className="text-xs font-black uppercase tracking-wider mb-3 text-[var(--color-accent)]">{title}</h2>
+              <div className="text-xs text-black leading-relaxed space-y-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1">{content}</div>
+            </section>
+          ))}
         </div>
       </main>
 
-      <footer className="border-t border-gray-100 py-10">
-        <div className="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-400">
+      <footer className="border-t-2 border-black py-10">
+        <div className="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[var(--color-muted)] font-mono uppercase tracking-wider">
           <span>© {new Date().getFullYear()} Kaya Suites</span>
           <div className="flex gap-6">
-            <Link href="/pricing" className="hover:text-gray-700 transition-colors">Pricing</Link>
-            <Link href="/privacy" className="hover:text-gray-700 transition-colors">Privacy</Link>
-            <Link href="/terms" className="hover:text-gray-700 transition-colors">Terms</Link>
+            <Link href="/pricing" className={navLinkClass}>Pricing</Link>
+            <Link href="/privacy" className={navLinkClass}>Privacy</Link>
+            <Link href="/terms" className={navLinkClass}>Terms</Link>
           </div>
         </div>
       </footer>
     </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <h2 className="text-base font-semibold text-gray-900 mb-3">{title}</h2>
-      <div className="space-y-3">{children}</div>
-    </section>
   );
 }

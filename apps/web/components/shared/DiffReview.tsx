@@ -17,19 +17,25 @@ export function DiffReview({ edit, editedText, onTextChange, onApprove, onReject
 
   if (edit.status === "approved") {
     return (
-      <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 flex items-center gap-2">
+      <div
+        className="mt-3 border-2 border-[var(--color-success)] bg-[var(--color-surface)] px-4 py-3 text-sm text-[var(--color-success)] flex items-center gap-2 font-mono"
+        style={{ borderRadius: "var(--border-radius)", boxShadow: "3px 3px 0px var(--color-success)" }}
+      >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="shrink-0">
           <path d="M3 8l4 4 6-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        Edit approved and committed to the document.
+        EDIT APPROVED AND COMMITTED.
       </div>
     );
   }
 
   if (edit.status === "rejected") {
     return (
-      <div className="mt-3 rounded-lg border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-400 line-through">
-        Edit rejected.
+      <div
+        className="mt-3 border-2 border-black bg-[var(--color-surface)] px-4 py-3 text-sm text-[var(--color-muted)] line-through font-mono"
+        style={{ borderRadius: "var(--border-radius)" }}
+      >
+        EDIT REJECTED.
       </div>
     );
   }
@@ -46,32 +52,32 @@ export function DiffReview({ edit, editedText, onTextChange, onApprove, onReject
   }
 
   return (
-    <div className="mt-3 rounded-lg border border-stone-200 bg-white overflow-hidden shadow-sm">
-      <div className="px-4 py-2.5 border-b border-stone-100 bg-stone-50 flex items-center gap-2">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="text-[#1A73E8] shrink-0">
+    <div
+      className="mt-3 border-2 border-black bg-[var(--color-surface)] overflow-hidden"
+      style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+    >
+      <div className="px-4 py-2.5 border-b-2 border-black bg-[var(--color-muted-bg)] flex items-center gap-2">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="text-[var(--color-accent)] shrink-0">
           <rect x="1" y="3" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.4" />
           <path d="M5 7h6M5 9.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
         </svg>
-        <span className="text-xs font-semibold text-stone-600 uppercase tracking-wide">Proposed edit</span>
+        <span className="text-xs font-bold text-black uppercase tracking-wider font-mono">Proposed Edit</span>
       </div>
 
-      {/* Diff view */}
-      <div className="px-4 py-3 font-mono text-sm leading-relaxed border-b border-stone-100">
-        <div className="mb-1.5 text-xs text-stone-400 uppercase tracking-wide font-sans">Changes</div>
+      <div className="px-4 py-3 font-mono text-sm leading-relaxed border-b-2 border-black">
+        <div className="mb-1.5 text-xs text-[var(--color-muted)] uppercase tracking-wider font-bold">Changes</div>
         <p className="whitespace-pre-wrap">
           {diff.map((op, i) => {
-            if (op.type === "equal") {
-              return <span key={i}>{op.text}</span>;
-            }
+            if (op.type === "equal") return <span key={i}>{op.text}</span>;
             if (op.type === "delete") {
               return (
-                <span key={i} className="bg-red-100 text-red-700 line-through rounded px-0.5">
+                <span key={i} className="bg-[#FFD6CC] text-[var(--color-danger)] line-through px-0.5 border border-[var(--color-danger)]">
                   {op.text}
                 </span>
               );
             }
             return (
-              <span key={i} className="bg-emerald-100 text-emerald-700 rounded px-0.5">
+              <span key={i} className="bg-[#C8F0D8] text-[var(--color-success)] px-0.5 border border-[var(--color-success)]">
                 {op.text}
               </span>
             );
@@ -79,29 +85,30 @@ export function DiffReview({ edit, editedText, onTextChange, onApprove, onReject
         </p>
       </div>
 
-      {/* Editable proposed text (FR-16) */}
-      <div className="px-4 py-3 border-b border-stone-100">
-        <div className="mb-1.5 text-xs text-stone-400 uppercase tracking-wide font-sans">Edit before approving</div>
+      <div className="px-4 py-3 border-b-2 border-black">
+        <div className="mb-1.5 text-xs text-[var(--color-muted)] uppercase tracking-wider font-bold font-mono">Edit before approving</div>
         <textarea
           value={editedText}
           onChange={(e) => onTextChange(edit.id, e.target.value)}
           rows={3}
-          className="w-full text-sm font-mono border border-stone-200 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#1A73E8] focus:border-transparent resize-y bg-white text-stone-800 leading-relaxed"
+          className="w-full text-sm font-mono border-2 border-black px-3 py-2 focus:outline-none focus:border-[var(--color-accent)] resize-y bg-white text-black leading-relaxed"
+          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
         />
       </div>
 
-      {/* Actions */}
-      <div className="px-4 py-2.5 flex items-center gap-2 justify-end">
+      <div className="px-4 py-2.5 flex items-center gap-2 justify-end bg-[var(--color-background)]">
         <button
           onClick={() => onReject(edit.id)}
-          className="px-3 py-1.5 text-sm rounded text-stone-500 hover:text-stone-700 hover:bg-stone-100 transition-colors"
+          className="px-3 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black text-black hover:bg-[var(--color-muted-bg)] transition-all font-mono"
+          style={{ borderRadius: "var(--border-radius)" }}
         >
           Reject
         </button>
         <button
           onClick={handleApprove}
           disabled={loading}
-          className="px-4 py-1.5 text-sm rounded bg-[#1A73E8] text-white font-medium hover:bg-[#1557B0] disabled:opacity-60 transition-colors"
+          className="px-4 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black bg-[var(--color-accent)] text-white disabled:opacity-60 transition-all font-mono"
+          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
         >
           {loading ? "Approving…" : "Approve"}
         </button>

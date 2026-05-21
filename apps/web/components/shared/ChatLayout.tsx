@@ -38,7 +38,6 @@ export function ChatLayout() {
   const [docRefreshKey, setDocRefreshKey] = useState(0);
   const onboarding = useOnboarding();
 
-  // On mount: load existing sessions; if none, create one.
   useEffect(() => {
     (async () => {
       const existing = await fetchSessions();
@@ -55,14 +54,11 @@ export function ChatLayout() {
     })();
   }, []);
 
-  // Auto-complete add_document if documents already exist
   useEffect(() => {
     if (!onboarding.isLoaded || onboarding.state?.completed.add_document) return;
     fetch("/api/documents")
       .then((r) => (r.ok ? r.json() : []))
-      .then((docs: unknown[]) => {
-        if (docs.length > 0) onboarding.markStepComplete("add_document");
-      })
+      .then((docs: unknown[]) => { if (docs.length > 0) onboarding.markStepComplete("add_document"); })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboarding.isLoaded]);
@@ -93,9 +89,7 @@ export function ChatLayout() {
   }, []);
 
   const handleSessionRenamed = useCallback((id: string, title: string) => {
-    setSessions((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, title } : s)),
-    );
+    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)));
   }, []);
 
   const handleRenameSession = useCallback(async (id: string, title: string) => {
@@ -108,8 +102,7 @@ export function ChatLayout() {
   }, [handleSessionRenamed]);
 
   return (
-    <div className="flex h-full overflow-hidden bg-stone-50">
-      {/* Session rail — hidden on mobile */}
+    <div className="flex h-full overflow-hidden" style={{ background: "var(--color-background)" }}>
       <div className="hidden md:flex shrink-0">
         <SessionRail
           sessions={sessions}
@@ -120,33 +113,29 @@ export function ChatLayout() {
         />
       </div>
 
-      {/* Chat pane */}
       <div
-        className={`flex flex-col min-w-0 border-r border-stone-200 bg-white transition-all duration-200 ${
+        className={`flex flex-col min-w-0 border-r-2 border-black bg-[var(--color-surface)] transition-all duration-200 ${
           openDocId ? "w-1/2" : "flex-1"
         }`}
       >
-        {/* Pane header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-stone-200 shrink-0">
+        <div className="flex items-center justify-between px-5 py-3 border-b-2 border-black shrink-0 bg-[var(--color-background)]">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-full bg-stone-800 flex items-center justify-center text-white text-xs font-bold">
+            <div
+              className="w-6 h-6 border-2 border-black bg-black flex items-center justify-center text-white text-xs font-bold font-mono"
+              style={{ borderRadius: "var(--border-radius)" }}
+            >
               K
             </div>
-            <span className="text-sm font-semibold text-stone-700">Kaya</span>
+            <span className="text-xs font-bold text-black uppercase tracking-wider font-mono">Kaya</span>
           </div>
-          {/* Mobile: new session button */}
           <button
             onClick={handleNewSession}
-            className="md:hidden p-1.5 rounded hover:bg-stone-100 text-stone-500 transition-colors"
+            className="md:hidden p-1.5 border-2 border-transparent hover:border-black hover:bg-[var(--color-muted-bg)] text-black transition-all"
+            style={{ borderRadius: "var(--border-radius)" }}
             title="New conversation"
           >
             <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M8 3v10M3 8h10"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
+              <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           </button>
         </div>
@@ -160,9 +149,8 @@ export function ChatLayout() {
         />
       </div>
 
-      {/* Document pane */}
       {openDocId && (
-        <div className="flex flex-col flex-1 min-w-0 bg-white">
+        <div className="flex flex-col flex-1 min-w-0 bg-[var(--color-surface)]">
           <DocumentPanel
             docId={openDocId}
             scrollToParagraphId={scrollToParagraphId}
@@ -172,7 +160,6 @@ export function ChatLayout() {
         </div>
       )}
 
-      {/* Onboarding checklist — rendered outside the flex layout to avoid reflowing panes */}
       <OnboardingChecklist
         isLoaded={onboarding.isLoaded}
         dismissed={onboarding.state?.dismissed ?? false}

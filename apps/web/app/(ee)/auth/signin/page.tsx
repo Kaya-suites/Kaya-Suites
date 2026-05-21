@@ -44,22 +44,27 @@ export default function SignInPage() {
     }
   }
 
+  const inputClass = "w-full border-2 border-black px-3 py-2.5 text-sm focus:outline-none focus:border-[var(--color-accent)] bg-white text-black font-mono placeholder:text-[var(--color-muted)]";
+
   return (
-    <main className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+    <main className="min-h-screen flex items-center justify-center px-4" style={{ background: "var(--color-background)" }}>
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <Link href="/" className="font-semibold text-lg tracking-tight text-gray-900">
+          <Link href="/" className="font-bold text-sm tracking-wider text-black uppercase font-mono hover:text-[var(--color-accent)] transition-colors">
             Kaya Suites
           </Link>
         </div>
 
-        <div className="bg-white rounded-2xl border border-gray-200 p-8">
-          <h1 className="font-semibold text-gray-900 mb-1">Sign in</h1>
-          <p className="text-sm text-gray-500 mb-6">Enter your email and password to continue.</p>
+        <div
+          className="bg-[var(--color-surface)] border-2 border-black p-8"
+          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+        >
+          <h1 className="font-bold text-black mb-1 uppercase tracking-wider text-sm font-mono">Sign in</h1>
+          <p className="text-xs text-[var(--color-muted)] mb-6 font-mono">Enter your email and password to continue.</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="email" className="block text-xs text-gray-500 mb-1.5">
+              <label htmlFor="email" className="block text-xs font-bold uppercase tracking-wider text-black mb-1.5 font-mono">
                 Email address
               </label>
               <input
@@ -70,12 +75,13 @@ export default function SignInPage() {
                 placeholder="you@example.com"
                 required
                 autoFocus
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                className={inputClass}
+                style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-xs text-gray-500 mb-1.5">
+              <label htmlFor="password" className="block text-xs font-bold uppercase tracking-wider text-black mb-1.5 font-mono">
                 Password
               </label>
               <input
@@ -85,27 +91,29 @@ export default function SignInPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                className={inputClass}
+                style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
               />
             </div>
 
             {state === "error" && (
-              <p className="text-xs text-red-600">{errorMsg}</p>
+              <p className="text-xs text-[var(--color-danger)] font-mono font-bold">{errorMsg}</p>
             )}
 
             <button
               type="submit"
               disabled={state === "loading" || !email.trim() || !password}
-              className="w-full bg-gray-900 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full border-2 border-black bg-[var(--color-accent)] text-white py-2.5 text-xs font-bold uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed font-mono"
+              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
             >
               {state === "loading" ? "Signing in…" : "Sign in"}
             </button>
           </form>
         </div>
 
-        <p className="text-center text-xs text-gray-400 mt-6">
+        <p className="text-center text-xs text-[var(--color-muted)] mt-6 font-mono">
           New here?{" "}
-          <Link href="/auth/signup" className="underline hover:text-gray-700">
+          <Link href="/auth/signup" className="font-bold text-black underline hover:text-[var(--color-accent)]">
             Create an account
           </Link>
         </p>

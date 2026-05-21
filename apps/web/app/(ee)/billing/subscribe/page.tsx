@@ -27,7 +27,6 @@ export default function SubscribePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load Paddle.js once on mount.
   useEffect(() => {
     if (document.querySelector('script[src*="paddle.js"]')) return;
     const script = document.createElement("script");
@@ -40,7 +39,6 @@ export default function SubscribePage() {
     document.head.appendChild(script);
   }, []);
 
-  // Fetch the current user's ID so we can embed it as Paddle custom data.
   useEffect(() => {
     fetch(`${API_URL}/auth/me`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
@@ -49,73 +47,74 @@ export default function SubscribePage() {
   }, []);
 
   function openCheckout() {
-    if (!window.Paddle) {
-      setError("Checkout is still loading — please try again in a moment.");
-      return;
-    }
-    if (!userId) {
-      setError("You must be signed in to subscribe.");
-      return;
-    }
-    if (!PADDLE_PRICE_ID) {
-      setError("Checkout is not configured. Contact support.");
-      return;
-    }
-
+    if (!window.Paddle) { setError("Checkout is still loading — please try again in a moment."); return; }
+    if (!userId) { setError("You must be signed in to subscribe."); return; }
+    if (!PADDLE_PRICE_ID) { setError("Checkout is not configured. Contact support."); return; }
     setLoading(true);
     setError(null);
-
     window.Paddle.Checkout.open({
       items: [{ priceId: PADDLE_PRICE_ID, quantity: 1 }],
       customData: { user_id: userId },
       successUrl: `${window.location.origin}/billing/success`,
     });
-
-    // Paddle opens an overlay; reset loading after a short delay so the button
-    // doesn't stay disabled if the user closes the overlay without completing.
     setTimeout(() => setLoading(false), 2000);
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-md bg-white rounded-xl border border-gray-200 p-10 shadow-sm">
-        <h1 className="text-2xl font-semibold text-gray-900 mb-2">
+    <main className="min-h-screen flex items-center justify-center px-4 font-mono" style={{ background: "var(--color-background)" }}>
+      <div
+        className="w-full max-w-md bg-[var(--color-surface)] border-2 border-black p-10"
+        style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+      >
+        <h1 className="text-2xl font-black text-black mb-2 uppercase tracking-tight">
           Kaya Suites
         </h1>
-        <p className="text-gray-500 mb-8 leading-relaxed">
+        <p className="text-[var(--color-muted)] mb-8 leading-relaxed text-xs">
           AI-native knowledge base — one plan, everything included.
         </p>
 
-        <div className="rounded-lg border border-gray-100 bg-gray-50 p-6 mb-8">
+        <div
+          className="border-2 border-black bg-[var(--color-muted-bg)] p-6 mb-8"
+          style={{ borderRadius: "var(--border-radius)" }}
+        >
           <div className="flex items-baseline gap-1 mb-4">
-            <span className="text-4xl font-bold text-gray-900">$10</span>
-            <span className="text-gray-500">/month</span>
+            <span className="text-4xl font-black text-black">$10</span>
+            <span className="text-[var(--color-muted)] text-sm">/month</span>
           </div>
-          <ul className="space-y-2 text-sm text-gray-600">
-            <li>✓ Unlimited documents</li>
-            <li>✓ AI-assisted editing &amp; search</li>
-            <li>✓ Semantic search across your knowledge base</li>
-            <li>✓ Data export at any time</li>
-            <li>✓ 30-day money-back guarantee</li>
+          <ul className="space-y-2 text-xs text-black">
+            {[
+              "Unlimited documents",
+              "AI-assisted editing & search",
+              "Semantic search across your knowledge base",
+              "Data export at any time",
+              "30-day money-back guarantee",
+            ].map((f) => (
+              <li key={f} className="flex gap-2">
+                <span className="text-[var(--color-accent)] font-bold">✓</span> {f}
+              </li>
+            ))}
           </ul>
         </div>
 
         {error && (
-          <p className="text-red-600 text-sm mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3">
+          <div
+            className="border-2 border-[var(--color-danger)] bg-[#FFD6CC] px-4 py-3 text-xs text-[var(--color-danger)] font-bold mb-4"
+            style={{ borderRadius: "var(--border-radius)" }}
+          >
             {error}
-          </p>
+          </div>
         )}
 
         <button
           onClick={openCheckout}
           disabled={loading}
-          className="w-full rounded-lg bg-gray-900 text-white py-3 px-6 font-semibold text-base
-                     hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full border-2 border-black bg-[var(--color-accent)] text-white py-3 px-6 font-bold text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
         >
           {loading ? "Opening checkout…" : "Subscribe — $10/month"}
         </button>
 
-        <p className="mt-4 text-center text-xs text-gray-400">
+        <p className="mt-4 text-center text-xs text-[var(--color-muted)]">
           Secure checkout via Paddle. Cancel any time.
         </p>
       </div>

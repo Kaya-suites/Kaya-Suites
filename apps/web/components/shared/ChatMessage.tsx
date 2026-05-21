@@ -22,7 +22,6 @@ type Props = {
   onRejectAll: (messageId: string) => void;
 };
 
-// Replace [n] patterns with superscript citation chips
 function CitationText({
   children,
   citations,
@@ -45,7 +44,8 @@ function CitationText({
               <sup key={i}>
                 <button
                   onClick={() => onCitationClick(ref)}
-                  className="inline-flex items-center justify-center w-4 h-4 text-[10px] font-semibold rounded-full bg-[#1A73E8] text-white hover:bg-[#1557B0] transition-colors leading-none ml-0.5 cursor-pointer"
+                  className="inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold border-2 border-black bg-[var(--color-accent)] text-white leading-none ml-0.5 cursor-pointer font-mono"
+                  style={{ borderRadius: "var(--border-radius)" }}
                   title={`Open: ${ref.title}`}
                 >
                   {label}
@@ -76,33 +76,24 @@ export function ChatMessage({
   const [approveAllLoading, setApproveAllLoading] = useState(false);
   const isUser = message.role === "user";
 
-  // Build markdown components with citation injection
   const components: Components = {
     p({ children }) {
       const text = typeof children === "string" ? children : null;
       if (text) {
         return (
-          <p className="mb-3 last:mb-0">
-            <CitationText
-              citations={message.citations}
-              onCitationClick={onCitationClick}
-            >
+          <p className="mb-3 last:mb-0 font-mono">
+            <CitationText citations={message.citations} onCitationClick={onCitationClick}>
               {text}
             </CitationText>
           </p>
         );
       }
-      // children is an array — map over it
       const nodes = Array.isArray(children) ? children : [children];
       return (
-        <p className="mb-3 last:mb-0">
+        <p className="mb-3 last:mb-0 font-mono">
           {nodes.map((child, i) =>
             typeof child === "string" ? (
-              <CitationText
-                key={i}
-                citations={message.citations}
-                onCitationClick={onCitationClick}
-              >
+              <CitationText key={i} citations={message.citations} onCitationClick={onCitationClick}>
                 {child}
               </CitationText>
             ) : (
@@ -116,13 +107,13 @@ export function ChatMessage({
       const isBlock = className?.startsWith("language-");
       if (isBlock) {
         return (
-          <code className="block bg-stone-100 rounded p-3 text-xs font-mono text-stone-800 overflow-x-auto whitespace-pre">
+          <code className="block bg-[var(--color-muted-bg)] border-2 border-black p-3 text-xs font-mono text-black overflow-x-auto whitespace-pre">
             {children}
           </code>
         );
       }
       return (
-        <code className="bg-stone-100 rounded px-1 py-0.5 text-xs font-mono text-stone-800">
+        <code className="bg-[var(--color-muted-bg)] border border-black px-1 py-0.5 text-xs font-mono text-black">
           {children}
         </code>
       );
@@ -131,20 +122,20 @@ export function ChatMessage({
       return <pre className="mb-3 last:mb-0">{children}</pre>;
     },
     ul({ children }) {
-      return <ul className="list-disc pl-5 mb-3 last:mb-0 space-y-1">{children}</ul>;
+      return <ul className="list-disc pl-5 mb-3 last:mb-0 space-y-1 font-mono">{children}</ul>;
     },
     ol({ children }) {
-      return <ol className="list-decimal pl-5 mb-3 last:mb-0 space-y-1">{children}</ol>;
+      return <ol className="list-decimal pl-5 mb-3 last:mb-0 space-y-1 font-mono">{children}</ol>;
     },
     li({ children }) {
-      return <li className="text-stone-700">{children}</li>;
+      return <li className="text-black font-mono">{children}</li>;
     },
     strong({ children }) {
-      return <strong className="font-semibold text-stone-900">{children}</strong>;
+      return <strong className="font-bold text-black">{children}</strong>;
     },
     a({ href, children }) {
       return (
-        <a href={href} className="text-[#1A73E8] underline hover:text-[#1557B0]">
+        <a href={href} className="text-[var(--color-accent)] underline font-bold hover:opacity-70">
           {children}
         </a>
       );
@@ -152,26 +143,29 @@ export function ChatMessage({
     table({ children }) {
       return (
         <div className="overflow-x-auto mb-3 last:mb-0">
-          <table className="text-sm border-collapse w-full">{children}</table>
+          <table className="text-xs border-collapse w-full border-2 border-black font-mono">{children}</table>
         </div>
       );
     },
     th({ children }) {
       return (
-        <th className="border border-stone-200 px-3 py-1.5 bg-stone-50 text-left font-semibold text-stone-700 text-xs uppercase tracking-wide">
+        <th className="border-2 border-black px-3 py-1.5 bg-[var(--color-muted-bg)] text-left font-bold text-black text-xs uppercase tracking-wide">
           {children}
         </th>
       );
     },
     td({ children }) {
-      return <td className="border border-stone-200 px-3 py-1.5 text-stone-700">{children}</td>;
+      return <td className="border-2 border-black px-3 py-1.5 text-black font-mono">{children}</td>;
     },
   };
 
   if (isUser) {
     return (
       <div className="flex justify-end mb-4">
-        <div className="max-w-[75%] bg-[#1A73E8] text-white rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm leading-relaxed">
+        <div
+          className="max-w-[75%] bg-[var(--color-accent)] text-white border-2 border-black px-4 py-2.5 text-sm leading-relaxed font-mono font-bold"
+          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-bubble)" }}
+        >
           {message.content}
         </div>
       </div>
@@ -193,25 +187,29 @@ export function ChatMessage({
 
   return (
     <div className="flex mb-5 gap-3">
-      {/* Agent avatar */}
-      <div className="shrink-0 w-7 h-7 rounded-full bg-stone-800 flex items-center justify-center text-white text-xs font-semibold mt-0.5">
+      <div
+        className="shrink-0 w-7 h-7 border-2 border-black bg-black flex items-center justify-center text-white text-xs font-bold mt-0.5 font-mono"
+        style={{ borderRadius: "var(--border-radius)" }}
+      >
         K
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="prose prose-sm max-w-none text-stone-700 [&>*:last-child]:mb-0">
+        <div
+          className="border-2 border-black bg-[var(--color-surface)] px-4 py-3 font-mono text-sm text-black [&>*:last-child]:mb-0"
+          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-bubble)" }}
+        >
           {message.content ? (
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
               {message.content}
             </ReactMarkdown>
-          ) : isStreaming ? null : null}
+          ) : null}
 
           {isStreaming && (
-            <span className="inline-block w-2 h-4 ml-1 bg-stone-400 rounded-sm animate-pulse align-text-bottom" />
+            <span className="inline-block w-2 h-4 ml-1 bg-[var(--color-accent)] animate-pulse align-text-bottom" />
           )}
         </div>
 
-        {/* Diff review panels */}
         {message.proposedEdits?.map((edit) => (
           <DiffReview
             key={edit.id}
@@ -223,7 +221,6 @@ export function ChatMessage({
           />
         ))}
 
-        {/* Delete confirmation panels */}
         {message.proposedDeletes?.map((deletion) => (
           <DeleteReview
             key={deletion.id}
@@ -233,35 +230,39 @@ export function ChatMessage({
           />
         ))}
 
-        {/* Batch actions — shown when 2+ items are still pending */}
         {pendingCount >= 2 && (
-          <div className="mt-3 flex items-center gap-2 justify-end border-t border-stone-100 pt-3">
+          <div className="mt-3 flex items-center gap-2 justify-end border-t-2 border-black pt-3">
             <button
               onClick={() => onRejectAll(message.id)}
-              className="px-3 py-1.5 text-sm rounded text-stone-500 hover:text-stone-700 hover:bg-stone-100 transition-colors"
+              className="px-3 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black text-black hover:bg-[var(--color-muted-bg)] transition-all font-mono"
+              style={{ borderRadius: "var(--border-radius)" }}
             >
               Reject all
             </button>
             <button
               onClick={handleApproveAll}
               disabled={approveAllLoading}
-              className="px-4 py-1.5 text-sm rounded bg-[#1A73E8] text-white font-medium hover:bg-[#1557B0] disabled:opacity-60 transition-colors"
+              className="px-4 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black bg-[var(--color-accent)] text-white disabled:opacity-60 font-mono"
+              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
             >
               {approveAllLoading ? "Approving…" : `Approve all (${pendingCount})`}
             </button>
           </div>
         )}
 
-        {/* Citation list */}
         {message.citations.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5">
             {message.citations.map((c) => (
               <button
                 key={c.label}
                 onClick={() => onCitationClick(c)}
-                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full border border-stone-200 bg-white text-xs text-stone-600 hover:border-[#1A73E8] hover:text-[#1A73E8] hover:bg-blue-50 transition-colors"
+                className="inline-flex items-center gap-1.5 px-2 py-1 border-2 border-black bg-[var(--color-surface)] text-xs text-black font-bold uppercase tracking-wide hover:bg-[var(--color-muted-bg)] transition-all font-mono"
+                style={{ borderRadius: "var(--border-radius)" }}
               >
-                <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-stone-200 text-[9px] font-bold text-stone-600">
+                <span
+                  className="inline-flex items-center justify-center w-3.5 h-3.5 border border-black bg-[var(--color-accent)] text-[9px] font-bold text-white"
+                  style={{ borderRadius: "var(--border-radius)" }}
+                >
                   {c.label}
                 </span>
                 {c.title}
