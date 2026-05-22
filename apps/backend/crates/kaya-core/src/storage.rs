@@ -12,6 +12,17 @@ use uuid::Uuid;
 
 // ── Domain types ──────────────────────────────────────────────────────────────
 
+/// A folder that groups documents. Folders form an optional hierarchy via
+/// `parent_id`; a `None` parent means the folder sits at the root.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Folder {
+    pub id: Uuid,
+    pub name: String,
+    pub parent_id: Option<Uuid>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// A knowledge-base document stored in the database.
 ///
 /// Frontmatter fields follow FR-1 / FR-2 from the BRD. The `body` field holds
@@ -32,6 +43,9 @@ pub struct Document {
     pub related_docs: Vec<Uuid>,
     /// Raw Markdown body.
     pub body: String,
+    /// Folder this document belongs to (`None` = root / unfoldered).
+    #[serde(default)]
+    pub folder_id: Option<Uuid>,
 }
 
 /// A paragraph chunk extracted from a document body.
@@ -75,6 +89,10 @@ pub enum StorageError {
     #[error("document not found: {0}")]
     NotFound(Uuid),
 
+    /// The requested folder does not exist.
+    #[error("folder not found: {0}")]
+    FolderNotFound(Uuid),
+
     /// An underlying I/O or database error.
     #[error("backend error: {0}")]
     Backend(#[from] Box<dyn std::error::Error + Send + Sync>),
@@ -103,6 +121,77 @@ pub trait StorageAdapter: Send + Sync {
 
     /// Return all non-deleted documents.
     async fn list_documents(&self) -> Result<Vec<Document>, StorageError>;
+
+    /// Return all non-deleted documents in a specific folder.
+    /// Pass `None` to list documents that have no folder (root).
+    async fn list_documents_in_folder(
+        &self,
+        folder_id: Option<Uuid>,
+    ) -> Result<Vec<Document>, StorageError> {
+        let all = self.list_documents().await?;
+        Ok(all.into_iter().filter(|d| d.folder_id == folder_id).collect())
+    }
+
+    /// Move a document into a folder (or to root when `folder_id` is `None`).
+    async fn move_document_to_folder(
+        &self,
+        _doc_id: Uuid,
+        _folder_id: Option<Uuid>,
+    ) -> Result<(), StorageError> {
+        Err(StorageError::Backend(Box::new(std::io::Error::other(
+            "move_document_to_folder not implemented for this adapter",
+        ))))
+    }
+
+    // ── Folders ───────────────────────────────────────────────────────────────
+
+    /// Create a new folder. `parent_id = None` creates a root folder.
+    async fn create_folder(
+        &self,
+        _name: &str,
+        _parent_id: Option<Uuid>,
+    ) -> Result<Folder, StorageError> {
+        Err(StorageError::Backend(Box::new(std::io::Error::other(
+            "create_folder not implemented for this adapter",
+        ))))
+    }
+
+    /// Retrieve a single folder by ID.
+    async fn get_folder(&self, _id: Uuid) -> Result<Folder, StorageError> {
+        Err(StorageError::Backend(Box::new(std::io::Error::other(
+            "get_folder not implemented for this adapter",
+        ))))
+    }
+
+    /// Return all folders (flat list; callers build the tree from `parent_id`).
+    async fn list_folders(&self) -> Result<Vec<Folder>, StorageError> {
+        Ok(vec![])
+    }
+
+    /// Rename a folder.
+    async fn rename_folder(&self, _id: Uuid, _name: &str) -> Result<Folder, StorageError> {
+        Err(StorageError::Backend(Box::new(std::io::Error::other(
+            "rename_folder not implemented for this adapter",
+        ))))
+    }
+
+    /// Move a folder to a new parent (`None` = move to root).
+    async fn move_folder(
+        &self,
+        _id: Uuid,
+        _new_parent_id: Option<Uuid>,
+    ) -> Result<Folder, StorageError> {
+        Err(StorageError::Backend(Box::new(std::io::Error::other(
+            "move_folder not implemented for this adapter",
+        ))))
+    }
+
+    /// Delete a folder. All documents inside are moved to root (folder_id = NULL).
+    async fn delete_folder(&self, _id: Uuid) -> Result<(), StorageError> {
+        Err(StorageError::Backend(Box::new(std::io::Error::other(
+            "delete_folder not implemented for this adapter",
+        ))))
+    }
 
     // ── Chunks and text index ─────────────────────────────────────────────────
 

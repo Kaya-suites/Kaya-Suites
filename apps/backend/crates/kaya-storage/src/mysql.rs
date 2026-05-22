@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use sqlx::{MySqlPool, Row};
 use uuid::Uuid;
 
-use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter, StorageError};
+use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, Folder, StorageAdapter, StorageError};
 use kaya_core::UserContext;
 
 use crate::document::sha256_hex;
@@ -68,6 +68,13 @@ impl MySqlAdapter {
             .execute(pool)
             .await;
 
+        // Add folder_id column (no-op if already present).
+        let _ = sqlx::query(
+            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS folder_id VARCHAR(36)",
+        )
+        .execute(pool)
+        .await;
+
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS chunks (
                 user_id      VARCHAR(36)  NOT NULL,
@@ -96,6 +103,22 @@ impl MySqlAdapter {
         .await
         .map_err(box_err)?;
 
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS folders (
+                id         VARCHAR(36)  NOT NULL,
+                user_id    VARCHAR(36)  NOT NULL,
+                name       TEXT         NOT NULL,
+                parent_id  VARCHAR(36),
+                created_at VARCHAR(32)  NOT NULL,
+                updated_at VARCHAR(32)  NOT NULL,
+                PRIMARY KEY (id),
+                KEY folders_user_parent_idx (user_id, parent_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+        )
+        .execute(pool)
+        .await
+        .map_err(box_err)?;
+
         Ok(())
     }
 
@@ -110,7 +133,7 @@ impl MySqlAdapter {
 impl StorageAdapter for MySqlAdapter {
     async fn get_document(&self, id: Uuid) -> Result<Document, StorageError> {
         let row = sqlx::query(
-            "SELECT frontmatter_json, body, deleted_at FROM documents
+            "SELECT frontmatter_json, body, deleted_at, folder_id FROM documents
              WHERE id = ? AND user_id = ?",
         )
         .bind(id.to_string())
@@ -128,8 +151,14 @@ impl StorageAdapter for MySqlAdapter {
 
         let body: String = row.try_get("body").map_err(box_err)?;
         let fm_json: String = row.try_get("frontmatter_json").map_err(box_err)?;
+        let folder_id_str: Option<String> = row.try_get("folder_id").map_err(box_err)?;
         let mut doc: Document = serde_json::from_str(&fm_json).map_err(box_err)?;
         doc.body = body;
+        doc.folder_id = folder_id_str
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(box_err)?;
         Ok(doc)
     }
 
@@ -137,17 +166,20 @@ impl StorageAdapter for MySqlAdapter {
         let hash = sha256_hex(doc.body.as_bytes());
         let fm_json = serde_json::to_string(doc).map_err(box_err)?;
         let now = chrono::Utc::now().to_rfc3339();
+        let folder_id_str = doc.folder_id.map(|id| id.to_string());
 
         sqlx::query(
-            "INSERT INTO documents (id, user_id, title, frontmatter_json, content_hash, updated_at, deleted_at, body)
-             VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
+            "INSERT INTO documents
+                 (id, user_id, title, frontmatter_json, content_hash, updated_at, deleted_at, body, folder_id)
+             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
              ON DUPLICATE KEY UPDATE
                title            = VALUES(title),
                frontmatter_json = VALUES(frontmatter_json),
                content_hash     = VALUES(content_hash),
                updated_at       = VALUES(updated_at),
                deleted_at       = NULL,
-               body             = VALUES(body)",
+               body             = VALUES(body),
+               folder_id        = VALUES(folder_id)",
         )
         .bind(doc.id.to_string())
         .bind(self.user_id().to_string())
@@ -156,6 +188,7 @@ impl StorageAdapter for MySqlAdapter {
         .bind(&hash)
         .bind(&now)
         .bind(&doc.body)
+        .bind(&folder_id_str)
         .execute(&self.inner.pool)
         .await
         .map_err(box_err)?;
@@ -202,7 +235,7 @@ impl StorageAdapter for MySqlAdapter {
 
     async fn list_documents(&self) -> Result<Vec<Document>, StorageError> {
         let rows = sqlx::query(
-            "SELECT frontmatter_json, body FROM documents
+            "SELECT frontmatter_json, body, folder_id FROM documents
              WHERE user_id = ? AND deleted_at IS NULL
              ORDER BY updated_at DESC",
         )
@@ -215,11 +248,241 @@ impl StorageAdapter for MySqlAdapter {
         for row in rows {
             let body: String = row.try_get("body").map_err(box_err)?;
             let fm_json: String = row.try_get("frontmatter_json").map_err(box_err)?;
+            let folder_id_str: Option<String> = row.try_get("folder_id").map_err(box_err)?;
             let mut doc: Document = serde_json::from_str(&fm_json).map_err(box_err)?;
             doc.body = body;
+            doc.folder_id = folder_id_str
+                .as_deref()
+                .map(Uuid::parse_str)
+                .transpose()
+                .map_err(box_err)?;
             docs.push(doc);
         }
         Ok(docs)
+    }
+
+    async fn list_documents_in_folder(
+        &self,
+        folder_id: Option<Uuid>,
+    ) -> Result<Vec<Document>, StorageError> {
+        let rows = match folder_id {
+            None => {
+                sqlx::query(
+                    "SELECT frontmatter_json, body, folder_id FROM documents
+                     WHERE user_id = ? AND deleted_at IS NULL AND folder_id IS NULL
+                     ORDER BY updated_at DESC",
+                )
+                .bind(self.user_id().to_string())
+                .fetch_all(&self.inner.pool)
+                .await
+                .map_err(box_err)?
+            }
+            Some(fid) => {
+                sqlx::query(
+                    "SELECT frontmatter_json, body, folder_id FROM documents
+                     WHERE user_id = ? AND deleted_at IS NULL AND folder_id = ?
+                     ORDER BY updated_at DESC",
+                )
+                .bind(self.user_id().to_string())
+                .bind(fid.to_string())
+                .fetch_all(&self.inner.pool)
+                .await
+                .map_err(box_err)?
+            }
+        };
+
+        let mut docs = Vec::with_capacity(rows.len());
+        for row in rows {
+            let body: String = row.try_get("body").map_err(box_err)?;
+            let fm_json: String = row.try_get("frontmatter_json").map_err(box_err)?;
+            let folder_id_str: Option<String> = row.try_get("folder_id").map_err(box_err)?;
+            let mut doc: Document = serde_json::from_str(&fm_json).map_err(box_err)?;
+            doc.body = body;
+            doc.folder_id = folder_id_str
+                .as_deref()
+                .map(Uuid::parse_str)
+                .transpose()
+                .map_err(box_err)?;
+            docs.push(doc);
+        }
+        Ok(docs)
+    }
+
+    async fn move_document_to_folder(
+        &self,
+        doc_id: Uuid,
+        folder_id: Option<Uuid>,
+    ) -> Result<(), StorageError> {
+        let folder_id_str = folder_id.map(|id| id.to_string());
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "UPDATE documents SET folder_id = ?, updated_at = ?
+             WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+        )
+        .bind(&folder_id_str)
+        .bind(&now)
+        .bind(doc_id.to_string())
+        .bind(self.user_id().to_string())
+        .execute(&self.inner.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn create_folder(
+        &self,
+        name: &str,
+        parent_id: Option<Uuid>,
+    ) -> Result<Folder, StorageError> {
+        let id = Uuid::new_v4();
+        let id_str = id.to_string();
+        let parent_id_str = parent_id.map(|p| p.to_string());
+        let now = chrono::Utc::now().to_rfc3339();
+
+        sqlx::query(
+            "INSERT INTO folders (id, user_id, name, parent_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&id_str)
+        .bind(self.user_id().to_string())
+        .bind(name)
+        .bind(&parent_id_str)
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.inner.pool)
+        .await
+        .map_err(box_err)?;
+
+        Ok(Folder {
+            id,
+            name: name.to_owned(),
+            parent_id,
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    async fn get_folder(&self, id: Uuid) -> Result<Folder, StorageError> {
+        let id_str = id.to_string();
+        let row = sqlx::query(
+            "SELECT id, name, parent_id, created_at, updated_at FROM folders
+             WHERE id = ? AND user_id = ?",
+        )
+        .bind(&id_str)
+        .bind(self.user_id().to_string())
+        .fetch_optional(&self.inner.pool)
+        .await
+        .map_err(box_err)?
+        .ok_or(StorageError::FolderNotFound(id))?;
+
+        mysql_row_to_folder(&row).map_err(box_err)
+    }
+
+    async fn list_folders(&self) -> Result<Vec<Folder>, StorageError> {
+        let rows = sqlx::query(
+            "SELECT id, name, parent_id, created_at, updated_at FROM folders
+             WHERE user_id = ?
+             ORDER BY name ASC",
+        )
+        .bind(self.user_id().to_string())
+        .fetch_all(&self.inner.pool)
+        .await
+        .map_err(box_err)?;
+
+        rows.iter().map(|r| mysql_row_to_folder(r).map_err(box_err)).collect()
+    }
+
+    async fn rename_folder(&self, id: Uuid, name: &str) -> Result<Folder, StorageError> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let affected = sqlx::query(
+            "UPDATE folders SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+        )
+        .bind(name)
+        .bind(&now)
+        .bind(id.to_string())
+        .bind(self.user_id().to_string())
+        .execute(&self.inner.pool)
+        .await
+        .map_err(box_err)?
+        .rows_affected();
+
+        if affected == 0 {
+            return Err(StorageError::FolderNotFound(id));
+        }
+        self.get_folder(id).await
+    }
+
+    async fn move_folder(
+        &self,
+        id: Uuid,
+        new_parent_id: Option<Uuid>,
+    ) -> Result<Folder, StorageError> {
+        let parent_str = new_parent_id.map(|p| p.to_string());
+        let now = chrono::Utc::now().to_rfc3339();
+        let affected = sqlx::query(
+            "UPDATE folders SET parent_id = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+        )
+        .bind(&parent_str)
+        .bind(&now)
+        .bind(id.to_string())
+        .bind(self.user_id().to_string())
+        .execute(&self.inner.pool)
+        .await
+        .map_err(box_err)?
+        .rows_affected();
+
+        if affected == 0 {
+            return Err(StorageError::FolderNotFound(id));
+        }
+        self.get_folder(id).await
+    }
+
+    async fn delete_folder(&self, id: Uuid) -> Result<(), StorageError> {
+        let id_str = id.to_string();
+        let uid_str = self.user_id().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Re-parent child folders to this folder's parent.
+        sqlx::query(
+            "UPDATE folders f
+             JOIN folders p ON p.id = ?
+             SET f.parent_id = p.parent_id, f.updated_at = ?
+             WHERE f.parent_id = ? AND f.user_id = ?",
+        )
+        .bind(&id_str)
+        .bind(&now)
+        .bind(&id_str)
+        .bind(&uid_str)
+        .execute(&self.inner.pool)
+        .await
+        .map_err(box_err)?;
+
+        // Move documents to root.
+        sqlx::query(
+            "UPDATE documents SET folder_id = NULL, updated_at = ?
+             WHERE folder_id = ? AND user_id = ?",
+        )
+        .bind(&now)
+        .bind(&id_str)
+        .bind(&uid_str)
+        .execute(&self.inner.pool)
+        .await
+        .map_err(box_err)?;
+
+        let affected = sqlx::query(
+            "DELETE FROM folders WHERE id = ? AND user_id = ?",
+        )
+        .bind(&id_str)
+        .bind(&uid_str)
+        .execute(&self.inner.pool)
+        .await
+        .map_err(box_err)?
+        .rows_affected();
+
+        if affected == 0 {
+            return Err(StorageError::FolderNotFound(id));
+        }
+        Ok(())
     }
 
     async fn save_chunk(&self, chunk: &Chunk) -> Result<(), StorageError> {
@@ -422,6 +685,26 @@ impl StorageAdapter for MySqlAdapter {
 
         Ok(scored.into_iter().take(limit).map(|(_, hit)| hit).collect())
     }
+}
+
+// ── Row helpers ───────────────────────────────────────────────────────────────
+
+fn mysql_row_to_folder(row: &sqlx::mysql::MySqlRow) -> Result<Folder, sqlx::Error> {
+    let id_str: String = row.try_get("id")?;
+    let id = Uuid::parse_str(&id_str).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+    let parent_str: Option<String> = row.try_get("parent_id")?;
+    let parent_id = parent_str
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+    Ok(Folder {
+        id,
+        name: row.try_get("name")?,
+        parent_id,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
 }
 
 // ── Vector helpers ────────────────────────────────────────────────────────────

@@ -1,8 +1,9 @@
-use axum::{Router, routing::{get, patch, post}};
+use axum::{Router, routing::{get, patch, post, put}};
 
 mod chat;
 mod documents;
 mod edits;
+mod folders;
 mod sessions;
 
 /// Build the shared API router, generic over the host binary's state type.
@@ -28,6 +29,14 @@ where
                 .delete(documents::delete_document),
         )
         .route("/documents/{id}/export.pdf", get(documents::export_document_pdf))
+        .route("/documents/{id}/folder", put(folders::move_document_to_folder))
+        .route("/folders", get(folders::list_folders).post(folders::create_folder))
+        .route(
+            "/folders/{id}",
+            get(folders::get_folder)
+                .put(folders::update_folder)
+                .delete(folders::delete_folder),
+        )
         .route("/sessions", get(sessions::list_sessions).post(sessions::create_session))
         .route("/sessions/usage", get(sessions::get_usage_summary))
         .route(

@@ -17,7 +17,7 @@
 
 use async_trait::async_trait;
 use kaya_core::UserContext;
-use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter, StorageError};
+use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, Folder, StorageAdapter, StorageError};
 use pgvector::Vector;
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
@@ -62,7 +62,7 @@ impl StorageAdapter for PostgresAdapter {
 
     async fn get_document(&self, id: Uuid) -> Result<Document, StorageError> {
         let row = sqlx::query(
-            "SELECT id, title, owner, last_reviewed, tags, related_docs, body
+            "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id
              FROM documents
              WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL",
         )
@@ -79,24 +79,25 @@ impl StorageAdapter for PostgresAdapter {
     async fn save_document(&self, doc: &Document) -> Result<(), StorageError> {
         let hash = content_hash(&doc.body);
         let now = chrono::Utc::now();
-
         let related: Vec<String> = doc.related_docs.iter().map(|u| u.to_string()).collect();
+        let folder_id_str = doc.folder_id.map(|id| id.to_string());
 
         sqlx::query(
             "INSERT INTO documents
                  (id, user_id, title, owner, last_reviewed, tags, related_docs,
-                  body, content_hash, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+                  body, content_hash, folder_id, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
              ON CONFLICT (id) DO UPDATE SET
-                 title        = EXCLUDED.title,
-                 owner        = EXCLUDED.owner,
+                 title         = EXCLUDED.title,
+                 owner         = EXCLUDED.owner,
                  last_reviewed = EXCLUDED.last_reviewed,
-                 tags         = EXCLUDED.tags,
-                 related_docs = EXCLUDED.related_docs,
-                 body         = EXCLUDED.body,
-                 content_hash = EXCLUDED.content_hash,
-                 updated_at   = EXCLUDED.updated_at,
-                 deleted_at   = NULL",
+                 tags          = EXCLUDED.tags,
+                 related_docs  = EXCLUDED.related_docs,
+                 body          = EXCLUDED.body,
+                 content_hash  = EXCLUDED.content_hash,
+                 folder_id     = EXCLUDED.folder_id,
+                 updated_at    = EXCLUDED.updated_at,
+                 deleted_at    = NULL",
         )
         .bind(doc.id.to_string())
         .bind(self.user_id().to_string())
@@ -107,6 +108,7 @@ impl StorageAdapter for PostgresAdapter {
         .bind(&related[..])
         .bind(&doc.body)
         .bind(&hash)
+        .bind(&folder_id_str)
         .bind(now)
         .execute(&self.pool)
         .await
@@ -133,7 +135,7 @@ impl StorageAdapter for PostgresAdapter {
 
     async fn list_documents(&self) -> Result<Vec<Document>, StorageError> {
         let rows = sqlx::query(
-            "SELECT id, title, owner, last_reviewed, tags, related_docs, body
+            "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id
              FROM documents
              WHERE user_id = $1 AND deleted_at IS NULL
              ORDER BY updated_at DESC",
@@ -144,6 +146,206 @@ impl StorageAdapter for PostgresAdapter {
         .map_err(box_err)?;
 
         rows.iter().map(row_to_document).collect()
+    }
+
+    async fn list_documents_in_folder(
+        &self,
+        folder_id: Option<Uuid>,
+    ) -> Result<Vec<Document>, StorageError> {
+        let rows = match folder_id {
+            None => {
+                sqlx::query(
+                    "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id
+                     FROM documents
+                     WHERE user_id = $1 AND deleted_at IS NULL AND folder_id IS NULL
+                     ORDER BY updated_at DESC",
+                )
+                .bind(self.user_id().to_string())
+                .fetch_all(&self.pool)
+                .await
+                .map_err(box_err)?
+            }
+            Some(fid) => {
+                sqlx::query(
+                    "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id
+                     FROM documents
+                     WHERE user_id = $1 AND deleted_at IS NULL AND folder_id = $2
+                     ORDER BY updated_at DESC",
+                )
+                .bind(self.user_id().to_string())
+                .bind(fid.to_string())
+                .fetch_all(&self.pool)
+                .await
+                .map_err(box_err)?
+            }
+        };
+
+        rows.iter().map(row_to_document).collect()
+    }
+
+    async fn move_document_to_folder(
+        &self,
+        doc_id: Uuid,
+        folder_id: Option<Uuid>,
+    ) -> Result<(), StorageError> {
+        let folder_id_str = folder_id.map(|id| id.to_string());
+        sqlx::query(
+            "UPDATE documents SET folder_id = $1, updated_at = now()
+             WHERE id = $2 AND user_id = $3 AND deleted_at IS NULL",
+        )
+        .bind(&folder_id_str)
+        .bind(doc_id.to_string())
+        .bind(self.user_id().to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn create_folder(
+        &self,
+        name: &str,
+        parent_id: Option<Uuid>,
+    ) -> Result<Folder, StorageError> {
+        let parent_id_str = parent_id.map(|id| id.to_string());
+        let row = sqlx::query(
+            "INSERT INTO folders (user_id, name, parent_id)
+             VALUES ($1, $2, $3)
+             RETURNING id, name, parent_id,
+                       to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
+                       to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at",
+        )
+        .bind(self.user_id().to_string())
+        .bind(name)
+        .bind(&parent_id_str)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(box_err)?;
+
+        pg_row_to_folder(&row)
+    }
+
+    async fn get_folder(&self, id: Uuid) -> Result<Folder, StorageError> {
+        let row = sqlx::query(
+            "SELECT id, name, parent_id,
+                    to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
+                    to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
+             FROM folders
+             WHERE id = $1 AND user_id = $2",
+        )
+        .bind(id.to_string())
+        .bind(self.user_id().to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(box_err)?
+        .ok_or(StorageError::FolderNotFound(id))?;
+
+        pg_row_to_folder(&row)
+    }
+
+    async fn list_folders(&self) -> Result<Vec<Folder>, StorageError> {
+        let rows = sqlx::query(
+            "SELECT id, name, parent_id,
+                    to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
+                    to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
+             FROM folders
+             WHERE user_id = $1
+             ORDER BY name ASC",
+        )
+        .bind(self.user_id().to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(box_err)?;
+
+        rows.iter().map(pg_row_to_folder).collect()
+    }
+
+    async fn rename_folder(&self, id: Uuid, name: &str) -> Result<Folder, StorageError> {
+        let affected = sqlx::query(
+            "UPDATE folders SET name = $1, updated_at = now()
+             WHERE id = $2 AND user_id = $3",
+        )
+        .bind(name)
+        .bind(id.to_string())
+        .bind(self.user_id().to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?
+        .rows_affected();
+
+        if affected == 0 {
+            return Err(StorageError::FolderNotFound(id));
+        }
+        self.get_folder(id).await
+    }
+
+    async fn move_folder(
+        &self,
+        id: Uuid,
+        new_parent_id: Option<Uuid>,
+    ) -> Result<Folder, StorageError> {
+        let parent_str = new_parent_id.map(|p| p.to_string());
+        let affected = sqlx::query(
+            "UPDATE folders SET parent_id = $1, updated_at = now()
+             WHERE id = $2 AND user_id = $3",
+        )
+        .bind(&parent_str)
+        .bind(id.to_string())
+        .bind(self.user_id().to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?
+        .rows_affected();
+
+        if affected == 0 {
+            return Err(StorageError::FolderNotFound(id));
+        }
+        self.get_folder(id).await
+    }
+
+    async fn delete_folder(&self, id: Uuid) -> Result<(), StorageError> {
+        let id_str = id.to_string();
+        let uid_str = self.user_id().to_string();
+
+        // Move child folders to this folder's parent.
+        sqlx::query(
+            "UPDATE folders
+             SET parent_id = (SELECT parent_id FROM folders WHERE id = $1 AND user_id = $2),
+                 updated_at = now()
+             WHERE parent_id = $1 AND user_id = $2",
+        )
+        .bind(&id_str)
+        .bind(&uid_str)
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+
+        // Documents move to root (handled by ON DELETE SET NULL on the FK,
+        // but we set explicitly to be safe in case FK behaviour differs).
+        sqlx::query(
+            "UPDATE documents SET folder_id = NULL, updated_at = now()
+             WHERE folder_id = $1 AND user_id = $2",
+        )
+        .bind(&id_str)
+        .bind(&uid_str)
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+
+        let affected = sqlx::query(
+            "DELETE FROM folders WHERE id = $1 AND user_id = $2",
+        )
+        .bind(&id_str)
+        .bind(&uid_str)
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?
+        .rows_affected();
+
+        if affected == 0 {
+            return Err(StorageError::FolderNotFound(id));
+        }
+        Ok(())
     }
 
     // ── Chunks ────────────────────────────────────────────────────────────────
@@ -319,6 +521,12 @@ fn row_to_document(row: &sqlx::postgres::PgRow) -> Result<Document, StorageError
         .filter_map(|s| Uuid::parse_str(s).ok())
         .collect();
     let body: String = row.try_get("body").map_err(box_err)?;
+    let folder_id_str: Option<String> = row.try_get("folder_id").map_err(box_err)?;
+    let folder_id = folder_id_str
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .unwrap_or(None);
 
     Ok(Document {
         id,
@@ -328,6 +536,25 @@ fn row_to_document(row: &sqlx::postgres::PgRow) -> Result<Document, StorageError
         tags,
         related_docs,
         body,
+        folder_id,
+    })
+}
+
+fn pg_row_to_folder(row: &sqlx::postgres::PgRow) -> Result<Folder, StorageError> {
+    let id_str: String = row.try_get("id").map_err(box_err)?;
+    let id = Uuid::parse_str(&id_str).unwrap_or_default();
+    let parent_str: Option<String> = row.try_get("parent_id").map_err(box_err)?;
+    let parent_id = parent_str
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .unwrap_or(None);
+    Ok(Folder {
+        id,
+        name: row.try_get("name").map_err(box_err)?,
+        parent_id,
+        created_at: row.try_get("created_at").map_err(box_err)?,
+        updated_at: row.try_get("updated_at").map_err(box_err)?,
     })
 }
 

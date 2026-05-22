@@ -13,6 +13,9 @@ impl ApiError {
     pub fn internal(msg: impl Into<String>) -> Self {
         Self { status: StatusCode::INTERNAL_SERVER_ERROR, message: msg.into() }
     }
+    pub fn bad_request(msg: impl Into<String>) -> Self {
+        Self { status: StatusCode::BAD_REQUEST, message: msg.into() }
+    }
 }
 
 impl IntoResponse for ApiError {

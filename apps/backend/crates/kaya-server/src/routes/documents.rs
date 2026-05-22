@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{
     Json,
     body::Body,
-    extract::{Extension, Path},
+    extract::{Extension, Path, Query},
     http::{StatusCode, header},
     response::Response,
 };
@@ -13,6 +13,7 @@ use uuid::Uuid;
 use kaya_core::{SessionStorage, StorageAdapter, model_router::ModelRouter, retrieval::index_document_chunks};
 
 use crate::error::ApiError;
+use crate::routes::folders::{FolderFilterQuery, parse_folder_filter};
 
 // ── GET /documents ────────────────────────────────────────────────────────────
 
@@ -23,15 +24,20 @@ pub(crate) struct DocumentSummary {
     title: String,
     tags: Vec<String>,
     last_reviewed: Option<String>,
+    folder_id: Option<Uuid>,
 }
 
 pub async fn list_documents(
     Extension(storage): Extension<Arc<dyn StorageAdapter>>,
+    Query(query): Query<FolderFilterQuery>,
 ) -> Result<Json<Vec<DocumentSummary>>, ApiError> {
-    let docs = storage
-        .list_documents()
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let folder_filter = parse_folder_filter(&query)?;
+
+    let docs = match folder_filter {
+        None => storage.list_documents().await,
+        Some(folder_id) => storage.list_documents_in_folder(folder_id).await,
+    }
+    .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(
         docs.into_iter()
@@ -40,6 +46,7 @@ pub async fn list_documents(
                 title: d.title,
                 tags: d.tags,
                 last_reviewed: d.last_reviewed.map(|dt| dt.to_string()),
+                folder_id: d.folder_id,
             })
             .collect(),
     ))
@@ -53,6 +60,7 @@ pub struct CreateDocumentBody {
     pub content: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    pub folder_id: Option<Uuid>,
 }
 
 #[derive(Serialize)]
@@ -63,6 +71,7 @@ pub(crate) struct DocumentResponse {
     body: String,
     tags: Vec<String>,
     last_reviewed: Option<String>,
+    folder_id: Option<Uuid>,
 }
 
 pub async fn create_document(
@@ -79,6 +88,7 @@ pub async fn create_document(
         owner: None,
         last_reviewed: None,
         related_docs: vec![],
+        folder_id: body.folder_id,
     };
 
     storage
@@ -92,6 +102,7 @@ pub async fn create_document(
         body: doc.body.clone(),
         tags: doc.tags.clone(),
         last_reviewed: None,
+        folder_id: doc.folder_id,
     };
 
     if let Some(router) = llm {
@@ -125,6 +136,7 @@ pub async fn get_document(
         body: doc.body,
         tags: doc.tags,
         last_reviewed: doc.last_reviewed.map(|dt| dt.to_string()),
+        folder_id: doc.folder_id,
     }))
 }
 
@@ -170,6 +182,7 @@ pub async fn update_document(
         body: doc.body.clone(),
         tags: doc.tags.clone(),
         last_reviewed: doc.last_reviewed.map(|dt| dt.to_string()),
+        folder_id: doc.folder_id,
     });
 
     if let Some(router) = llm {

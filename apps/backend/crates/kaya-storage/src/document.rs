@@ -92,6 +92,7 @@ pub fn parse_document(raw: &str) -> Result<(Document, bool), ParseError> {
         tags: rfm.tags,
         related_docs: rfm.related_docs,
         body: body.to_string(),
+        folder_id: None,
     };
     Ok((doc, id_was_generated))
 }
