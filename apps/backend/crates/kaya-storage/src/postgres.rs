@@ -17,18 +17,13 @@
 
 use async_trait::async_trait;
 use kaya_core::UserContext;
-use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, Folder, StorageAdapter, StorageError};
+use kaya_core::storage::{
+    Chunk, ChunkHit, Document, Embedding, Folder, StorageAdapter, StorageError,
+};
 use pgvector::Vector;
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
-
-// ── Migration handle ──────────────────────────────────────────────────────────
-
-/// sqlx migrator for the legacy Postgres schema.
-/// NOTE: kaya-oss uses kaya-db::run_migrations instead; this migrator is kept
-/// for backward compatibility only.
-pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
 // ── Adapter ───────────────────────────────────────────────────────────────────
 
@@ -41,11 +36,6 @@ pub struct PostgresAdapter {
 impl PostgresAdapter {
     pub fn new(pool: PgPool, user_context: UserContext) -> Self {
         Self { pool, user_context }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn migrate(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
-        MIGRATOR.run(pool).await
     }
 
     #[inline]
@@ -153,31 +143,27 @@ impl StorageAdapter for PostgresAdapter {
         folder_id: Option<Uuid>,
     ) -> Result<Vec<Document>, StorageError> {
         let rows = match folder_id {
-            None => {
-                sqlx::query(
-                    "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id
+            None => sqlx::query(
+                "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id
                      FROM documents
                      WHERE user_id = $1 AND deleted_at IS NULL AND folder_id IS NULL
                      ORDER BY updated_at DESC",
-                )
-                .bind(self.user_id().to_string())
-                .fetch_all(&self.pool)
-                .await
-                .map_err(box_err)?
-            }
-            Some(fid) => {
-                sqlx::query(
-                    "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id
+            )
+            .bind(self.user_id().to_string())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(box_err)?,
+            Some(fid) => sqlx::query(
+                "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id
                      FROM documents
                      WHERE user_id = $1 AND deleted_at IS NULL AND folder_id = $2
                      ORDER BY updated_at DESC",
-                )
-                .bind(self.user_id().to_string())
-                .bind(fid.to_string())
-                .fetch_all(&self.pool)
-                .await
-                .map_err(box_err)?
-            }
+            )
+            .bind(self.user_id().to_string())
+            .bind(fid.to_string())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(box_err)?,
         };
 
         rows.iter().map(row_to_document).collect()
@@ -332,15 +318,13 @@ impl StorageAdapter for PostgresAdapter {
         .await
         .map_err(box_err)?;
 
-        let affected = sqlx::query(
-            "DELETE FROM folders WHERE id = $1 AND user_id = $2",
-        )
-        .bind(&id_str)
-        .bind(&uid_str)
-        .execute(&self.pool)
-        .await
-        .map_err(box_err)?
-        .rows_affected();
+        let affected = sqlx::query("DELETE FROM folders WHERE id = $1 AND user_id = $2")
+            .bind(&id_str)
+            .bind(&uid_str)
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?
+            .rows_affected();
 
         if affected == 0 {
             return Err(StorageError::FolderNotFound(id));
