@@ -55,12 +55,10 @@ The orchestrator itself does not invoke domain tools directly.
 
 The researcher implementation lives at `apps/backend/crates/kaya-core/src/agent/researcher.rs`.
 
-It runs an inner loop with read-only tools:
+It currently runs a deterministic retrieval pipeline, not a free-form tool loop. In the current implementation it emits synthetic tool events for:
 
 - `search_documents`
-- `read_document`
-- `list_documents`
-- `find_stale_references`
+- `search_directories`
 
 During execution it emits standard `AgentEvent`s such as `ToolCall`, `ToolResult`, `Usage`, and `FinalMessage`. It also accumulates a `ResearchResult` containing:
 
@@ -78,6 +76,7 @@ The editor implementation lives at `apps/backend/crates/kaya-core/src/agent/edit
 It only runs for `ResearchThenEdit` plans. The editor receives the `ResearchResult` and injects the research summary into its system prompt, then uses write-only tools:
 
 - `create_document`
+- `create_folder`
 - `delete_document`
 - `propose_edit`
 - `update_document`
@@ -96,7 +95,8 @@ Tool registration lives in `apps/backend/crates/kaya-core/src/agent/tools/mod.rs
 
 - `read_tools()`
 - `write_tools()`
-- `default_tools()` for the older single-loop path
+
+The current orchestrated `Researcher` does not dynamically iterate over the full `read_tools()` set. Instead, it performs a fixed retrieval pass and emits tool-shaped events for the read operations it actually executes.
 
 The separation is enforced at compile time:
 
@@ -165,7 +165,7 @@ Browser UI
   -> Orchestrator
        -> classify intent
        -> Researcher (read tools only)
-            -> search/read/list/stale-ref tools
+            -> search_documents + search_directories + synthesis
             -> ResearchResult
        -> Editor (write tools only, optional)
             -> create/delete/propose/update tools

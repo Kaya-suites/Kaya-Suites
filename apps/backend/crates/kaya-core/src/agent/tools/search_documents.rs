@@ -8,6 +8,7 @@ use crate::agent::{
     tool::{Tool, ToolOutput},
 };
 use crate::error::KayaError;
+use crate::session::EmbeddingCall;
 
 pub struct SearchDocuments;
 
@@ -50,7 +51,15 @@ impl Tool for SearchDocuments {
         let emb = ctx.router.embed(query.clone()).await?;
         let _ = ctx
             .sessions
-            .save_embedding_call(&emb.usage.model, emb.usage.input_tokens)
+            .save_embedding_call(&EmbeddingCall {
+                model: emb.usage.model.clone(),
+                tokens: emb.usage.input_tokens,
+                task_id: None,
+                task_type: "search_documents_tool".to_string(),
+                session_id: None,
+                document_id: None,
+                paragraph_id: None,
+            })
             .await;
         let hits = ctx.storage.search_embeddings(&emb.embedding, limit).await?;
 

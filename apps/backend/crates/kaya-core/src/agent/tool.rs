@@ -54,16 +54,16 @@ pub trait Tool: Send + Sync {
 }
 
 /// Marker trait for tools that only read from the knowledge base.
-/// Implemented by: `SearchDocuments`, `ReadDocument`, `ListDocuments`,
-/// `FindStaleReferences`.
+/// Implemented by: `SearchDocuments`, `SearchDirectories`, `ReadDocument`,
+/// `ListDocuments`, `FindStaleReferences`.
 ///
 /// `Researcher` accepts only `Vec<Arc<dyn ReadTool>>` — passing a write tool
 /// is a compile error.
 pub trait ReadTool: Tool {}
 
 /// Marker trait for tools that propose writes to the knowledge base.
-/// Implemented by: `CreateDocument`, `ProposeEdit`, `UpdateDocument`,
-/// `DeleteDocument`.
+/// Implemented by: `CreateDocument`, `CreateFolder`, `ProposeEdit`,
+/// `UpdateDocument`, `DeleteDocument`.
 ///
 /// `Editor` accepts only `Vec<Arc<dyn WriteTool>>` — passing a read tool
 /// is a compile error.

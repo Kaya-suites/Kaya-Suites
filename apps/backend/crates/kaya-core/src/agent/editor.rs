@@ -77,7 +77,12 @@ impl Editor {
             })
             .collect();
 
-        let system_prompt = build_editor_prompt(&self.tools, instruction, &research);
+        let system_prompt = build_editor_prompt(
+            &self.tools,
+            instruction,
+            &research,
+            ctx.conversation_context.as_deref(),
+        );
         let turn_id = Uuid::new_v4();
         let mut tool_history = String::new();
         let mut total_input_tokens: u32 = 0;
@@ -227,19 +232,31 @@ fn build_editor_prompt(
     tools: &[Arc<dyn WriteTool>],
     instruction: &str,
     research: &ResearchResult,
+    conversation_context: Option<&str>,
 ) -> String {
     let tool_list = tools
         .iter()
         .map(|t| format!("- {}: {}", t.name(), t.description()))
         .collect::<Vec<_>>()
         .join("\n");
+    let directory_context = serde_json::to_string_pretty(&research.directory_context)
+        .unwrap_or_else(|_| "{\"folders\":[]}".to_string());
+    let conversation_context = conversation_context
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| format!("## Conversation context\n{s}\n\n"))
+        .unwrap_or_default();
 
     format!(
         "You are the Editor agent for Kaya Suites.\n\
          \n\
+         {conversation_context}\
          ## Research context\n\
          The Researcher agent has gathered the following context for you:\n\
          {}\n\
+         \n\
+         ## Directory context\n\
+         Use this structured directory data exactly as provided:\n\
+         {directory_context}\n\
          \n\
          ## Your task\n\
          Using the research context above, carry out the following instruction:\n\
@@ -250,6 +267,10 @@ fn build_editor_prompt(
          \n\
          IMPORTANT: Never apply document edits directly. Always use propose_edit \
          or create_document so the user can review and approve the change. \
+         For create_folder, root-level folders must omit `parent_id` entirely; \
+         never use `00000000-0000-0000-0000-000000000000` as a root sentinel. \
+         Use only folder IDs that appear in DIRECTORY_CONTEXT. If no matching \
+         parent folder is present there, omit `parent_id` rather than guessing. \
          You already have all the information you need from the research context — \
          do not attempt to search or read documents.",
         research.summary_context

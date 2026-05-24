@@ -1,7 +1,6 @@
 //! Orchestrator — the new entry point for the agent system.
 //!
-//! `orchestrate(msg, ctx)` replaces the old `AgentLoop::run` call in the HTTP
-//! handler. It:
+//! `orchestrate(msg, ctx)` is the chat entry point used by the HTTP handler. It:
 //!
 //! 1. Classifies the user message into an [`AgentPlan`] via a single fast model
 //!    call (`OperationType::IntentClassification`).
@@ -40,6 +39,7 @@ pub struct OrchestratorContext {
     pub sessions: Arc<dyn SessionStorage>,
     pub router: Arc<ModelRouter>,
     pub session: UserSession,
+    pub conversation_context: Option<String>,
 }
 
 impl OrchestratorContext {
@@ -49,6 +49,7 @@ impl OrchestratorContext {
             sessions: self.sessions.clone(),
             router: self.router.clone(),
             session: self.session.clone(),
+            conversation_context: self.conversation_context.clone(),
         })
     }
 }
@@ -241,13 +242,20 @@ async fn orchestrate_task(
 // ── Classification ────────────────────────────────────────────────────────────
 
 async fn classify_intent(msg: &str, ctx: &OrchestratorContext) -> AgentPlan {
+    let convo_context = ctx
+        .conversation_context
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| format!("\nConversation context:\n{s}\n"))
+        .unwrap_or_default();
+
     let prompt = format!(
         "Classify the following user message as one of two intents.\n\
          Return a JSON object only, no explanation.\n\
          \n\
          Intent options:\n\
          1. research_only — the user wants information, a summary, or an answer.\n\
-         2. research_then_edit — the user wants to create, modify, or delete documents.\n\
+         2. research_then_edit — the user wants to create, modify, move, or delete documents or folders.\n\
          \n\
          JSON format for research_only:\n\
          {{\"intent\":\"research_only\",\"query\":\"<user query>\"}}\n\
@@ -255,6 +263,8 @@ async fn classify_intent(msg: &str, ctx: &OrchestratorContext) -> AgentPlan {
          JSON format for research_then_edit:\n\
          {{\"intent\":\"research_then_edit\",\"query\":\"<what to research>\",\"instruction\":\"<what to edit>\"}}\n\
          \n\
+         Use the conversation context only as supporting background. The current user message is the source of truth for the requested action.\n\
+         {convo_context}\
          User message: {msg}"
     );
 

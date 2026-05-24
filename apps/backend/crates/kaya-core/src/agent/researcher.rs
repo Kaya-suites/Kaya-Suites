@@ -18,10 +18,12 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::agent::log::{InvocationLog, ToolInvocation};
+use crate::agent::tool::Tool;
+use crate::agent::tools::SearchDirectories;
 use crate::agent::{AgentContext, AgentEvent};
 use crate::error::KayaError;
 use crate::model_router::OperationType;
-use crate::retrieval::{self, RetrievalResult};
+use crate::retrieval::{self, EmbeddingTaskContext, RetrievalResult};
 
 use super::orchestrator::AgentPlan;
 
@@ -51,6 +53,8 @@ pub struct ResearchResult {
     pub chunks: Vec<RetrievedChunk>,
     pub cited_doc_ids: Vec<Uuid>,
     pub stale_refs: Vec<StaleRef>,
+    /// Structured folder search output passed through to the Editor verbatim.
+    pub directory_context: serde_json::Value,
     /// The Researcher's synthesised answer — injected into the Editor's prompt.
     pub summary_context: String,
 }
@@ -106,10 +110,61 @@ impl Researcher {
         let started_at = Utc::now();
         let t0 = Instant::now();
 
-        let hits: Vec<RetrievalResult> =
-            retrieval::retrieve(query, self.top_k, &ctx.storage, &ctx.router, Some(ctx.sessions.as_ref()))
-                .await
-                .unwrap_or_default();
+        let directory_input = json!({ "query": query, "limit": self.top_k });
+        let _ = tx
+            .send(Ok(AgentEvent::ToolCall {
+                name: "search_directories".into(),
+                input: directory_input.clone(),
+            }))
+            .await;
+
+        let directory_started_at = Utc::now();
+        let directory_t0 = Instant::now();
+        let directory_output = SearchDirectories
+            .invoke(directory_input.clone(), ctx.as_ref())
+            .await
+            .unwrap_or_else(|e| {
+                crate::agent::tool::ToolOutput::value(json!({
+                    "error": e.to_string(),
+                    "query": query,
+                    "folders": [],
+                }))
+            });
+        let directory_latency_ms = directory_t0.elapsed().as_millis() as u64;
+
+        log.record(ToolInvocation {
+            id: Uuid::new_v4(),
+            turn_id,
+            tool_name: "search_directories".into(),
+            input: directory_input,
+            output: Ok(directory_output.content.clone()),
+            latency_ms: directory_latency_ms,
+            started_at: directory_started_at,
+        });
+
+        let _ = tx
+            .send(Ok(AgentEvent::ToolResult {
+                name: "search_directories".into(),
+                output: directory_output.content.clone(),
+                latency_ms: directory_latency_ms,
+            }))
+            .await;
+
+        let hits: Vec<RetrievalResult> = retrieval::retrieve(
+            query,
+            self.top_k,
+            &ctx.storage,
+            &ctx.router,
+            Some(ctx.sessions.as_ref()),
+            Some(&EmbeddingTaskContext {
+                task_id: Some(turn_id.to_string()),
+                task_type: "agent_research".to_string(),
+                session_id: None,
+                document_id: None,
+            }),
+        )
+        .await
+        .unwrap_or_default();
 
         let latency_ms = t0.elapsed().as_millis() as u64;
 
@@ -153,7 +208,12 @@ impl Researcher {
             .await;
 
         // Single synthesis call — grounded on retrieved chunks.
-        let synthesis_prompt = build_synthesis_prompt(query, &hits);
+        let synthesis_prompt = build_synthesis_prompt(
+            query,
+            &hits,
+            &directory_output.content,
+            ctx.conversation_context.as_deref(),
+        );
 
         let synthesis_resp = match ctx
             .router
@@ -202,6 +262,7 @@ impl Researcher {
             chunks,
             cited_doc_ids,
             stale_refs: vec![],
+            directory_context: directory_output.content,
             summary_context,
         })
     }
@@ -209,10 +270,24 @@ impl Researcher {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn build_synthesis_prompt(query: &str, hits: &[RetrievalResult]) -> String {
+fn build_synthesis_prompt(
+    query: &str,
+    hits: &[RetrievalResult],
+    directories: &serde_json::Value,
+    conversation_context: Option<&str>,
+) -> String {
+    let directory_text = serde_json::to_string_pretty(directories)
+        .unwrap_or_else(|_| "{\"folders\":[]}".to_string());
+    let conversation_context = conversation_context
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| format!("Conversation context:\n{s}\n\n"))
+        .unwrap_or_default();
+
     if hits.is_empty() {
         return format!(
             "Query: {query}\n\n\
+             {conversation_context}\
+             Current directory context:\n{directory_text}\n\n\
              No relevant documents were found in the knowledge base. \
              Answer based on what you know, or indicate the information is unavailable."
         );
@@ -236,9 +311,13 @@ fn build_synthesis_prompt(query: &str, hits: &[RetrievalResult]) -> String {
     format!(
         "You are a research assistant synthesising knowledge-base content.\n\n\
          Query: {query}\n\n\
+         {conversation_context}\
+         Current directory context:\n{directory_text}\n\n\
          Retrieved chunks (ranked by relevance):\n\n\
          {chunks_text}\n\n\
          Write a comprehensive answer grounded in the chunks above. \
+         When directory structure is relevant, use the directory context above rather than \
+         inferring folder IDs or paths from stale document references. \
          Cite sources inline using [[doc_id:para_id]] immediately after each \
          cited sentence. Do not propose or apply any edits — only summarise."
     )

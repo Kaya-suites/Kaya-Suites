@@ -43,7 +43,7 @@ impl Tool for CreateFolder {
         })
     }
 
-    async fn invoke(&self, input: Value, _ctx: &AgentContext) -> Result<ToolOutput, KayaError> {
+    async fn invoke(&self, input: Value, ctx: &AgentContext) -> Result<ToolOutput, KayaError> {
         let name = input["name"]
             .as_str()
             .ok_or_else(|| KayaError::Internal("create_folder: missing 'name'".into()))?
@@ -51,7 +51,14 @@ impl Tool for CreateFolder {
 
         let parent_id = input["parent_id"]
             .as_str()
-            .and_then(|s| s.parse::<Uuid>().ok());
+            .and_then(|s| s.parse::<Uuid>().ok())
+            // Some model outputs use the nil UUID as a fake "root" sentinel.
+            // Root folders are represented as `None` in storage, not `Uuid::nil()`.
+            .filter(|id| *id != Uuid::nil());
+
+        if let Some(parent_id) = parent_id {
+            ctx.storage.get_folder(parent_id).await?;
+        }
 
         let edit = ProposedEdit {
             id: Uuid::new_v4(),

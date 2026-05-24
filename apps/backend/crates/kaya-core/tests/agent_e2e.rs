@@ -16,10 +16,10 @@ use futures::StreamExt;
 use serde_json::json;
 use uuid::Uuid;
 
-use kaya_core::agent::tools::default_tools;
+use kaya_core::agent::tools::{CreateFolder, SearchDirectories};
 use kaya_core::agent::{
-    AgentContext, AgentEvent, AgentLoop, AgentSource, InvocationLog, OrchestratorContext,
-    SourcedEvent, orchestrate,
+    AgentContext, AgentEvent, AgentPlan, AgentSource, InvocationLog, OrchestratorContext,
+    Researcher, SourcedEvent, Tool, orchestrate,
 };
 use kaya_core::auth::UserSession;
 use kaya_core::edit::commit_edit;
@@ -30,18 +30,22 @@ use kaya_core::model_router::{
     ToolCallResult,
 };
 use kaya_core::session::{MessageRecord, Session, SessionError, SessionStorage, UsageSummary};
-use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter, StorageError};
+use kaya_core::storage::{
+    Chunk, ChunkHit, Document, Embedding, Folder, StorageAdapter, StorageError,
+};
 
 // ── In-memory StorageAdapter ─────────────────────────────────────────────────
 
 struct MemStorage {
     docs: Arc<Mutex<HashMap<Uuid, Document>>>,
+    folders: Arc<Mutex<HashMap<Uuid, Folder>>>,
 }
 
 impl MemStorage {
     fn new() -> Self {
         Self {
             docs: Arc::new(Mutex::new(HashMap::new())),
+            folders: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -76,6 +80,17 @@ impl StorageAdapter for MemStorage {
     }
     async fn list_documents(&self) -> Result<Vec<Document>, StorageError> {
         Ok(self.docs.lock().unwrap().values().cloned().collect())
+    }
+    async fn list_folders(&self) -> Result<Vec<Folder>, StorageError> {
+        Ok(self.folders.lock().unwrap().values().cloned().collect())
+    }
+    async fn get_folder(&self, id: Uuid) -> Result<Folder, StorageError> {
+        self.folders
+            .lock()
+            .unwrap()
+            .get(&id)
+            .cloned()
+            .ok_or(StorageError::FolderNotFound(id))
     }
     async fn search_embeddings(
         &self,
@@ -160,7 +175,13 @@ impl SessionStorage for NoopSessions {
             by_embedding_model: vec![],
         })
     }
-    async fn save_embedding_call(&self, _: &str, _: u32) -> Result<(), SessionError> {
+    async fn save_embedding_call(&self, _: &kaya_core::EmbeddingCall) -> Result<(), SessionError> {
+        Ok(())
+    }
+    async fn upsert_document_embedding_status(
+        &self,
+        _: &kaya_core::DocumentEmbeddingStatus,
+    ) -> Result<(), SessionError> {
         Ok(())
     }
     async fn touch_session(&self, _: Uuid) -> Result<(), SessionError> {
@@ -188,6 +209,7 @@ fn noop_orch_ctx(
         session: UserSession {
             user_id: Uuid::new_v4(),
         },
+        conversation_context: None,
     }
 }
 
@@ -311,6 +333,17 @@ fn make_doc(body: &str) -> Document {
     }
 }
 
+fn make_folder(name: &str, parent_id: Option<Uuid>) -> Folder {
+    Folder {
+        id: Uuid::new_v4(),
+        name: name.to_string(),
+        parent_id,
+        sort_order: 0,
+        created_at: "2026-01-01T00:00:00Z".into(),
+        updated_at: "2026-01-01T00:00:00Z".into(),
+    }
+}
+
 // ── Test 1: propose-then-approve invariant ───────────────────────────────────
 
 #[tokio::test]
@@ -319,53 +352,40 @@ async fn search_then_edit_requires_approval() {
     let doc_id = doc.id;
     let storage = Arc::new(MemStorage::with_doc(doc));
 
-    // Turn 1 — search_documents; Turn 2 — propose_edit; Turn 3 — final answer.
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        ScriptedTurn {
-            tool_call: Some(ToolCallResult {
-                tool_name: "search_documents".into(),
-                arguments: json!({ "query": "paragraph", "limit": 3 }),
-            }),
-            content: None,
-        },
-        ScriptedTurn {
-            tool_call: Some(ToolCallResult {
-                tool_name: "propose_edit".into(),
-                arguments: json!({
-                    "document_id": doc_id.to_string(),
-                    "hunks": [
-                        { "old_text": "Old paragraph one.\n\nOld paragraph two.", "new_text": "New paragraph one.\n\nNew paragraph two." }
-                    ],
-                    "reason": "Updating content"
+    let provider = Arc::new(
+        ScriptedProvider::new(vec![
+            ScriptedTurn {
+                tool_call: Some(ToolCallResult {
+                    tool_name: "propose_edit".into(),
+                    arguments: json!({
+                        "document_id": doc_id.to_string(),
+                        "hunks": [
+                            { "old_text": "Old paragraph one.\n\nOld paragraph two.", "new_text": "New paragraph one.\n\nNew paragraph two." }
+                        ],
+                        "reason": "Updating content"
+                    }),
                 }),
-            }),
-            content: None,
-        },
-        ScriptedTurn {
-            tool_call: None,
-            content: Some("I have proposed an edit to the document.".into()),
-        },
-    ]));
-
-    let ctx = Arc::new(AgentContext {
-        storage: storage.clone() as Arc<dyn StorageAdapter>,
-        sessions: Arc::new(NoopSessions),
-        router: router_with(provider as Arc<dyn LlmProvider>),
-        session: UserSession {
-            user_id: Uuid::new_v4(),
-        },
-    });
-
-    let log = Arc::new(InvocationLog::new());
-    let agent = AgentLoop::new(default_tools());
-    let mut stream = agent.run(
-        "Update the test document.".into(),
-        vec![],
-        ctx.clone(),
-        log.clone(),
+                content: None,
+            },
+            ScriptedTurn {
+                tool_call: None,
+                content: Some("I have proposed an edit to the document.".into()),
+            },
+        ])
+        .with_complete(vec![
+            r#"{"intent":"research_then_edit","query":"test document paragraphs","instruction":"Update the test document."}"#
+                .into(),
+            "The test document contains the paragraphs that need updating.".into(),
+        ]),
     );
 
-    let mut events: Vec<AgentEvent> = Vec::new();
+    let orch_ctx = noop_orch_ctx(
+        storage.clone() as Arc<dyn StorageAdapter>,
+        router_with(provider as Arc<dyn LlmProvider>),
+    );
+    let mut stream = orchestrate("Update the test document.", orch_ctx);
+
+    let mut events: Vec<SourcedEvent> = Vec::new();
     while let Some(ev) = stream.next().await {
         events.push(ev.expect("agent event should not error"));
     }
@@ -374,7 +394,11 @@ async fn search_then_edit_requires_approval() {
     let proposed = events
         .iter()
         .find_map(|e| {
-            if let AgentEvent::ProposedEditEmitted { edit } = e {
+            if let SourcedEvent {
+                source: AgentSource::Editor,
+                event: AgentEvent::ProposedEditEmitted { edit },
+            } = e
+            {
                 Some(edit.clone())
             } else {
                 None
@@ -409,7 +433,7 @@ async fn search_then_edit_requires_approval() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, AgentEvent::FinalMessage { .. })),
+            .any(|e| matches!(e.event, AgentEvent::FinalMessage { .. })),
         "stream must end with a FinalMessage"
     );
 }
@@ -419,43 +443,30 @@ async fn search_then_edit_requires_approval() {
 #[tokio::test]
 async fn invocation_log_captures_every_tool_used() {
     let doc = make_doc("Some content.");
-    let doc_id = doc.id;
     let storage = Arc::new(MemStorage::with_doc(doc));
-
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        ScriptedTurn {
-            tool_call: Some(ToolCallResult {
-                tool_name: "list_documents".into(),
-                arguments: json!({}),
-            }),
-            content: None,
-        },
-        ScriptedTurn {
-            tool_call: Some(ToolCallResult {
-                tool_name: "read_document".into(),
-                arguments: json!({ "document_id": doc_id.to_string() }),
-            }),
-            content: None,
-        },
-        ScriptedTurn {
-            tool_call: None,
-            content: Some("Here is the document.".into()),
-        },
-    ]));
-
+    let provider =
+        Arc::new(ScriptedProvider::new(vec![]).with_complete(vec!["Grounded summary.".into()]));
     let ctx = Arc::new(AgentContext {
-        storage: storage.clone() as Arc<dyn StorageAdapter>,
+        storage: storage as Arc<dyn StorageAdapter>,
         sessions: Arc::new(NoopSessions),
         router: router_with(provider as Arc<dyn LlmProvider>),
         session: UserSession {
             user_id: Uuid::new_v4(),
         },
+        conversation_context: None,
     });
 
     let log = Arc::new(InvocationLog::new());
-    let agent = AgentLoop::new(default_tools());
-    let mut stream = agent.run("Show me the documents.".into(), vec![], ctx, log.clone());
-    while let Some(ev) = stream.next().await {
+    let (tx, mut rx) = futures::channel::mpsc::channel(16);
+    let researcher = Researcher::new();
+    let plan = AgentPlan::ResearchOnly {
+        query: "Show me the documents.".into(),
+    };
+    let _ = researcher
+        .research(&plan, ctx, log.clone(), tx)
+        .await
+        .expect("research should succeed");
+    while let Some(ev) = rx.next().await {
         ev.expect("no errors");
     }
 
@@ -463,12 +474,12 @@ async fn invocation_log_captures_every_tool_used() {
     let names: Vec<&str> = entries.iter().map(|e| e.tool_name.as_str()).collect();
 
     assert!(
-        names.contains(&"list_documents"),
-        "log must contain list_documents"
+        names.contains(&"search_directories"),
+        "log must contain search_directories"
     );
     assert!(
-        names.contains(&"read_document"),
-        "log must contain read_document"
+        names.contains(&"search_documents"),
+        "log must contain search_documents"
     );
     assert_eq!(entries.len(), 2, "exactly 2 tool calls should be logged");
 
@@ -484,34 +495,15 @@ async fn invocation_log_captures_every_tool_used() {
 async fn cancellation_does_not_panic_or_leak() {
     let storage = Arc::new(MemStorage::new());
 
-    // Five tool calls followed by a final message — we will cancel after the first.
-    let turns: Vec<ScriptedTurn> = (0..5)
-        .map(|_| ScriptedTurn {
-            tool_call: Some(ToolCallResult {
-                tool_name: "list_documents".into(),
-                arguments: json!({}),
-            }),
-            content: None,
-        })
-        .chain(std::iter::once(ScriptedTurn {
-            tool_call: None,
-            content: Some("Done.".into()),
-        }))
-        .collect();
-
-    let provider = Arc::new(ScriptedProvider::new(turns));
-    let ctx = Arc::new(AgentContext {
-        storage: storage as Arc<dyn StorageAdapter>,
-        sessions: Arc::new(NoopSessions),
-        router: router_with(provider as Arc<dyn LlmProvider>),
-        session: UserSession {
-            user_id: Uuid::new_v4(),
-        },
-    });
-
-    let log = Arc::new(InvocationLog::new());
-    let agent = AgentLoop::new(default_tools());
-    let mut stream = agent.run("List docs.".into(), vec![], ctx, log);
+    let provider = Arc::new(ScriptedProvider::new(vec![]).with_complete(vec![
+        r#"{"intent":"research_only","query":"List docs."}"#.into(),
+        "Done.".into(),
+    ]));
+    let orch_ctx = noop_orch_ctx(
+        storage as Arc<dyn StorageAdapter>,
+        router_with(provider as Arc<dyn LlmProvider>),
+    );
+    let mut stream = orchestrate("List docs.", orch_ctx);
 
     // Consume only the first event, then drop the stream.
     let first = stream.next().await;
@@ -529,37 +521,37 @@ async fn cancellation_does_not_panic_or_leak() {
 async fn create_document_requires_approval() {
     let storage = Arc::new(MemStorage::new());
 
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        ScriptedTurn {
-            tool_call: Some(ToolCallResult {
-                tool_name: "create_document".into(),
-                arguments: json!({
-                    "title": "Brand New Doc",
-                    "body": "# Brand New\n\nFresh content."
+    let provider = Arc::new(
+        ScriptedProvider::new(vec![
+            ScriptedTurn {
+                tool_call: Some(ToolCallResult {
+                    tool_name: "create_document".into(),
+                    arguments: json!({
+                        "title": "Brand New Doc",
+                        "body": "# Brand New\n\nFresh content."
+                    }),
                 }),
-            }),
-            content: None,
-        },
-        ScriptedTurn {
-            tool_call: None,
-            content: Some("Created a new document proposal.".into()),
-        },
-    ]));
+                content: None,
+            },
+            ScriptedTurn {
+                tool_call: None,
+                content: Some("Created a new document proposal.".into()),
+            },
+        ])
+        .with_complete(vec![
+            r#"{"intent":"research_then_edit","query":"new document requirements","instruction":"Create a doc."}"#
+                .into(),
+            "Creating a new document is appropriate.".into(),
+        ]),
+    );
 
-    let ctx = Arc::new(AgentContext {
-        storage: storage.clone() as Arc<dyn StorageAdapter>,
-        sessions: Arc::new(NoopSessions),
-        router: router_with(provider as Arc<dyn LlmProvider>),
-        session: UserSession {
-            user_id: Uuid::new_v4(),
-        },
-    });
+    let orch_ctx = noop_orch_ctx(
+        storage.clone() as Arc<dyn StorageAdapter>,
+        router_with(provider as Arc<dyn LlmProvider>),
+    );
+    let mut stream = orchestrate("Create a doc.", orch_ctx);
 
-    let log = Arc::new(InvocationLog::new());
-    let agent = AgentLoop::new(default_tools());
-    let mut stream = agent.run("Create a doc.".into(), vec![], ctx, log);
-
-    let mut events = Vec::new();
+    let mut events: Vec<SourcedEvent> = Vec::new();
     while let Some(ev) = stream.next().await {
         events.push(ev.unwrap());
     }
@@ -567,7 +559,11 @@ async fn create_document_requires_approval() {
     let proposed = events
         .iter()
         .find_map(|e| {
-            if let AgentEvent::ProposedEditEmitted { edit } = e {
+            if let SourcedEvent {
+                source: AgentSource::Editor,
+                event: AgentEvent::ProposedEditEmitted { edit },
+            } = e
+            {
                 Some(edit.clone())
             } else {
                 None
@@ -607,13 +603,10 @@ async fn orchestrator_routes_question_to_research_only() {
     let storage = Arc::new(MemStorage::new());
 
     // classify → research_only; researcher does RAG retrieval + one synthesis complete()
-    let provider = Arc::new(
-        ScriptedProvider::new(vec![])
-            .with_complete(vec![
-                r#"{"intent":"research_only","query":"what is in the knowledge base"}"#.into(),
-                "Here is what I found in the knowledge base.".into(),
-            ]),
-    );
+    let provider = Arc::new(ScriptedProvider::new(vec![]).with_complete(vec![
+        r#"{"intent":"research_only","query":"what is in the knowledge base"}"#.into(),
+        "Here is what I found in the knowledge base.".into(),
+    ]));
 
     let orch_ctx = noop_orch_ctx(storage as Arc<dyn StorageAdapter>, router_with(provider));
     let mut stream = orchestrate("what is in the knowledge base", orch_ctx);
@@ -726,6 +719,13 @@ async fn orchestrator_routes_edit_request_to_research_then_edit() {
 async fn research_result_injected_into_editor_prompt() {
     let doc = make_doc("Some body text.");
     let storage = Arc::new(MemStorage::with_doc(doc));
+    let clients = make_folder("Clients", None);
+    let acme = make_folder("Acme", Some(clients.id));
+    storage
+        .folders
+        .lock()
+        .unwrap()
+        .extend([(clients.id, clients.clone()), (acme.id, acme.clone())]);
 
     // We capture the prompt sent to the Editor by inspecting the
     // `complete_responses` queue — we use a `PromptCapturingProvider` instead.
@@ -776,7 +776,7 @@ async fn research_result_injected_into_editor_prompt() {
         },
     ])
     .with_complete(vec![
-        r#"{"intent":"research_then_edit","query":"test","instruction":"do it"}"#.into(),
+        r#"{"intent":"research_then_edit","query":"acme","instruction":"do it"}"#.into(),
         // Researcher synthesis — contains the marker
         "UNIQUE_RESEARCH_MARKER found.".into(),
     ]);
@@ -805,6 +805,142 @@ async fn research_result_injected_into_editor_prompt() {
         editor_prompt.contains("UNIQUE_RESEARCH_MARKER"),
         "Editor system prompt must include Researcher's final message"
     );
+    assert!(
+        editor_prompt.contains(&acme.id.to_string()),
+        "Editor prompt must include structured directory folder IDs"
+    );
+    assert!(
+        editor_prompt.contains("Clients / Acme"),
+        "Editor prompt must include structured directory paths"
+    );
+    assert!(
+        editor_prompt.contains("Use only folder IDs that appear in DIRECTORY_CONTEXT."),
+        "Editor system prompt must require IDs to come from directory context"
+    );
+    assert!(
+        editor_prompt
+            .contains("never use `00000000-0000-0000-0000-000000000000` as a root sentinel"),
+        "Editor system prompt must forbid nil UUID root sentinels for folders"
+    );
+}
+
+#[tokio::test]
+async fn search_directories_returns_current_folder_paths() {
+    let storage = Arc::new(MemStorage::new());
+    let clients = make_folder("Clients", None);
+    let acme = make_folder("Acme", Some(clients.id));
+    storage
+        .folders
+        .lock()
+        .unwrap()
+        .extend([(clients.id, clients.clone()), (acme.id, acme.clone())]);
+
+    let mut doc = make_doc("Folder-aware body.");
+    doc.title = "Acme Contract Notes".into();
+    doc.folder_id = Some(acme.id);
+    storage.docs.lock().unwrap().insert(doc.id, doc);
+
+    let provider = Arc::new(ScriptedProvider::new(vec![]));
+    let ctx = AgentContext {
+        storage: storage as Arc<dyn StorageAdapter>,
+        sessions: Arc::new(NoopSessions),
+        router: router_with(provider as Arc<dyn LlmProvider>),
+        session: UserSession {
+            user_id: Uuid::new_v4(),
+        },
+        conversation_context: None,
+    };
+
+    let output = SearchDirectories
+        .invoke(
+            json!({"query": "create a folder under acme", "limit": 5}),
+            &ctx,
+        )
+        .await
+        .expect("directory search should succeed");
+
+    let folders = output.content["folders"]
+        .as_array()
+        .expect("folders should be an array");
+    assert!(
+        !folders.is_empty(),
+        "directory search should return at least one folder"
+    );
+    assert_eq!(folders[0]["id"], json!(acme.id));
+    assert_eq!(folders[0]["path"], json!("Clients / Acme"));
+}
+
+#[tokio::test]
+async fn create_folder_treats_nil_uuid_parent_as_root() {
+    let provider = Arc::new(ScriptedProvider::new(vec![]));
+    let ctx = AgentContext {
+        storage: Arc::new(MemStorage::new()) as Arc<dyn StorageAdapter>,
+        sessions: Arc::new(NoopSessions),
+        router: router_with(provider as Arc<dyn LlmProvider>),
+        session: UserSession {
+            user_id: Uuid::new_v4(),
+        },
+        conversation_context: None,
+    };
+
+    let output = CreateFolder
+        .invoke(
+            json!({
+                "name": "Root Child",
+                "parent_id": Uuid::nil().to_string(),
+            }),
+            &ctx,
+        )
+        .await
+        .expect("create_folder should succeed");
+
+    assert_eq!(output.content["parent_id"], serde_json::Value::Null);
+
+    let edit = output
+        .proposed_edit
+        .expect("create_folder should emit a proposed edit");
+    match edit.kind {
+        kaya_core::ProposedEditKind::CreateFolder { parent_id, .. } => {
+            assert_eq!(parent_id, None, "nil UUID should be normalized to root");
+        }
+        other => panic!("unexpected proposed edit kind: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn create_folder_rejects_unknown_parent_id() {
+    let provider = Arc::new(ScriptedProvider::new(vec![]));
+    let ctx = AgentContext {
+        storage: Arc::new(MemStorage::new()) as Arc<dyn StorageAdapter>,
+        sessions: Arc::new(NoopSessions),
+        router: router_with(provider as Arc<dyn LlmProvider>),
+        session: UserSession {
+            user_id: Uuid::new_v4(),
+        },
+        conversation_context: None,
+    };
+
+    let missing_parent = Uuid::parse_str("11111111-1111-1111-1111-111111111111")
+        .expect("hard-coded UUID must parse");
+
+    let err = match CreateFolder
+        .invoke(
+            json!({
+                "name": "Should Fail",
+                "parent_id": missing_parent.to_string(),
+            }),
+            &ctx,
+        )
+        .await
+    {
+        Ok(_) => panic!("create_folder should reject unknown parent IDs"),
+        Err(err) => err,
+    };
+
+    assert!(
+        err.to_string().contains(&missing_parent.to_string()),
+        "error should mention the unknown parent ID"
+    );
 }
 
 // ── Test 8: Fallback on unrecognised intent ───────────────────────────────────
@@ -813,15 +949,12 @@ async fn research_result_injected_into_editor_prompt() {
 async fn orchestrator_falls_back_on_unrecognised_intent() {
     let storage = Arc::new(MemStorage::new());
 
-    let provider = Arc::new(
-        ScriptedProvider::new(vec![])
-            .with_complete(vec![
-                // Unrecognised intent → falls back to ResearchOnly
-                r#"{"intent":"unknown","query":"whatever"}"#.into(),
-                // Researcher synthesis
-                "Nothing found.".into(),
-            ]),
-    );
+    let provider = Arc::new(ScriptedProvider::new(vec![]).with_complete(vec![
+        // Unrecognised intent → falls back to ResearchOnly
+        r#"{"intent":"unknown","query":"whatever"}"#.into(),
+        // Researcher synthesis
+        "Nothing found.".into(),
+    ]));
 
     let orch_ctx = noop_orch_ctx(storage as Arc<dyn StorageAdapter>, router_with(provider));
     let mut stream = orchestrate("some message", orch_ctx);
@@ -853,6 +986,8 @@ async fn agent_event_tagging() {
     let doc = make_doc("Tagging test body.");
     let doc_id = doc.id;
     let storage = Arc::new(MemStorage::with_doc(doc));
+    let folder = make_folder("Tagging", None);
+    storage.folders.lock().unwrap().insert(folder.id, folder);
 
     // Researcher uses RAG (emits synthetic search_documents ToolCall event).
     // Editor uses tool_call() turns.
@@ -890,7 +1025,7 @@ async fn agent_event_tagging() {
         events.push(ev.expect("no error expected"));
     }
 
-    // search_documents tool calls must be tagged Researcher
+    // search_documents and search_directories tool calls must be tagged Researcher
     let search_calls: Vec<_> = events
         .iter()
         .filter(|e| {
@@ -909,6 +1044,27 @@ async fn agent_event_tagging() {
             e.source,
             AgentSource::Researcher,
             "search_documents must be Researcher"
+        );
+    }
+
+    let directory_calls: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.event,
+                AgentEvent::ToolCall { name, .. } if name == "search_directories"
+            )
+        })
+        .collect();
+    assert!(
+        !directory_calls.is_empty(),
+        "must have at least one search_directories ToolCall"
+    );
+    for e in &directory_calls {
+        assert_eq!(
+            e.source,
+            AgentSource::Researcher,
+            "search_directories must be Researcher"
         );
     }
 

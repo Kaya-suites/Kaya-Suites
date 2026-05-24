@@ -26,8 +26,8 @@ pub struct ToolInvocation {
 
 /// In-memory log of tool invocations for the current session.
 ///
-/// Cheap to clone (inner `Arc`). Pass an `Arc<InvocationLog>` to
-/// [`super::AgentLoop::run`]; inspect it after the stream is consumed.
+/// Cheap to clone (inner `Arc`). Pass an `Arc<InvocationLog>` to the
+/// `Researcher` or `Editor`; inspect it after the stream is consumed.
 #[derive(Debug, Clone, Default)]
 pub struct InvocationLog {
     records: Arc<Mutex<Vec<ToolInvocation>>>,

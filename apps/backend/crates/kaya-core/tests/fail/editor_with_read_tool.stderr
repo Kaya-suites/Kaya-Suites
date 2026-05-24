@@ -8,5 +8,6 @@ error[E0277]: the trait bound `SearchDocuments: WriteTool` is not satisfied
             CreateDocument
             ProposeEdit
             UpdateDocument
+            kaya_core::agent::tools::CreateFolder
             kaya_core::agent::tools::DeleteDocument
   = note: required for the cast from `Arc<SearchDocuments>` to `Arc<dyn WriteTool>`

@@ -1,4 +1,4 @@
-//! CLI harness for the Kaya agent loop.
+//! CLI harness for the Kaya orchestrated agent flow.
 //!
 //! Runs one agent turn against a mock in-memory knowledge base, prints each
 //! event as it arrives, and shows the propose-then-approve flow end-to-end.
@@ -15,8 +15,7 @@ use futures::StreamExt;
 use serde_json::json;
 use uuid::Uuid;
 
-use kaya_core::agent::tools::default_tools;
-use kaya_core::agent::{AgentContext, AgentEvent, AgentLoop, InvocationLog};
+use kaya_core::agent::{AgentEvent, AgentSource, OrchestratorContext, SourcedEvent, orchestrate};
 use kaya_core::auth::UserSession;
 use kaya_core::edit::commit_edit;
 use kaya_core::error::KayaError;
@@ -60,6 +59,9 @@ impl StorageAdapter for Mem {
     async fn list_documents(&self) -> Result<Vec<Document>, StorageError> {
         Ok(self.0.lock().unwrap().values().cloned().collect())
     }
+    async fn list_folders(&self) -> Result<Vec<kaya_core::storage::Folder>, StorageError> {
+        Ok(vec![])
+    }
     async fn search_embeddings(
         &self,
         _q: &[f32],
@@ -95,12 +97,17 @@ impl StorageAdapter for Mem {
 
 struct MockProvider {
     turns: Mutex<std::collections::VecDeque<(Option<ToolCallResult>, Option<String>)>>,
+    complete_responses: Mutex<std::collections::VecDeque<String>>,
 }
 
 impl MockProvider {
-    fn new(turns: Vec<(Option<ToolCallResult>, Option<String>)>) -> Arc<Self> {
+    fn new(
+        turns: Vec<(Option<ToolCallResult>, Option<String>)>,
+        complete_responses: Vec<String>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             turns: Mutex::new(turns.into()),
+            complete_responses: Mutex::new(complete_responses.into()),
         })
     }
 }
@@ -109,7 +116,12 @@ impl MockProvider {
 impl LlmProvider for MockProvider {
     async fn complete(&self, r: CompletionRequest) -> Result<CompletionResponse, KayaError> {
         Ok(CompletionResponse {
-            content: String::new(),
+            content: self
+                .complete_responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_default(),
             usage: usage(r.model, r.operation),
         })
     }
@@ -224,7 +236,13 @@ impl SessionStorage for NoopSessions {
             by_embedding_model: vec![],
         })
     }
-    async fn save_embedding_call(&self, _: &str, _: u32) -> Result<(), SessionError> {
+    async fn save_embedding_call(&self, _: &kaya_core::EmbeddingCall) -> Result<(), SessionError> {
+        Ok(())
+    }
+    async fn upsert_document_embedding_status(
+        &self,
+        _: &kaya_core::DocumentEmbeddingStatus,
+    ) -> Result<(), SessionError> {
         Ok(())
     }
     async fn touch_session(&self, _: Uuid) -> Result<(), SessionError> {
@@ -260,14 +278,8 @@ async fn main() {
     let storage = Mem::new(vec![doc]);
 
     // Script the model: search → propose_edit → final answer.
-    let provider = MockProvider::new(vec![
-        (
-            Some(ToolCallResult {
-                tool_name: "search_documents".into(),
-                arguments: json!({ "query": "onboarding", "limit": 3 }),
-            }),
-            None,
-        ),
+    let provider = MockProvider::new(
+        vec![
         (
             Some(ToolCallResult {
                 tool_name: "propose_edit".into(),
@@ -285,76 +297,85 @@ async fn main() {
             None,
             Some("I've proposed adding a wiki link to the onboarding guide. Please review and approve.".into()),
         ),
-    ]);
+        ],
+        vec![
+            r#"{"intent":"research_then_edit","query":"onboarding guide","instruction":"Update the onboarding guide."}"#
+                .into(),
+            "The onboarding guide exists and is the right place for the requested wiki-link update.".into(),
+        ],
+    );
 
     let session = UserSession {
         user_id: Uuid::new_v4(),
     };
-    let ctx = Arc::new(AgentContext {
+    let ctx = OrchestratorContext {
         storage: storage.clone() as Arc<dyn StorageAdapter>,
         sessions: Arc::new(NoopSessions),
         router: router(provider as Arc<dyn LlmProvider>),
         session: session.clone(),
-    });
-
-    let log = Arc::new(InvocationLog::new());
-    let agent = AgentLoop::new(default_tools());
+        conversation_context: None,
+    };
 
     println!("── Agent turn ─────────────────────────────────────────────────");
     println!("User: Update the onboarding guide.\n");
 
-    let mut stream = agent.run(
-        "Update the onboarding guide.".into(),
-        vec![],
-        ctx,
-        log.clone(),
-    );
+    let mut stream = orchestrate("Update the onboarding guide.", ctx);
     let mut proposed_edit = None;
 
     while let Some(ev) = stream.next().await {
         match ev.unwrap() {
-            AgentEvent::ToolCall { name, input } => {
+            SourcedEvent {
+                source,
+                event: AgentEvent::ToolCall { name, input },
+            } => {
                 println!(
-                    "[tool call]  {name}({})",
+                    "[{source:?}][tool call]  {name}({})",
                     serde_json::to_string(&input).unwrap()
                 );
             }
-            AgentEvent::ToolResult {
-                name,
-                output,
-                latency_ms,
+            SourcedEvent {
+                source,
+                event:
+                    AgentEvent::ToolResult {
+                        name,
+                        output,
+                        latency_ms,
+                    },
             } => {
-                println!("[tool result] {name} — {latency_ms}ms → {output}");
+                println!("[{source:?}][tool result] {name} — {latency_ms}ms → {output}");
             }
-            AgentEvent::ProposedEditEmitted { edit } => {
-                println!("[proposed edit] id={}", edit.id);
+            SourcedEvent {
+                source: AgentSource::Editor,
+                event: AgentEvent::ProposedEditEmitted { edit },
+            } => {
+                println!("[Editor][proposed edit] id={}", edit.id);
                 proposed_edit = Some(edit);
             }
-            AgentEvent::FinalMessage { text } => {
-                println!("\nAssistant: {text}");
-            }
-            AgentEvent::ThinkingChunk { text } => print!("{text}"),
-            AgentEvent::Usage {
-                input_tokens,
-                output_tokens,
-                model,
+            SourcedEvent {
+                source,
+                event: AgentEvent::FinalMessage { text },
             } => {
-                println!("[usage] model={model} input={input_tokens} output={output_tokens}");
+                println!("\n{source:?}: {text}");
             }
+            SourcedEvent {
+                source,
+                event: AgentEvent::ThinkingChunk { text },
+            } => print!("[{source:?}] {text}"),
+            SourcedEvent {
+                source,
+                event:
+                    AgentEvent::Usage {
+                        input_tokens,
+                        output_tokens,
+                        model,
+                    },
+            } => {
+                println!(
+                    "[{source:?}][usage] model={model} input={input_tokens} output={output_tokens}"
+                );
+            }
+            SourcedEvent { .. } => {}
         }
-    }
-
-    // ── Show invocation log ───────────────────────────────────────────────────
-    println!(
-        "\n── Invocation log ({} entries) ─────────────────────────────",
-        log.len()
-    );
-    for entry in log.entries() {
-        let status = if entry.output.is_ok() { "ok" } else { "err" };
-        println!(
-            "  {} | {} | {}ms | {}",
-            entry.turn_id, entry.tool_name, entry.latency_ms, status
-        );
     }
 
     // ── Approve and commit ────────────────────────────────────────────────────
