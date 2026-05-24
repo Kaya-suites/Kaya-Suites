@@ -1,17 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export function useResizable(initial: number, min = 120, max = 480) {
-  const [width, setWidth] = useState(initial);
+export function useResizable(storageKey: string, initial: number, min = 120, max = 480) {
+  const [width, setWidth] = useState(() => {
+    if (typeof window === "undefined") return initial;
+    const stored = localStorage.getItem(storageKey);
+    if (stored) {
+      const parsed = parseInt(stored, 10);
+      if (!isNaN(parsed)) return Math.min(max, Math.max(min, parsed));
+    }
+    return initial;
+  });
+
   const dragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
+  const currentWidth = useRef(width);
+  currentWidth.current = width;
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     dragging.current = true;
     startX.current = e.clientX;
-    startWidth.current = width;
+    startWidth.current = currentWidth.current;
     e.preventDefault();
-  }, [width]);
+  }, []);
 
   useEffect(() => {
     function onMouseMove(e: MouseEvent) {
@@ -20,6 +31,9 @@ export function useResizable(initial: number, min = 120, max = 480) {
       setWidth(next);
     }
     function onMouseUp() {
+      if (dragging.current) {
+        localStorage.setItem(storageKey, String(currentWidth.current));
+      }
       dragging.current = false;
     }
     window.addEventListener("mousemove", onMouseMove);
@@ -28,7 +42,7 @@ export function useResizable(initial: number, min = 120, max = 480) {
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
-  }, [min, max]);
+  }, [min, max, storageKey]);
 
   return { width, onMouseDown };
 }

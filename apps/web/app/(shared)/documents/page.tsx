@@ -29,7 +29,7 @@ export default function DocumentsPage() {
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
 
-  const { width: sidebarWidth, onMouseDown: onResizeStart } = useResizable(200);
+  const { width: sidebarWidth, onMouseDown: onResizeStart } = useResizable("sidebar-width", 200);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
