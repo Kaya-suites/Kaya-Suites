@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 
-const MDXEditorClient = dynamic(
-  () => import("@/components/shared/MDXEditorClient").then((m) => m.MDXEditorClient),
+const KayaMarkdownEditor = dynamic(
+  () => import("@/components/shared/KayaMarkdownEditor").then((m) => m.KayaMarkdownEditor),
   { ssr: false },
 );
 
@@ -102,7 +102,7 @@ export default function NewDocumentPage() {
 
       {/* Editor */}
       <div className="flex-1 overflow-y-auto">
-        <MDXEditorClient markdown={body} onChange={setBody} />
+        <KayaMarkdownEditor markdown={body} onChange={setBody} />
       </div>
     </div>
   );

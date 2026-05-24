@@ -5,8 +5,8 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { KayaDocument } from "@/types/chat";
 
-const MDXEditorClient = dynamic(
-  () => import("./MDXEditorClient").then((m) => m.MDXEditorClient),
+const KayaMarkdownEditor = dynamic(
+  () => import("./KayaMarkdownEditor").then((m) => m.KayaMarkdownEditor),
   { ssr: false },
 );
 
@@ -113,7 +113,7 @@ export function DocumentEditor({ doc }: Props) {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <MDXEditorClient markdown={body} onChange={setBody} />
+        <KayaMarkdownEditor markdown={body} onChange={setBody} />
       </div>
     </div>
   );
