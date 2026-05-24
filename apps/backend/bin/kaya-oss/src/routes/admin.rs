@@ -7,6 +7,8 @@
 //! - `GET  /admin/users`                 — list all users (superadmin only)
 //! - `POST /admin/users`                 — create a user (superadmin only)
 //! - `DELETE /admin/users/:id`           — delete a user (superadmin only)
+//! - `GET  /admin/embeddings`            — recent embedding calls (founder only)
+//! - `GET  /admin/embedding-coverage`    — per-document embedding coverage (founder only)
 //! - `GET  /admin/tables`                — list browsable table names (founder only)
 //! - `GET  /admin/table/:name`           — paginated table rows (founder only)
 //! - `POST /admin/query`                 — execute a read-only SELECT (founder only)
@@ -35,6 +37,8 @@ pub fn router() -> Router<AppState> {
         .route("/admin/users", get(list_users))
         .route("/admin/users", post(create_user))
         .route("/admin/users/{id}", delete(delete_user))
+        .route("/admin/embeddings", get(list_embedding_calls))
+        .route("/admin/embedding-coverage", get(list_embedding_coverage))
         .route("/admin/tables", get(list_tables))
         .route("/admin/table/{name}", get(browse_table))
         .route("/admin/query", post(run_query))
@@ -273,8 +277,12 @@ async fn delete_user(
 const BROWSABLE_TABLES: &[&str] = &[
     "users",
     "documents",
+    "chunks",
+    "chunk_embeddings",
     "chat_sessions",
     "chat_messages",
+    "embedding_calls",
+    "document_embedding_status",
     "usage_events",
     "usage_counters",
     "subscriptions",
@@ -284,7 +292,10 @@ const BROWSABLE_TABLES: &[&str] = &[
 fn order_clause(table: &str) -> &'static str {
     match table {
         "users" | "chat_sessions" | "chat_messages" | "subscriptions" => "ORDER BY created_at DESC",
+        "embedding_calls" => "ORDER BY created_at DESC",
+        "document_embedding_status" => "ORDER BY updated_at DESC",
         "documents" => "ORDER BY updated_at DESC",
+        "chunks" | "chunk_embeddings" => "",
         "usage_events" => "ORDER BY recorded_at DESC",
         "usage_counters" => "ORDER BY period_start DESC",
         _ => "",
@@ -303,7 +314,12 @@ fn any_row_to_json(row: &sqlx::any::AnyRow) -> Vec<serde_json::Value> {
                     return serde_json::Value::Number(v.into());
                 }
             }
-            if type_name.contains("real") || type_name.contains("float") || type_name.contains("double") || type_name.contains("numeric") || type_name.contains("decimal") {
+            if type_name.contains("real")
+                || type_name.contains("float")
+                || type_name.contains("double")
+                || type_name.contains("numeric")
+                || type_name.contains("decimal")
+            {
                 if let Ok(v) = row.try_get::<f64, _>(name) {
                     if let Some(n) = serde_json::Number::from_f64(v) {
                         return serde_json::Value::Number(n);
@@ -332,7 +348,10 @@ fn any_row_to_json(row: &sqlx::any::AnyRow) -> Vec<serde_json::Value> {
         .collect()
 }
 
-async fn list_tables(State(state): State<AppState>, auth: AuthSession<KayaAuthBackend>) -> Response {
+async fn list_tables(
+    State(state): State<AppState>,
+    auth: AuthSession<KayaAuthBackend>,
+) -> Response {
     let user = match auth.user {
         Some(u) => u,
         None => return StatusCode::UNAUTHORIZED.into_response(),
@@ -341,7 +360,11 @@ async fn list_tables(State(state): State<AppState>, auth: AuthSession<KayaAuthBa
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    (StatusCode::OK, Json(serde_json::json!({ "tables": BROWSABLE_TABLES }))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "tables": BROWSABLE_TABLES })),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -352,8 +375,12 @@ struct PaginationParams {
     page_size: u32,
 }
 
-fn default_page() -> u32 { 1 }
-fn default_page_size() -> u32 { 50 }
+fn default_page() -> u32 {
+    1
+}
+fn default_page_size() -> u32 {
+    50
+}
 
 #[derive(Serialize)]
 struct TableResponse {
@@ -362,6 +389,34 @@ struct TableResponse {
     total: i64,
     page: u32,
     page_size: u32,
+}
+
+fn count_from_row(row: &sqlx::any::AnyRow) -> i64 {
+    row.try_get::<i64, _>("n")
+        .or_else(|_| row.try_get::<i64, _>(0))
+        .unwrap_or(0)
+}
+
+fn table_response_from_rows(
+    rows: &[sqlx::any::AnyRow],
+    total: i64,
+    page: u32,
+    page_size: u32,
+) -> TableResponse {
+    let columns: Vec<String> = rows
+        .first()
+        .map(|r| r.columns().iter().map(|c| c.name().to_string()).collect())
+        .unwrap_or_default();
+
+    let data: Vec<Vec<serde_json::Value>> = rows.iter().map(any_row_to_json).collect();
+
+    TableResponse {
+        columns,
+        rows: data,
+        total,
+        page,
+        page_size,
+    }
 }
 
 async fn browse_table(
@@ -391,41 +446,128 @@ async fn browse_table(
 
     let order = order_clause(&table_name);
 
-    let select_sql = format!(
-        "SELECT * FROM {table_name} {order} LIMIT {page_size} OFFSET {offset}"
-    );
+    let select_sql =
+        format!("SELECT * FROM {table_name} {order} LIMIT {page_size} OFFSET {offset}");
     let count_sql = format!("SELECT COUNT(*) as n FROM {table_name}");
 
     let rows_result = sqlx::query(&select_sql).fetch_all(&state.pool).await;
     let count_result = sqlx::query(&count_sql).fetch_one(&state.pool).await;
 
     match (rows_result, count_result) {
-        (Ok(rows), Ok(count_row)) => {
-            let total: i64 = count_row.try_get::<i64, _>("n")
-                .or_else(|_| count_row.try_get::<i64, _>(0))
-                .unwrap_or(0);
-
-            let columns: Vec<String> = rows
-                .first()
-                .map(|r| r.columns().iter().map(|c| c.name().to_string()).collect())
-                .unwrap_or_default();
-
-            let data: Vec<Vec<serde_json::Value>> = rows.iter().map(any_row_to_json).collect();
-
-            (
-                StatusCode::OK,
-                Json(TableResponse {
-                    columns,
-                    rows: data,
-                    total,
-                    page,
-                    page_size,
-                }),
-            )
-                .into_response()
-        }
+        (Ok(rows), Ok(count_row)) => (
+            StatusCode::OK,
+            Json(table_response_from_rows(
+                &rows,
+                count_from_row(&count_row),
+                page,
+                page_size,
+            )),
+        )
+            .into_response(),
         (Err(e), _) | (_, Err(e)) => {
             tracing::error!(error = %e, table = %table_name, "browse_table failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+async fn list_embedding_calls(
+    State(state): State<AppState>,
+    auth: AuthSession<KayaAuthBackend>,
+    Query(params): Query<PaginationParams>,
+) -> Response {
+    let user = match auth.user {
+        Some(u) => u,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+    if !is_founder(&user, &state.admin_email) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    let page_size = params.page_size.clamp(1, 200);
+    let page = params.page.max(1);
+    let offset = (page - 1) * page_size;
+
+    let select_sql = format!(
+        "SELECT ec.created_at, ec.task_id, ec.task_type, ec.model, ec.tokens,
+                ec.session_id, ec.document_id, d.title AS document_title, ec.paragraph_id
+         FROM embedding_calls ec
+         LEFT JOIN documents d ON d.id = ec.document_id
+         ORDER BY ec.created_at DESC
+         LIMIT {page_size} OFFSET {offset}"
+    );
+    let count_sql = "SELECT COUNT(*) AS n FROM embedding_calls";
+
+    match (
+        sqlx::query(&select_sql).fetch_all(&state.pool).await,
+        sqlx::query(count_sql).fetch_one(&state.pool).await,
+    ) {
+        (Ok(rows), Ok(count_row)) => (
+            StatusCode::OK,
+            Json(table_response_from_rows(
+                &rows,
+                count_from_row(&count_row),
+                page,
+                page_size,
+            )),
+        )
+            .into_response(),
+        (Err(e), _) | (_, Err(e)) => {
+            tracing::error!(error = %e, "list_embedding_calls failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+async fn list_embedding_coverage(
+    State(state): State<AppState>,
+    auth: AuthSession<KayaAuthBackend>,
+    Query(params): Query<PaginationParams>,
+) -> Response {
+    let user = match auth.user {
+        Some(u) => u,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+    if !is_founder(&user, &state.admin_email) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    let page_size = params.page_size.clamp(1, 200);
+    let page = params.page.max(1);
+    let offset = (page - 1) * page_size;
+
+    let select_sql = format!(
+        "SELECT s.document_id, d.title, s.task_id, s.status,
+                s.expected_chunks, s.embedded_chunks,
+                CASE
+                    WHEN s.expected_chunks > s.embedded_chunks
+                    THEN s.expected_chunks - s.embedded_chunks
+                    ELSE 0
+                END AS missing_chunks,
+                s.last_error, s.updated_at, s.last_indexed_at
+         FROM document_embedding_status s
+         LEFT JOIN documents d ON d.id = s.document_id
+         ORDER BY s.updated_at DESC
+         LIMIT {page_size} OFFSET {offset}"
+    );
+    let count_sql = "SELECT COUNT(*) AS n FROM document_embedding_status";
+
+    match (
+        sqlx::query(&select_sql).fetch_all(&state.pool).await,
+        sqlx::query(count_sql).fetch_one(&state.pool).await,
+    ) {
+        (Ok(rows), Ok(count_row)) => (
+            StatusCode::OK,
+            Json(table_response_from_rows(
+                &rows,
+                count_from_row(&count_row),
+                page,
+                page_size,
+            )),
+        )
+            .into_response(),
+        (Err(e), _) | (_, Err(e)) => {
+            tracing::error!(error = %e, "list_embedding_coverage failed");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -457,8 +599,7 @@ fn validate_select_only(sql: &str) -> Result<(), &'static str> {
         .filter(|t| !t.is_empty())
         .collect();
     const BANNED: &[&str] = &[
-        "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER",
-        "TRUNCATE", "GRANT", "REVOKE",
+        "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE", "GRANT", "REVOKE",
     ];
     for banned in BANNED {
         if tokens.contains(banned) {
@@ -498,7 +639,14 @@ async fn run_query(
 
             let data: Vec<Vec<serde_json::Value>> = rows.iter().map(any_row_to_json).collect();
 
-            (StatusCode::OK, Json(QueryResponse { columns, rows: data })).into_response()
+            (
+                StatusCode::OK,
+                Json(QueryResponse {
+                    columns,
+                    rows: data,
+                }),
+            )
+                .into_response()
         }
         Err(e) => {
             tracing::warn!(error = %e, "admin query failed");

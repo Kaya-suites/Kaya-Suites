@@ -134,12 +134,11 @@ async fn run_inspect(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
     }
 
     // Chunk counts keyed by document_id.
-    let chunk_rows = sqlx::query(
-        "SELECT document_id, COUNT(*) as cnt FROM chunks GROUP BY document_id",
-    )
-    .fetch_all(pool)
-    .await
-    .context("failed to query chunk counts")?;
+    let chunk_rows =
+        sqlx::query("SELECT document_id, COUNT(*) as cnt FROM chunks GROUP BY document_id")
+            .fetch_all(pool)
+            .await
+            .context("failed to query chunk counts")?;
 
     let mut chunk_counts: HashMap<String, i64> = HashMap::new();
     for row in &chunk_rows {
@@ -268,10 +267,7 @@ async fn run_reindex(
 
     let sep = "─".repeat(72);
     println!("{sep}");
-    println!(
-        "  Reindexing {} document(s)…",
-        targets.len(),
-    );
+    println!("  Reindexing {} document(s)…", targets.len(),);
     println!("{sep}");
 
     let mut total_calls = 0usize;
@@ -282,7 +278,7 @@ async fn run_reindex(
         let title = truncate(&doc.title, 44);
         print!("{prefix}  {title:<44}  … ");
 
-        match retrieval::index_document_chunks(doc, &storage, &router, None).await {
+        match retrieval::index_document_chunks(doc, &storage, &router, None, None).await {
             Ok(n) => {
                 total_calls += n;
                 if n == 0 {
