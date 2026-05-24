@@ -24,12 +24,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use chrono::Utc;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::error::KayaError;
 use crate::model_router::ModelRouter;
-use crate::session::SessionStorage;
+use crate::session::{DocumentEmbeddingStatus, EmbeddingCall, SessionStorage};
 use crate::storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter};
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -44,6 +45,15 @@ pub struct RetrievalResult {
     pub ordinal: u32,
     /// Reciprocal rank fusion score; higher means more relevant.
     pub score: f32,
+}
+
+/// Context attached to embedding work so usage can be attributed to a task.
+#[derive(Debug, Clone)]
+pub struct EmbeddingTaskContext {
+    pub task_id: Option<String>,
+    pub task_type: String,
+    pub session_id: Option<Uuid>,
+    pub document_id: Option<Uuid>,
 }
 
 // ── Chunking ──────────────────────────────────────────────────────────────────
@@ -101,8 +111,11 @@ pub async fn index_document_chunks(
     storage: &Arc<dyn StorageAdapter>,
     router: &ModelRouter,
     sessions: Option<&dyn SessionStorage>,
+    context: Option<&EmbeddingTaskContext>,
 ) -> Result<usize, KayaError> {
     let new_chunks = chunk_document(doc);
+    let total_chunks = new_chunks.len() as u32;
+    let now = Utc::now().timestamp_millis();
 
     // Existing paragraph_id → content_hash map for this document.
     let stored: HashMap<String, String> = storage
@@ -133,15 +146,60 @@ pub async fn index_document_chunks(
         .collect();
 
     let embed_count = to_embed.len();
+    let unchanged_chunks = total_chunks.saturating_sub(embed_count as u32);
+
+    if let (Some(s), Some(ctx)) = (sessions, context) {
+        let _ = s
+            .upsert_document_embedding_status(&DocumentEmbeddingStatus {
+                document_id: doc.id,
+                task_id: ctx.task_id.clone(),
+                status: "running".to_string(),
+                expected_chunks: total_chunks,
+                embedded_chunks: unchanged_chunks,
+                last_error: None,
+                updated_at: now,
+                last_indexed_at: None,
+            })
+            .await;
+    }
 
     // Generate all new embeddings BEFORE mutating storage.  If any embed call
     // fails, the existing index is left untouched.
     let mut new_embeddings: Vec<Embedding> = Vec::with_capacity(embed_count);
     for chunk in &to_embed {
-        let resp = router.embed(&chunk.content).await?;
+        let resp = match router.embed(&chunk.content).await {
+            Ok(resp) => resp,
+            Err(err) => {
+                if let (Some(s), Some(ctx)) = (sessions, context) {
+                    let _ = s
+                        .upsert_document_embedding_status(&DocumentEmbeddingStatus {
+                            document_id: doc.id,
+                            task_id: ctx.task_id.clone(),
+                            status: "failed".to_string(),
+                            expected_chunks: total_chunks,
+                            embedded_chunks: unchanged_chunks + new_embeddings.len() as u32,
+                            last_error: Some(err.to_string()),
+                            updated_at: Utc::now().timestamp_millis(),
+                            last_indexed_at: None,
+                        })
+                        .await;
+                }
+                return Err(err);
+            }
+        };
         if let Some(s) = sessions {
             let _ = s
-                .save_embedding_call(&resp.usage.model, resp.usage.input_tokens)
+                .save_embedding_call(&EmbeddingCall {
+                    model: resp.usage.model.clone(),
+                    tokens: resp.usage.input_tokens,
+                    task_id: context.and_then(|ctx| ctx.task_id.clone()),
+                    task_type: context
+                        .map(|ctx| ctx.task_type.clone())
+                        .unwrap_or_else(|| "document_index".to_string()),
+                    session_id: context.and_then(|ctx| ctx.session_id),
+                    document_id: Some(doc.id),
+                    paragraph_id: Some(chunk.paragraph_id.clone()),
+                })
                 .await;
         }
         new_embeddings.push(Embedding {
@@ -170,6 +228,21 @@ pub async fn index_document_chunks(
         storage.save_embeddings(&emb).await?;
     }
 
+    if let (Some(s), Some(ctx)) = (sessions, context) {
+        let _ = s
+            .upsert_document_embedding_status(&DocumentEmbeddingStatus {
+                document_id: doc.id,
+                task_id: ctx.task_id.clone(),
+                status: "completed".to_string(),
+                expected_chunks: total_chunks,
+                embedded_chunks: total_chunks,
+                last_error: None,
+                updated_at: Utc::now().timestamp_millis(),
+                last_indexed_at: Some(Utc::now().timestamp_millis()),
+            })
+            .await;
+    }
+
     Ok(embed_count)
 }
 
@@ -188,6 +261,7 @@ pub async fn retrieve(
     storage: &Arc<dyn StorageAdapter>,
     router: &ModelRouter,
     sessions: Option<&dyn SessionStorage>,
+    context: Option<&EmbeddingTaskContext>,
 ) -> Result<Vec<RetrievalResult>, KayaError> {
     if query.trim().is_empty() || k == 0 {
         return Ok(vec![]);
@@ -196,7 +270,17 @@ pub async fn retrieve(
     let emb_resp = router.embed(query).await?;
     if let Some(s) = sessions {
         let _ = s
-            .save_embedding_call(&emb_resp.usage.model, emb_resp.usage.input_tokens)
+            .save_embedding_call(&EmbeddingCall {
+                model: emb_resp.usage.model.clone(),
+                tokens: emb_resp.usage.input_tokens,
+                task_id: context.and_then(|ctx| ctx.task_id.clone()),
+                task_type: context
+                    .map(|ctx| ctx.task_type.clone())
+                    .unwrap_or_else(|| "retrieval_query".to_string()),
+                session_id: context.and_then(|ctx| ctx.session_id),
+                document_id: context.and_then(|ctx| ctx.document_id),
+                paragraph_id: None,
+            })
             .await;
     }
     let query_vec = emb_resp.embedding;

@@ -1,6 +1,7 @@
 //! SessionStorage trait and domain types for chat sessions and messages.
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// A chat session.
@@ -34,6 +35,27 @@ pub struct MessageRecord {
     pub model: String,
 }
 
+/// A persisted summary of older chat history for a session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatHistorySummary {
+    pub summary: String,
+    pub covered_message_count: u32,
+    pub updated_at: i64,
+}
+
+/// A persisted edit-history entry for a session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditHistoryEntry {
+    pub edit_id: String,
+    pub kind: String,
+    pub status: String,
+    pub summary: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 /// Token usage aggregated across all sessions.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,6 +83,40 @@ pub struct ModelUsage {
 pub struct EmbeddingModelUsage {
     pub model: String,
     pub tokens: u32,
+}
+
+/// Metadata recorded for a single embedding API call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddingCall {
+    pub model: String,
+    pub tokens: u32,
+    pub task_id: Option<String>,
+    pub task_type: String,
+    pub session_id: Option<Uuid>,
+    pub document_id: Option<Uuid>,
+    pub paragraph_id: Option<String>,
+}
+
+/// Current embedding/indexing state for a document.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentEmbeddingStatus {
+    pub document_id: Uuid,
+    pub task_id: Option<String>,
+    pub status: String,
+    pub expected_chunks: u32,
+    pub embedded_chunks: u32,
+    pub last_error: Option<String>,
+    pub updated_at: i64,
+    pub last_indexed_at: Option<i64>,
+}
+
+/// Persisted UI state for the folder sidebar.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderSidebarState {
+    pub expanded_folder_ids: Vec<String>,
 }
 
 /// Per-session token totals (for the usage table).
@@ -95,6 +151,37 @@ pub trait SessionStorage: Send + Sync {
         &self,
         session_id: Uuid,
     ) -> Result<Vec<(String, String)>, SessionError>;
+    /// Return the rolling summary of older messages for prompt context.
+    async fn get_chat_summary(
+        &self,
+        _session_id: Uuid,
+    ) -> Result<Option<ChatHistorySummary>, SessionError> {
+        Ok(None)
+    }
+    /// Persist the rolling summary of older messages for prompt context.
+    async fn save_chat_summary(
+        &self,
+        _session_id: Uuid,
+        _summary: &ChatHistorySummary,
+    ) -> Result<(), SessionError> {
+        Ok(())
+    }
+    /// Return the most recent edit-history entries for prompt context.
+    async fn get_recent_edit_history(
+        &self,
+        _session_id: Uuid,
+        _limit: usize,
+    ) -> Result<Vec<EditHistoryEntry>, SessionError> {
+        Ok(vec![])
+    }
+    /// Persist or update an edit-history entry for prompt context.
+    async fn upsert_edit_history_entry(
+        &self,
+        _session_id: Uuid,
+        _entry: &EditHistoryEntry,
+    ) -> Result<(), SessionError> {
+        Ok(())
+    }
     async fn save_user_message(
         &self,
         session_id: Uuid,
@@ -113,7 +200,23 @@ pub trait SessionStorage: Send + Sync {
     ) -> Result<(), SessionError>;
     async fn get_usage_summary(&self) -> Result<UsageSummary, SessionError>;
     /// Record a single embedding API call (tokens used, model name).
-    async fn save_embedding_call(&self, model: &str, tokens: u32) -> Result<(), SessionError>;
+    async fn save_embedding_call(&self, call: &EmbeddingCall) -> Result<(), SessionError>;
+    /// Update the current indexing/embedding status for a document.
+    async fn upsert_document_embedding_status(
+        &self,
+        status: &DocumentEmbeddingStatus,
+    ) -> Result<(), SessionError>;
+    /// Load the user's folder sidebar expansion state.
+    async fn get_folder_sidebar_state(&self) -> Result<Option<FolderSidebarState>, SessionError> {
+        Ok(None)
+    }
+    /// Persist the user's folder sidebar expansion state.
+    async fn save_folder_sidebar_state(
+        &self,
+        _state: &FolderSidebarState,
+    ) -> Result<(), SessionError> {
+        Ok(())
+    }
     /// Update the session's `updated_at` timestamp (and `message_count` where tracked).
     async fn touch_session(&self, session_id: Uuid) -> Result<(), SessionError>;
     /// Rename the session, replacing its current title.

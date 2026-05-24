@@ -193,6 +193,16 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
     ").await?;
     exec(pool, "CREATE INDEX IF NOT EXISTS chat_messages_session ON chat_messages (session_id, user_id, created_at ASC)").await?;
 
+    exec(pool, "
+        CREATE TABLE IF NOT EXISTS user_ui_preferences (
+            user_id          VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            preference_key   TEXT        NOT NULL,
+            preference_value JSONB       NOT NULL,
+            updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (user_id, preference_key)
+        )
+    ").await?;
+
     // tool_invocations
     exec(
         pool,
@@ -308,17 +318,49 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
         pool,
         "
         CREATE TABLE IF NOT EXISTS embedding_calls (
-            id         VARCHAR(36)  NOT NULL,
-            user_id    VARCHAR(36)  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            model      TEXT         NOT NULL,
-            tokens     INTEGER      NOT NULL DEFAULT 0,
-            created_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
+            id           VARCHAR(36)  NOT NULL,
+            user_id      VARCHAR(36)  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            model        TEXT         NOT NULL,
+            tokens       INTEGER      NOT NULL DEFAULT 0,
+            task_id      TEXT,
+            task_type    TEXT         NOT NULL DEFAULT 'unknown',
+            session_id   VARCHAR(36),
+            document_id  VARCHAR(36),
+            paragraph_id TEXT,
+            created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
             PRIMARY KEY (id)
         )
     ",
     )
     .await?;
     exec(pool, "CREATE INDEX IF NOT EXISTS embedding_calls_user ON embedding_calls (user_id, created_at DESC)").await?;
+    for stmt in [
+        "ALTER TABLE embedding_calls ADD COLUMN IF NOT EXISTS task_id TEXT",
+        "ALTER TABLE embedding_calls ADD COLUMN IF NOT EXISTS task_type TEXT NOT NULL DEFAULT 'unknown'",
+        "ALTER TABLE embedding_calls ADD COLUMN IF NOT EXISTS session_id VARCHAR(36)",
+        "ALTER TABLE embedding_calls ADD COLUMN IF NOT EXISTS document_id VARCHAR(36)",
+        "ALTER TABLE embedding_calls ADD COLUMN IF NOT EXISTS paragraph_id TEXT",
+    ] {
+        exec(pool, stmt).await?;
+    }
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS document_embedding_status (
+            user_id         VARCHAR(36)  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            document_id     VARCHAR(36)  NOT NULL,
+            task_id         TEXT,
+            status          TEXT         NOT NULL DEFAULT 'pending',
+            expected_chunks INTEGER      NOT NULL DEFAULT 0,
+            embedded_chunks INTEGER      NOT NULL DEFAULT 0,
+            last_error      TEXT,
+            updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+            last_indexed_at TIMESTAMPTZ,
+            PRIMARY KEY (user_id, document_id)
+        )
+    ",
+    )
+    .await?;
 
     tracing::info!("Postgres migrations applied");
     Ok(())
@@ -426,16 +468,48 @@ async fn run_sqlite(pool: &AnyPool) -> anyhow::Result<()> {
         pool,
         "
         CREATE TABLE IF NOT EXISTS embedding_calls (
-            id         TEXT    NOT NULL PRIMARY KEY,
-            user_id    TEXT    NOT NULL,
-            model      TEXT    NOT NULL,
-            tokens     INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            id           TEXT    NOT NULL PRIMARY KEY,
+            user_id      TEXT    NOT NULL,
+            model        TEXT    NOT NULL,
+            tokens       INTEGER NOT NULL DEFAULT 0,
+            task_id      TEXT,
+            task_type    TEXT    NOT NULL DEFAULT 'unknown',
+            session_id   TEXT,
+            document_id  TEXT,
+            paragraph_id TEXT,
+            created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
         )
     ",
     )
     .await?;
     exec(pool, "CREATE INDEX IF NOT EXISTS embedding_calls_user ON embedding_calls (user_id, created_at DESC)").await?;
+    for stmt in [
+        "ALTER TABLE embedding_calls ADD COLUMN task_id TEXT",
+        "ALTER TABLE embedding_calls ADD COLUMN task_type TEXT NOT NULL DEFAULT 'unknown'",
+        "ALTER TABLE embedding_calls ADD COLUMN session_id TEXT",
+        "ALTER TABLE embedding_calls ADD COLUMN document_id TEXT",
+        "ALTER TABLE embedding_calls ADD COLUMN paragraph_id TEXT",
+    ] {
+        let _ = exec(pool, stmt).await;
+    }
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS document_embedding_status (
+            user_id         TEXT    NOT NULL,
+            document_id     TEXT    NOT NULL,
+            task_id         TEXT,
+            status          TEXT    NOT NULL DEFAULT 'pending',
+            expected_chunks INTEGER NOT NULL DEFAULT 0,
+            embedded_chunks INTEGER NOT NULL DEFAULT 0,
+            last_error      TEXT,
+            updated_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+            last_indexed_at TEXT,
+            PRIMARY KEY (user_id, document_id)
+        )
+    ",
+    )
+    .await?;
 
     tracing::info!("SQLite migrations applied");
     Ok(())
@@ -545,13 +619,45 @@ async fn run_mysql(pool: &AnyPool) -> anyhow::Result<()> {
         pool,
         "
         CREATE TABLE IF NOT EXISTS embedding_calls (
-            id         VARCHAR(36)  NOT NULL,
-            user_id    VARCHAR(36)  NOT NULL,
-            model      VARCHAR(200) NOT NULL,
-            tokens     INT          NOT NULL DEFAULT 0,
-            created_at DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+            id           VARCHAR(36)  NOT NULL,
+            user_id      VARCHAR(36)  NOT NULL,
+            model        VARCHAR(200) NOT NULL,
+            tokens       INT          NOT NULL DEFAULT 0,
+            task_id      VARCHAR(64),
+            task_type    VARCHAR(64)  NOT NULL DEFAULT 'unknown',
+            session_id   VARCHAR(36),
+            document_id  VARCHAR(36),
+            paragraph_id VARCHAR(255),
+            created_at   DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
             PRIMARY KEY (id),
             KEY embedding_calls_user (user_id, created_at DESC)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+    )
+    .await?;
+    for stmt in [
+        "ALTER TABLE embedding_calls ADD COLUMN task_id VARCHAR(64)",
+        "ALTER TABLE embedding_calls ADD COLUMN task_type VARCHAR(64) NOT NULL DEFAULT 'unknown'",
+        "ALTER TABLE embedding_calls ADD COLUMN session_id VARCHAR(36)",
+        "ALTER TABLE embedding_calls ADD COLUMN document_id VARCHAR(36)",
+        "ALTER TABLE embedding_calls ADD COLUMN paragraph_id VARCHAR(255)",
+    ] {
+        let _ = exec(pool, stmt).await;
+    }
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS document_embedding_status (
+            user_id         VARCHAR(36)  NOT NULL,
+            document_id     VARCHAR(36)  NOT NULL,
+            task_id         VARCHAR(64),
+            status          VARCHAR(32)  NOT NULL DEFAULT 'pending',
+            expected_chunks INT          NOT NULL DEFAULT 0,
+            embedded_chunks INT          NOT NULL DEFAULT 0,
+            last_error      TEXT,
+            updated_at      DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+            last_indexed_at DATETIME(6),
+            PRIMARY KEY (user_id, document_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ",
     )

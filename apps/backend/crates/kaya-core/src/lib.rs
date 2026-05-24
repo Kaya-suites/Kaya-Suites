@@ -17,10 +17,12 @@ pub use edit::{ApprovalToken, ProposedEdit, ProposedEditKind, commit_edit};
 pub use error::KayaError;
 pub use model_router::{ConfigError, LlmProvider, Meter, ModelRouter, OperationType, TokenUsage};
 pub use retrieval::{
-    RetrievalResult, chunk_document, index_document_chunks, make_paragraph_id, retrieve,
+    EmbeddingTaskContext, RetrievalResult, chunk_document, index_document_chunks,
+    make_paragraph_id, retrieve,
 };
 pub use session::{
-    EmbeddingModelUsage, MessageRecord, ModelUsage, Session, SessionError, SessionStorage,
-    SessionTokenUsage, UsageSummary,
+    DocumentEmbeddingStatus, EmbeddingCall, EmbeddingModelUsage, FolderSidebarState,
+    MessageRecord, ModelUsage, Session, SessionError, SessionStorage, SessionTokenUsage,
+    UsageSummary,
 };
 pub use storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter, StorageError};
