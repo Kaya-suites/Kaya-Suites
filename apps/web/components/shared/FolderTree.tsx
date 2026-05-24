@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   useDraggable,
@@ -13,6 +14,7 @@ export type Folder = {
   id: string;
   name: string;
   parentId: string | null;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -29,15 +31,20 @@ type Props = {
   folders: Folder[];
   documents: DocumentSummary[];
   selectedFolderId: string | null | "root";
-  overFolderId?: string | null;
+  overDropTarget?: FolderDropTarget;
   onSelectFolder: (id: string | null) => void;
   onFolderCreated: (folder: Folder) => void;
   onFolderRenamed: (folder: Folder) => void;
   onFolderDeleted: (id: string) => void;
+  onDocumentCreated: (doc: DocumentSummary) => void;
   onDocumentDeleted: (id: string) => void;
-  onDocumentMoved: (docId: string, folderId: string | null) => void;
-  onFolderMoved: (folderId: string, newParentId: string | null) => void;
 };
+
+export type FolderDropTarget =
+  | { kind: "inside"; folderId: string }
+  | { kind: "before"; folderId: string; parentId: string | null }
+  | { kind: "after"; folderId: string; parentId: string | null }
+  | { kind: "root" };
 
 // ── Context menu ──────────────────────────────────────────────────────────────
 
@@ -60,6 +67,12 @@ type DeleteConfirm = {
   subFolderCount: number;
 };
 
+type FolderSidebarState = {
+  expandedFolderIds: string[];
+};
+
+const EXPANDED_FOLDERS_STORAGE_KEY = "kaya_folder_sidebar_expanded_v1";
+
 // ── Kebab icon ────────────────────────────────────────────────────────────────
 
 function KebabIcon() {
@@ -81,7 +94,7 @@ function DraggableFolderNode({
   documents,
   selectedFolderId,
   expandedIds,
-  overFolderId,
+  overDropTarget,
   onSelectFolder,
   onToggleExpand,
   onContextMenu,
@@ -93,7 +106,7 @@ function DraggableFolderNode({
   documents: DocumentSummary[];
   selectedFolderId: string | null | "root";
   expandedIds: Set<string>;
-  overFolderId: string | null | undefined;
+  overDropTarget: FolderDropTarget | undefined;
   onSelectFolder: (id: string | null) => void;
   onToggleExpand: (id: string) => void;
   onContextMenu: (e: React.MouseEvent, folderId: string) => void;
@@ -110,17 +123,32 @@ function DraggableFolderNode({
     data: { type: "folder", folderId: folder.id, parentId: folder.parentId },
   });
 
-  const { setNodeRef: setDropRef } = useDroppable({
+  const { setNodeRef: setInsideDropRef } = useDroppable({
     id: `folder-drop:${folder.id}`,
-    data: { type: "folder", folderId: folder.id },
+    data: { type: "folder-target", dropType: "inside", folderId: folder.id },
+  });
+
+  const { setNodeRef: setBeforeDropRef } = useDroppable({
+    id: `folder-before:${folder.id}`,
+    data: { type: "folder-target", dropType: "before", folderId: folder.id, parentId: folder.parentId },
+  });
+
+  const { setNodeRef: setAfterDropRef } = useDroppable({
+    id: `folder-after:${folder.id}`,
+    data: { type: "folder-target", dropType: "after", folderId: folder.id, parentId: folder.parentId },
   });
 
   const mergedRef = (node: HTMLDivElement | null) => {
     setDragRef(node);
-    setDropRef(node);
+    setInsideDropRef(node);
   };
 
-  const isOver = overFolderId === folder.id && !isDragging;
+  const isOverInside =
+    overDropTarget?.kind === "inside" && overDropTarget.folderId === folder.id && !isDragging;
+  const isOverBefore =
+    overDropTarget?.kind === "before" && overDropTarget.folderId === folder.id && !isDragging;
+  const isOverAfter =
+    overDropTarget?.kind === "after" && overDropTarget.folderId === folder.id && !isDragging;
 
   function handleRowClick() {
     onSelectFolder(folder.id);
@@ -129,6 +157,18 @@ function DraggableFolderNode({
 
   return (
     <div style={{ opacity: isDragging ? 0.4 : 1 }}>
+      <div
+        ref={setBeforeDropRef}
+        className="px-2"
+        style={{ paddingLeft: `${depth * 12 + 20}px` }}
+      >
+        <div
+          className={`h-0.5 rounded-full transition-colors ${
+            isOverBefore ? "bg-[var(--color-accent)]" : "bg-transparent"
+          }`}
+        />
+      </div>
+
       {/* Folder row */}
       <div
         ref={mergedRef}
@@ -137,7 +177,7 @@ function DraggableFolderNode({
         className={`group flex items-center gap-1.5 px-2 py-1 cursor-pointer select-none text-xs font-mono font-bold uppercase tracking-wider transition-colors border-2 ${
           isSelected
             ? "bg-[var(--color-accent)] text-white border-transparent"
-            : isOver
+            : isOverInside
             ? "border-[var(--color-accent)] bg-[var(--color-muted-bg)] text-black"
             : "border-transparent text-black hover:bg-[var(--color-muted-bg)]"
         }`}
@@ -189,7 +229,7 @@ function DraggableFolderNode({
               documents={documents}
               selectedFolderId={selectedFolderId}
               expandedIds={expandedIds}
-              overFolderId={overFolderId}
+              overDropTarget={overDropTarget}
               onSelectFolder={onSelectFolder}
               onToggleExpand={onToggleExpand}
               onContextMenu={onContextMenu}
@@ -203,6 +243,18 @@ function DraggableFolderNode({
           ))}
         </>
       )}
+
+      <div
+        ref={setAfterDropRef}
+        className="px-2"
+        style={{ paddingLeft: `${depth * 12 + 20}px` }}
+      >
+        <div
+          className={`h-0.5 rounded-full transition-colors ${
+            isOverAfter ? "bg-[var(--color-accent)]" : "bg-transparent"
+          }`}
+        />
+      </div>
     </div>
   );
 }
@@ -268,7 +320,7 @@ function RootDropZone({
 }) {
   const { setNodeRef } = useDroppable({
     id: "folder-drop:root",
-    data: { type: "folder", folderId: null },
+    data: { type: "folder-target", dropType: "root" },
   });
 
   const isSelected = selectedFolderId === null;
@@ -346,15 +398,15 @@ export function FolderTree({
   folders,
   documents,
   selectedFolderId,
-  overFolderId,
+  overDropTarget,
   onSelectFolder,
   onFolderCreated,
   onFolderRenamed,
   onFolderDeleted,
+  onDocumentCreated,
   onDocumentDeleted,
-  onDocumentMoved,
-  onFolderMoved,
 }: Props) {
+  const router = useRouter();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
@@ -362,8 +414,12 @@ export function FolderTree({
   const [newFolderName, setNewFolderName] = useState("");
   const [docKebabMenu, setDocKebabMenu] = useState<DocKebabMenu | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null);
+  const [preferencesReady, setPreferencesReady] = useState(false);
   const renameRef = useRef<HTMLInputElement>(null);
   const createRef = useRef<HTMLInputElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const docKebabMenuRef = useRef<HTMLDivElement>(null);
+  const savePreferencesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (renaming) renameRef.current?.focus();
@@ -372,6 +428,99 @@ export function FolderTree({
   useEffect(() => {
     if (creating) createRef.current?.focus();
   }, [creating]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadExpandedFolders() {
+      let hadLocalState = false;
+
+      try {
+        const raw = window.localStorage.getItem(EXPANDED_FOLDERS_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as string[];
+          if (Array.isArray(parsed)) {
+            hadLocalState = true;
+            if (!cancelled) setExpandedIds(new Set(parsed));
+          }
+        }
+      } catch {}
+
+      try {
+        const res = await fetch("/api/preferences/folder-sidebar");
+        if (!res.ok) return;
+        const state = await res.json() as FolderSidebarState;
+        if (!cancelled && !hadLocalState && Array.isArray(state.expandedFolderIds)) {
+          setExpandedIds(new Set(state.expandedFolderIds));
+        }
+      } catch {
+        // Local state is the first source of truth; server sync is best-effort.
+      } finally {
+        if (!cancelled) setPreferencesReady(true);
+      }
+    }
+
+    void loadExpandedFolders();
+
+    return () => {
+      cancelled = true;
+      if (savePreferencesTimerRef.current) clearTimeout(savePreferencesTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!preferencesReady) return;
+
+    const expandedFolderIds = Array.from(expandedIds).sort();
+
+    try {
+      window.localStorage.setItem(
+        EXPANDED_FOLDERS_STORAGE_KEY,
+        JSON.stringify(expandedFolderIds),
+      );
+    } catch {}
+
+    if (savePreferencesTimerRef.current) clearTimeout(savePreferencesTimerRef.current);
+    savePreferencesTimerRef.current = setTimeout(() => {
+      void fetch("/api/preferences/folder-sidebar", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expandedFolderIds }),
+      }).catch(() => {});
+    }, 300);
+
+    return () => {
+      if (savePreferencesTimerRef.current) clearTimeout(savePreferencesTimerRef.current);
+    };
+  }, [expandedIds, preferencesReady]);
+
+  useEffect(() => {
+    if (!contextMenu && !docKebabMenu) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (contextMenuRef.current?.contains(target)) return;
+      if (docKebabMenuRef.current?.contains(target)) return;
+      closeAll();
+    }
+
+    function handleContextMenuOutside(event: MouseEvent) {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (contextMenuRef.current?.contains(target)) return;
+      if (docKebabMenuRef.current?.contains(target)) return;
+      closeAll();
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("contextmenu", handleContextMenuOutside, true);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("contextmenu", handleContextMenuOutside, true);
+    };
+  }, [contextMenu, docKebabMenu]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedIds((prev) => {
@@ -474,6 +623,38 @@ export function FolderTree({
     closeContextMenu();
   }
 
+  async function createDocument(folderId: string | null) {
+    closeAll();
+    try {
+      const res = await fetch("/api/documents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Untitled",
+          content: "",
+          tags: [],
+          folderId,
+        }),
+      });
+      if (!res.ok) return;
+      const created = await res.json() as {
+        id: string;
+        title: string;
+        tags?: string[];
+        folderId?: string | null;
+        lastReviewed?: string;
+      };
+      onDocumentCreated({
+        id: created.id,
+        title: created.title,
+        tags: created.tags ?? [],
+        folderId: created.folderId ?? folderId,
+        lastReviewed: created.lastReviewed,
+      });
+      router.push(`/documents/${created.id}`);
+    } catch {}
+  }
+
   async function submitCreate() {
     if (!creating || !newFolderName.trim()) { setCreating(null); return; }
     try {
@@ -502,21 +683,40 @@ export function FolderTree({
       <div className="py-1">
         <div className="px-2 py-1 flex items-center justify-between">
           <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-muted)] font-mono">Folders</span>
-          <button
-            onClick={(e) => { e.stopPropagation(); startCreate(null); }}
-            className="text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"
-            title="New folder"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                createDocument(
+                  selectedFolderId && selectedFolderId !== "root" ? selectedFolderId : null,
+                );
+              }}
+              className="text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"
+              title="New file"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="12" y1="11" x2="12" y2="17" />
+                <line x1="9" y1="14" x2="15" y2="14" />
+              </svg>
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); startCreate(null); }}
+              className="text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"
+              title="New folder"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <RootDropZone
           selectedFolderId={selectedFolderId}
-          isOver={overFolderId === null}
+          isOver={overDropTarget?.kind === "root"}
           onSelectFolder={onSelectFolder}
         />
 
@@ -529,7 +729,7 @@ export function FolderTree({
             documents={documents}
             selectedFolderId={selectedFolderId}
             expandedIds={expandedIds}
-            overFolderId={overFolderId}
+            overDropTarget={overDropTarget}
             onSelectFolder={onSelectFolder}
             onToggleExpand={toggleExpand}
             onContextMenu={handleContextMenu}
@@ -567,10 +767,17 @@ export function FolderTree({
       {/* Folder right-click / kebab context menu */}
       {contextMenu && (
         <div
+          ref={contextMenuRef}
           className="fixed z-50 bg-white border-2 border-black shadow-lg py-1 min-w-36"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
+          <button
+            className="w-full text-left px-3 py-1.5 text-xs font-mono font-bold uppercase tracking-wider hover:bg-[var(--color-muted-bg)] transition-colors"
+            onClick={() => createDocument(contextMenu.folderId)}
+          >
+            New file
+          </button>
           <button
             className="w-full text-left px-3 py-1.5 text-xs font-mono font-bold uppercase tracking-wider hover:bg-[var(--color-muted-bg)] transition-colors"
             onClick={() => startCreate(contextMenu.folderId)}
@@ -596,6 +803,7 @@ export function FolderTree({
       {/* Document kebab menu */}
       {docKebabMenu && (
         <div
+          ref={docKebabMenuRef}
           className="fixed z-50 bg-white border-2 border-black shadow-lg py-1 min-w-36"
           style={{ top: docKebabMenu.y, left: docKebabMenu.x }}
           onClick={(e) => e.stopPropagation()}

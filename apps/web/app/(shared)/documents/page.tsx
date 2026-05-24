@@ -16,7 +16,13 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { DocumentList } from "@/components/shared/DocumentList";
-import { DraggableDocument, DraggableFolder, Folder, FolderTree } from "@/components/shared/FolderTree";
+import {
+  DraggableDocument,
+  DraggableFolder,
+  Folder,
+  FolderDropTarget,
+  FolderTree,
+} from "@/components/shared/FolderTree";
 
 type DocumentSummary = {
   id: string;
@@ -25,6 +31,95 @@ type DocumentSummary = {
   lastReviewed?: string;
   folderId?: string | null;
 };
+
+type FolderDropData =
+  | { type: "folder-target"; dropType: "inside"; folderId: string }
+  | { type: "folder-target"; dropType: "before" | "after"; folderId: string; parentId: string | null }
+  | { type: "folder-target"; dropType: "root" };
+
+function sortFoldersForRender(folders: Folder[]): Folder[] {
+  return [...folders].sort((a, b) => {
+    const parentCompare = (a.parentId ?? "").localeCompare(b.parentId ?? "");
+    if (parentCompare !== 0) return parentCompare;
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    const nameCompare = a.name.localeCompare(b.name);
+    if (nameCompare !== 0) return nameCompare;
+    return a.createdAt.localeCompare(b.createdAt);
+  });
+}
+
+function getSiblingFolders(
+  folders: Folder[],
+  parentId: string | null,
+  excludeFolderId?: string,
+): Folder[] {
+  return sortFoldersForRender(folders).filter(
+    (folder) => folder.parentId === parentId && folder.id !== excludeFolderId,
+  );
+}
+
+function applyFolderMove(
+  folders: Folder[],
+  folderId: string,
+  newParentId: string | null,
+  orderIndex: number,
+): Folder[] {
+  const movingFolder = folders.find((folder) => folder.id === folderId);
+  if (!movingFolder) return folders;
+
+  const targetSiblings = getSiblingFolders(folders, newParentId, folderId);
+  const insertAt = Math.max(0, Math.min(orderIndex, targetSiblings.length));
+  const reorderedTarget = [...targetSiblings];
+  reorderedTarget.splice(insertAt, 0, { ...movingFolder, parentId: newParentId });
+
+  const targetOrders = new Map(reorderedTarget.map((folder, index) => [folder.id, index]));
+  const previousOrders =
+    movingFolder.parentId === newParentId
+      ? new Map<string, number>()
+      : new Map(
+          getSiblingFolders(folders, movingFolder.parentId, folderId).map((folder, index) => [
+            folder.id,
+            index,
+          ]),
+        );
+
+  return sortFoldersForRender(
+    folders.map((folder) => {
+      if (folder.id === folderId) {
+        return {
+          ...folder,
+          parentId: newParentId,
+          sortOrder: targetOrders.get(folder.id) ?? insertAt,
+        };
+      }
+      if (targetOrders.has(folder.id)) {
+        return { ...folder, sortOrder: targetOrders.get(folder.id)! };
+      }
+      if (previousOrders.has(folder.id)) {
+        return { ...folder, sortOrder: previousOrders.get(folder.id)! };
+      }
+      return folder;
+    }),
+  );
+}
+
+function getFolderDropTarget(data: unknown): FolderDropTarget | undefined {
+  if (!data || typeof data !== "object" || !("type" in data)) return undefined;
+  const dropData = data as FolderDropData;
+  if (dropData.type !== "folder-target") return undefined;
+
+  if (dropData.dropType === "root") {
+    return { kind: "root" };
+  }
+  if (dropData.dropType === "inside") {
+    return { kind: "inside", folderId: dropData.folderId };
+  }
+  return {
+    kind: dropData.dropType,
+    folderId: dropData.folderId,
+    parentId: dropData.parentId,
+  };
+}
 
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
@@ -41,7 +136,7 @@ export default function DocumentsPage() {
   const titleRef = useRef<HTMLInputElement>(null);
 
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [overFolderId, setOverFolderId] = useState<string | null | undefined>(undefined);
+  const [overDropTarget, setOverDropTarget] = useState<FolderDropTarget | undefined>(undefined);
 
   const { width: sidebarWidth, onMouseDown: onResizeStart } = useResizable("sidebar-width", 200);
 
@@ -51,14 +146,12 @@ export default function DocumentsPage() {
 
   function handleDragStart(event: DragStartEvent) {
     setActiveId(event.active.id as string);
-    setOverFolderId(undefined);
+    setOverDropTarget(undefined);
   }
 
   function handleDragOver(event: DragOverEvent) {
-    const { over } = event;
-    if (!over) { setOverFolderId(undefined); return; }
-    const data = over.data.current as { folderId?: string | null };
-    setOverFolderId(data?.folderId !== undefined ? data.folderId : undefined);
+    const target = getFolderDropTarget(event.over?.data.current);
+    setOverDropTarget(target);
   }
 
   // Load folders and documents on mount.
@@ -68,7 +161,7 @@ export default function DocumentsPage() {
       fetch("/api/documents").then((r) => (r.ok ? r.json() : [])),
     ])
       .then(([foldersData, docsData]: [Folder[], DocumentSummary[]]) => {
-        setFolders(foldersData);
+        setFolders(sortFoldersForRender(foldersData));
         setDocuments(docsData);
       })
       .catch(() => {})
@@ -96,11 +189,6 @@ export default function DocumentsPage() {
     return [...buildBreadcrumb(folder.parentId, visited), folder];
   }
   const breadcrumb = buildBreadcrumb(selectedFolderId);
-
-  function handleSelectFolder(id: string | null) {
-    setSelectedFolderId(id);
-    setShowAllDocs(id === null && selectedFolderId === null); // "All" when clicking root twice or staying at root
-  }
 
   // Simpler: "All docs" when nothing selected, folder contents otherwise.
   function selectFolder(id: string | null) {
@@ -141,11 +229,13 @@ export default function DocumentsPage() {
   }
 
   const handleFolderCreated = useCallback((folder: Folder) => {
-    setFolders((prev) => [...prev, folder]);
+    setFolders((prev) => sortFoldersForRender([...prev, folder]));
   }, []);
 
   const handleFolderRenamed = useCallback((folder: Folder) => {
-    setFolders((prev) => prev.map((f) => (f.id === folder.id ? folder : f)));
+    setFolders((prev) =>
+      sortFoldersForRender(prev.map((f) => (f.id === folder.id ? { ...f, ...folder } : f))),
+    );
   }, []);
 
   const handleFolderDeleted = useCallback((id: string) => {
@@ -172,26 +262,77 @@ export default function DocumentsPage() {
     setDocuments((prev) => prev.map((d) => d.id === docId ? { ...d, folderId } : d));
   }, []);
 
-  const handleFolderMoved = useCallback((folderId: string, newParentId: string | null) => {
-    setFolders((prev) =>
-      prev.map((f) => (f.id === folderId ? { ...f, parentId: newParentId } : f))
-    );
+  const handleDocumentCreated = useCallback((doc: DocumentSummary) => {
+    setDocuments((prev) => [doc, ...prev.filter((existing) => existing.id !== doc.id)]);
+  }, []);
+
+  const handleFolderMoved = useCallback((
+    folderId: string,
+    newParentId: string | null,
+    orderIndex: number,
+  ) => {
+    setFolders((prev) => applyFolderMove(prev, folderId, newParentId, orderIndex));
   }, []);
 
   async function handleDragEnd(event: DragEndEvent) {
     setActiveId(null);
-    setOverFolderId(undefined);
+    setOverDropTarget(undefined);
     const { active, over } = event;
-    if (!over) return;
 
-    const activeData = active.data.current as { type: string; docId?: string; folderId?: string };
-    const overData = over.data.current as { folderId?: string | null };
-    const targetFolderId = overData?.folderId !== undefined ? overData.folderId : null;
+    const activeData = active.data.current as { type: string; docId?: string; folderId?: string; parentId?: string | null };
+
+    if (!over) {
+      // Dropped outside any droppable zone — move to root
+      if (activeData.type === "folder" && activeData.folderId) {
+        const targetIndex = getSiblingFolders(folders, null, activeData.folderId).length;
+        if (activeData.parentId === null || activeData.parentId === undefined) return;
+        try {
+          const res = await fetch(`/api/folders/${activeData.folderId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ parentId: null, orderIndex: targetIndex }),
+          });
+          if (res.ok) handleFolderMoved(activeData.folderId, null, targetIndex);
+        } catch {}
+      } else if (activeData.type === "document" && activeData.docId) {
+        const doc = documents.find((d) => d.id === activeData.docId);
+        if (!doc?.folderId) return;
+        try {
+          const res = await fetch(`/api/documents/${activeData.docId}/folder`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ folderId: null }),
+          });
+          if (res.ok || res.status === 204) handleDocumentMoved(activeData.docId, null);
+        } catch {}
+      }
+      return;
+    }
+
+    const target = getFolderDropTarget(over.data.current);
 
     if (activeData.type === "folder" && activeData.folderId) {
-      if (activeData.folderId === targetFolderId) return;
-      // Prevent moving a folder into one of its own descendants (cycle).
-      if (targetFolderId !== null) {
+      if (!target) return;
+
+      let targetParentId: string | null;
+      let targetIndex: number;
+
+      if (target.kind === "root") {
+        targetParentId = null;
+        targetIndex = getSiblingFolders(folders, null, activeData.folderId).length;
+      } else if (target.kind === "inside") {
+        if (activeData.folderId === target.folderId) return;
+        targetParentId = target.folderId;
+        targetIndex = getSiblingFolders(folders, targetParentId, activeData.folderId).length;
+      } else {
+        targetParentId = target.parentId;
+        const siblings = getSiblingFolders(folders, targetParentId, activeData.folderId);
+        const anchorIndex = siblings.findIndex((folder) => folder.id === target.folderId);
+        if (anchorIndex === -1) return;
+        targetIndex = target.kind === "before" ? anchorIndex : anchorIndex + 1;
+      }
+
+      if (targetParentId !== null) {
         const descendants = new Set<string>();
         const queue = [activeData.folderId];
         while (queue.length) {
@@ -199,19 +340,25 @@ export default function DocumentsPage() {
           descendants.add(cur);
           folders.filter((f) => f.parentId === cur).forEach((f) => queue.push(f.id));
         }
-        if (descendants.has(targetFolderId)) return;
+        if (descendants.has(targetParentId)) return;
       }
       try {
         const res = await fetch(`/api/folders/${activeData.folderId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parentId: targetFolderId }),
+          body: JSON.stringify({ parentId: targetParentId, orderIndex: targetIndex }),
         });
         if (res.ok) {
-          handleFolderMoved(activeData.folderId, targetFolderId);
+          handleFolderMoved(activeData.folderId, targetParentId, targetIndex);
         }
       } catch {}
     } else if (activeData.type === "document" && activeData.docId) {
+      if (!target) return;
+      // "before"/"after" are folder-ordering zones — treat them as drops into the anchor's parent folder
+      const targetFolderId =
+        target.kind === "inside" ? target.folderId :
+        target.kind === "root" ? null :
+        target.parentId;
       try {
         const res = await fetch(`/api/documents/${activeData.docId}/folder`, {
           method: "PUT",
@@ -249,14 +396,13 @@ export default function DocumentsPage() {
             folders={folders}
             documents={documents}
             selectedFolderId={showAllDocs ? null : selectedFolderId}
-            overFolderId={overFolderId}
+            overDropTarget={overDropTarget}
             onSelectFolder={selectFolder}
             onFolderCreated={handleFolderCreated}
             onFolderRenamed={handleFolderRenamed}
             onFolderDeleted={handleFolderDeleted}
+            onDocumentCreated={handleDocumentCreated}
             onDocumentDeleted={handleDocumentDeleted}
-            onDocumentMoved={handleDocumentMoved}
-            onFolderMoved={handleFolderMoved}
           />
         </div>
 
