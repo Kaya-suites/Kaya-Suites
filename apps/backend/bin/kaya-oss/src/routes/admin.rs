@@ -281,16 +281,15 @@ const BROWSABLE_TABLES: &[&str] = &[
     "system_flags",
 ];
 
-// Tables that have a created_at column for deterministic ordering.
-const TABLES_WITH_CREATED_AT: &[&str] = &[
-    "users",
-    "documents",
-    "chat_sessions",
-    "chat_messages",
-    "usage_events",
-    "usage_counters",
-    "subscriptions",
-];
+fn order_clause(table: &str) -> &'static str {
+    match table {
+        "users" | "chat_sessions" | "chat_messages" | "subscriptions" => "ORDER BY created_at DESC",
+        "documents" => "ORDER BY updated_at DESC",
+        "usage_events" => "ORDER BY recorded_at DESC",
+        "usage_counters" => "ORDER BY period_start DESC",
+        _ => "",
+    }
+}
 
 fn any_row_to_json(row: &sqlx::any::AnyRow) -> Vec<serde_json::Value> {
     row.columns()
@@ -390,11 +389,7 @@ async fn browse_table(
     let page = params.page.max(1);
     let offset = (page - 1) * page_size;
 
-    let order = if TABLES_WITH_CREATED_AT.contains(&table_name.as_str()) {
-        "ORDER BY created_at DESC"
-    } else {
-        ""
-    };
+    let order = order_clause(&table_name);
 
     let select_sql = format!(
         "SELECT * FROM {table_name} {order} LIMIT {page_size} OFFSET {offset}"
