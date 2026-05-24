@@ -21,6 +21,8 @@ type Props = {
   documents: DocumentSummary[];
   loading: boolean;
   folders?: FolderOption[];
+  subfolders?: FolderOption[];
+  onSelectFolder?: (id: string) => void;
   onMoveToFolder?: (docId: string, folderId: string | null) => void;
   renderWrapper?: (doc: DocumentSummary, node: React.ReactNode) => React.ReactNode;
 };
@@ -112,7 +114,7 @@ function FolderPicker({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function DocumentList({ documents, loading, folders, onMoveToFolder, renderWrapper }: Props) {
+export function DocumentList({ documents, loading, folders, subfolders, onSelectFolder, onMoveToFolder, renderWrapper }: Props) {
   const [openPickerId, setOpenPickerId] = useState<string | null>(null);
 
   if (loading) {
@@ -125,7 +127,9 @@ export function DocumentList({ documents, loading, folders, onMoveToFolder, rend
     );
   }
 
-  if (documents.length === 0) {
+  const hasContent = (subfolders?.length ?? 0) > 0 || documents.length > 0;
+
+  if (!hasContent) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-[var(--color-muted)] text-sm gap-3 font-mono">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -139,6 +143,30 @@ export function DocumentList({ documents, loading, folders, onMoveToFolder, rend
 
   return (
     <div className="divide-y-2 divide-black">
+      {subfolders?.map((folder) => (
+        <div key={folder.id} className="group relative flex items-stretch">
+          <button
+            onClick={() => onSelectFolder?.(folder.id)}
+            className="flex-1 flex items-start gap-4 px-6 py-4 hover:bg-[var(--color-muted-bg)] transition-colors min-w-0 text-left"
+          >
+            <div className="shrink-0 mt-0.5 text-[var(--color-muted)] group-hover:text-[var(--color-accent)] transition-colors">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold uppercase tracking-wider text-black group-hover:text-[var(--color-accent)] truncate transition-colors font-mono">
+                {folder.name}
+              </p>
+            </div>
+            <div className="shrink-0 text-[var(--color-muted)] group-hover:text-black mt-0.5 transition-colors">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </div>
+          </button>
+        </div>
+      ))}
       {documents.map((doc) => {
         const row = (
           <div key={doc.id} className="group relative flex items-stretch">

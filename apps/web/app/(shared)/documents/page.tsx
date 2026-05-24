@@ -53,13 +53,13 @@ export default function DocumentsPage() {
     if (showForm) titleRef.current?.focus();
   }, [showForm]);
 
-  // Derived: documents visible in the current folder view.
-  // When a folder is selected, show that folder's docs plus any unfoldered docs.
   const visibleDocs = showAllDocs
     ? documents
-    : documents.filter(
-        (d) => (d.folderId ?? null) === selectedFolderId || (d.folderId ?? null) === null
-      );
+    : documents.filter((d) => (d.folderId ?? null) === selectedFolderId);
+
+  const visibleSubfolders = showAllDocs
+    ? folders.filter((f) => f.parentId === null)
+    : folders.filter((f) => f.parentId === selectedFolderId);
 
   // Breadcrumb path from root to selectedFolderId.
   function buildBreadcrumb(folderId: string | null): Folder[] {
@@ -122,10 +122,24 @@ export default function DocumentsPage() {
   }, []);
 
   const handleFolderDeleted = useCallback((id: string) => {
-    setFolders((prev) => prev.filter((f) => f.id !== id));
-    setDocuments((prev) => prev.map((d) => d.folderId === id ? { ...d, folderId: null } : d));
+    // Collect all descendant folder IDs so we can also remove their documents.
+    setFolders((prev) => {
+      const toDelete = new Set<string>();
+      const queue = [id];
+      while (queue.length) {
+        const cur = queue.pop()!;
+        toDelete.add(cur);
+        prev.filter((f) => f.parentId === cur).forEach((f) => queue.push(f.id));
+      }
+      setDocuments((docs) => docs.filter((d) => !d.folderId || !toDelete.has(d.folderId)));
+      return prev.filter((f) => !toDelete.has(f.id));
+    });
     if (selectedFolderId === id) selectFolder(null);
   }, [selectedFolderId]);
+
+  const handleDocumentDeleted = useCallback((id: string) => {
+    setDocuments((prev) => prev.filter((d) => d.id !== id));
+  }, []);
 
   const handleDocumentMoved = useCallback((docId: string, folderId: string | null) => {
     setDocuments((prev) => prev.map((d) => d.id === docId ? { ...d, folderId } : d));
@@ -178,6 +192,7 @@ export default function DocumentsPage() {
             onFolderCreated={handleFolderCreated}
             onFolderRenamed={handleFolderRenamed}
             onFolderDeleted={handleFolderDeleted}
+            onDocumentDeleted={handleDocumentDeleted}
             onDocumentMoved={handleDocumentMoved}
             onFolderMoved={handleFolderMoved}
           />
@@ -285,6 +300,8 @@ export default function DocumentsPage() {
               documents={visibleDocs}
               loading={loading}
               folders={folders}
+              subfolders={visibleSubfolders}
+              onSelectFolder={selectFolder}
               onMoveToFolder={async (docId, folderId) => {
                 try {
                   const res = await fetch(`/api/documents/${docId}/folder`, {

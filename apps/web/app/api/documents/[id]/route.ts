@@ -41,3 +41,22 @@ export async function PUT(
     return Response.json({ error: "backend unreachable" }, { status: 502 });
   }
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  const { id } = await params;
+  const cookie = req.headers.get("cookie") ?? "";
+  try {
+    const res = await fetch(`${API_URL}/documents/${id}`, {
+      method: "DELETE",
+      headers: { ...(cookie && { cookie }) },
+    });
+    if (res.status === 204) return new Response(null, { status: 204 });
+    const data = await res.json();
+    return Response.json(data, { status: res.status });
+  } catch {
+    return Response.json({ error: "backend unreachable" }, { status: 502 });
+  }
+}

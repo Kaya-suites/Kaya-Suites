@@ -43,6 +43,7 @@ type Props = {
   onFolderCreated: (folder: Folder) => void;
   onFolderRenamed: (folder: Folder) => void;
   onFolderDeleted: (id: string) => void;
+  onDocumentDeleted: (id: string) => void;
   onDocumentMoved: (docId: string, folderId: string | null) => void;
   onFolderMoved: (folderId: string, newParentId: string | null) => void;
 };
@@ -54,6 +55,31 @@ type ContextMenu = {
   x: number;
   y: number;
 };
+
+type DocKebabMenu = {
+  id: string;
+  x: number;
+  y: number;
+};
+
+type DeleteConfirm = {
+  id: string;
+  name: string;
+  docCount: number;
+  subFolderCount: number;
+};
+
+// ── Kebab icon ────────────────────────────────────────────────────────────────
+
+function KebabIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+      <circle cx="12" cy="5" r="2" />
+      <circle cx="12" cy="12" r="2" />
+      <circle cx="12" cy="19" r="2" />
+    </svg>
+  );
+}
 
 // ── Draggable folder node ─────────────────────────────────────────────────────
 
@@ -68,7 +94,7 @@ function DraggableFolderNode({
   onSelectFolder,
   onToggleExpand,
   onContextMenu,
-  onDeleteFolder,
+  onDocKebab,
 }: {
   folder: Folder;
   depth: number;
@@ -80,7 +106,7 @@ function DraggableFolderNode({
   onSelectFolder: (id: string | null) => void;
   onToggleExpand: (id: string) => void;
   onContextMenu: (e: React.MouseEvent, folderId: string) => void;
-  onDeleteFolder: (folderId: string) => void;
+  onDocKebab: (e: React.MouseEvent, docId: string) => void;
 }) {
   const childFolders = folders.filter((f) => f.parentId === folder.id);
   const folderDocs = documents.filter((d) => d.folderId === folder.id);
@@ -103,7 +129,6 @@ function DraggableFolderNode({
     setDropRef(node);
   };
 
-  // Highlight when another item is hovering over this folder (not itself).
   const isOver = overFolderId === folder.id && !isDragging;
 
   function handleRowClick() {
@@ -149,19 +174,15 @@ function DraggableFolderNode({
           <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
         </svg>
         <span className="truncate flex-1">{folder.name}</span>
+        {/* Kebab menu button */}
         <button
           className={`shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded ${
-            isSelected ? "hover:bg-white/20 text-white" : "hover:bg-[var(--color-danger)] hover:text-white text-[var(--color-muted)]"
+            isSelected ? "text-white/70 hover:text-white hover:bg-white/20" : "text-[var(--color-muted)] hover:text-black hover:bg-black/10"
           }`}
-          title={`Delete "${folder.name}"`}
-          onClick={(e) => { e.stopPropagation(); onDeleteFolder(folder.id); }}
+          title="Options"
+          onClick={(e) => { e.stopPropagation(); onContextMenu(e, folder.id); }}
         >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-            <path d="M10 11v6M14 11v6" />
-            <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
-          </svg>
+          <KebabIcon />
         </button>
       </div>
 
@@ -181,13 +202,13 @@ function DraggableFolderNode({
               onSelectFolder={onSelectFolder}
               onToggleExpand={onToggleExpand}
               onContextMenu={onContextMenu}
-              onDeleteFolder={onDeleteFolder}
+              onDocKebab={onDocKebab}
             />
           ))}
 
           {/* Documents inside this folder — draggable so they can be moved out */}
           {folderDocs.map((doc) => (
-            <DraggableFolderDoc key={doc.id} doc={doc} depth={depth} />
+            <DraggableFolderDoc key={doc.id} doc={doc} depth={depth} onKebabDoc={onDocKebab} />
           ))}
         </>
       )}
@@ -197,7 +218,15 @@ function DraggableFolderNode({
 
 // ── Draggable doc inside an expanded folder ───────────────────────────────────
 
-function DraggableFolderDoc({ doc, depth }: { doc: DocumentSummary; depth: number }) {
+function DraggableFolderDoc({
+  doc,
+  depth,
+  onKebabDoc,
+}: {
+  doc: DocumentSummary;
+  depth: number;
+  onKebabDoc: (e: React.MouseEvent, docId: string) => void;
+}) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `doc:${doc.id}`,
     data: { type: "document", docId: doc.id },
@@ -208,7 +237,7 @@ function DraggableFolderDoc({ doc, depth }: { doc: DocumentSummary; depth: numbe
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className="flex items-center gap-1.5 py-1 cursor-grab select-none border-2 border-transparent hover:bg-[var(--color-muted-bg)] transition-colors"
+      className="group flex items-center gap-1.5 py-1 cursor-grab select-none border-2 border-transparent hover:bg-[var(--color-muted-bg)] transition-colors"
       style={{ paddingLeft: `${(depth + 1) * 12 + 8}px`, opacity: isDragging ? 0.4 : 1 }}
     >
       <span className="w-3 h-3 shrink-0" />
@@ -224,6 +253,13 @@ function DraggableFolderDoc({ doc, depth }: { doc: DocumentSummary; depth: numbe
       >
         {doc.title}
       </Link>
+      <button
+        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-[var(--color-muted)] hover:text-black"
+        title="Options"
+        onClick={(e) => { e.stopPropagation(); onKebabDoc(e, doc.id); }}
+      >
+        <KebabIcon />
+      </button>
     </div>
   );
 }
@@ -270,7 +306,13 @@ function RootDropZone({
 
 // ── Unfiled document row (draggable) ──────────────────────────────────────────
 
-function UnfiledDocRow({ doc }: { doc: DocumentSummary }) {
+function UnfiledDocRow({
+  doc,
+  onKebabDoc,
+}: {
+  doc: DocumentSummary;
+  onKebabDoc: (e: React.MouseEvent, docId: string) => void;
+}) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `doc:${doc.id}`,
     data: { type: "document", docId: doc.id },
@@ -296,6 +338,13 @@ function UnfiledDocRow({ doc }: { doc: DocumentSummary }) {
       >
         {doc.title}
       </Link>
+      <button
+        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-[var(--color-muted)] hover:text-black"
+        title="Options"
+        onClick={(e) => { e.stopPropagation(); onKebabDoc(e, doc.id); }}
+      >
+        <KebabIcon />
+      </button>
     </div>
   );
 }
@@ -310,6 +359,7 @@ export function FolderTree({
   onFolderCreated,
   onFolderRenamed,
   onFolderDeleted,
+  onDocumentDeleted,
   onDocumentMoved,
   onFolderMoved,
 }: Props) {
@@ -319,8 +369,9 @@ export function FolderTree({
   const [creating, setCreating] = useState<{ parentId: string | null } | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
-  // folderId the pointer is currently over (null = root zone, undefined = nothing).
   const [overFolderId, setOverFolderId] = useState<string | null | undefined>(undefined);
+  const [docKebabMenu, setDocKebabMenu] = useState<DocKebabMenu | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null);
   const renameRef = useRef<HTMLInputElement>(null);
   const createRef = useRef<HTMLInputElement>(null);
 
@@ -348,11 +399,25 @@ export function FolderTree({
   function handleContextMenu(e: React.MouseEvent, folderId: string) {
     e.preventDefault();
     e.stopPropagation();
+    setDocKebabMenu(null);
     setContextMenu({ folderId, x: e.clientX, y: e.clientY });
   }
 
   function closeContextMenu() {
     setContextMenu(null);
+  }
+
+  function closeAll() {
+    setContextMenu(null);
+    setDocKebabMenu(null);
+  }
+
+  function openDocKebab(e: React.MouseEvent, docId: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu(null);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setDocKebabMenu({ id: docId, x: rect.left, y: rect.bottom + 4 });
   }
 
   function startRename(folderId: string) {
@@ -378,10 +443,42 @@ export function FolderTree({
   }
 
   async function deleteFolder(folderId: string) {
-    closeContextMenu();
     try {
       const res = await fetch(`/api/folders/${folderId}`, { method: "DELETE" });
       if (res.ok || res.status === 204) onFolderDeleted(folderId);
+    } catch {}
+  }
+
+  function confirmDeleteFolder(folderId: string) {
+    closeContextMenu();
+    const folder = folders.find((f) => f.id === folderId);
+    if (!folder) return;
+
+    // Collect all descendant folder IDs (BFS)
+    const allIds = new Set<string>();
+    const queue = [folderId];
+    while (queue.length) {
+      const cur = queue.pop()!;
+      allIds.add(cur);
+      folders.filter((f) => f.parentId === cur).forEach((f) => queue.push(f.id));
+    }
+
+    const docCount = documents.filter((d) => d.folderId && allIds.has(d.folderId)).length;
+    const subFolderCount = allIds.size - 1;
+
+    if (docCount === 0 && subFolderCount === 0) {
+      deleteFolder(folderId);
+      return;
+    }
+
+    setDeleteConfirm({ id: folderId, name: folder.name, docCount, subFolderCount });
+  }
+
+  async function deleteDocument(docId: string) {
+    setDocKebabMenu(null);
+    try {
+      const res = await fetch(`/api/documents/${docId}`, { method: "DELETE" });
+      if (res.ok || res.status === 204) onDocumentDeleted(docId);
     } catch {}
   }
 
@@ -434,7 +531,7 @@ export function FolderTree({
     const targetFolderId = overData?.folderId !== undefined ? overData.folderId : null;
 
     if (activeData.type === "folder" && activeData.folderId) {
-      if (activeData.folderId === targetFolderId) return; // can't nest into itself
+      if (activeData.folderId === targetFolderId) return;
       try {
         const res = await fetch(`/api/folders/${activeData.folderId}`, {
           method: "PUT",
@@ -471,7 +568,7 @@ export function FolderTree({
     : null;
 
   return (
-    <div className="relative" onClick={() => closeContextMenu()}>
+    <div className="relative" onClick={closeAll}>
       <DndContext
         sensors={sensors}
         collisionDetection={(args) => {
@@ -516,7 +613,7 @@ export function FolderTree({
               onSelectFolder={onSelectFolder}
               onToggleExpand={toggleExpand}
               onContextMenu={handleContextMenu}
-              onDeleteFolder={deleteFolder}
+              onDocKebab={openDocKebab}
             />
           ))}
 
@@ -543,7 +640,7 @@ export function FolderTree({
           )}
 
           {unfiledDocs.map((doc) => (
-            <UnfiledDocRow key={doc.id} doc={doc} />
+            <UnfiledDocRow key={doc.id} doc={doc} onKebabDoc={openDocKebab} />
           ))}
         </div>
 
@@ -565,6 +662,7 @@ export function FolderTree({
         </DragOverlay>
       </DndContext>
 
+      {/* Folder right-click / kebab context menu */}
       {contextMenu && (
         <div
           className="fixed z-50 bg-white border-2 border-black shadow-lg py-1 min-w-36"
@@ -586,13 +684,30 @@ export function FolderTree({
           <div className="border-t border-black my-1" />
           <button
             className="w-full text-left px-3 py-1.5 text-xs font-mono font-bold uppercase tracking-wider hover:bg-[var(--color-danger)] hover:text-white transition-colors text-[var(--color-danger)]"
-            onClick={() => deleteFolder(contextMenu.folderId)}
+            onClick={() => confirmDeleteFolder(contextMenu.folderId)}
           >
             Delete folder
           </button>
         </div>
       )}
 
+      {/* Document kebab menu */}
+      {docKebabMenu && (
+        <div
+          className="fixed z-50 bg-white border-2 border-black shadow-lg py-1 min-w-36"
+          style={{ top: docKebabMenu.y, left: docKebabMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full text-left px-3 py-1.5 text-xs font-mono font-bold uppercase tracking-wider hover:bg-[var(--color-danger)] hover:text-white transition-colors text-[var(--color-danger)]"
+            onClick={() => deleteDocument(docKebabMenu.id)}
+          >
+            Delete document
+          </button>
+        </div>
+      )}
+
+      {/* Folder rename inline input */}
       {renaming && (
         <div className="px-2 py-1">
           <input
@@ -607,6 +722,60 @@ export function FolderTree({
             className="w-full text-xs font-mono font-bold uppercase tracking-wider border-2 border-[var(--color-accent)] bg-white outline-none px-2 py-1 text-black"
             onClick={(e) => e.stopPropagation()}
           />
+        </div>
+      )}
+
+      {/* Folder delete confirmation modal */}
+      {deleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setDeleteConfirm(null)}
+        >
+          <div
+            className="bg-white border-2 border-black shadow-xl p-6 w-full max-w-sm mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-sm font-bold uppercase tracking-wider font-mono mb-3">
+              Delete folder
+            </h2>
+            <p className="text-xs font-mono text-black mb-2">
+              Delete <span className="font-bold">&ldquo;{deleteConfirm.name}&rdquo;</span>?
+            </p>
+            <p className="text-xs font-mono text-[var(--color-danger)] mb-5">
+              This will permanently delete{" "}
+              {deleteConfirm.docCount > 0 && (
+                <span>
+                  <span className="font-bold">{deleteConfirm.docCount}</span>{" "}
+                  document{deleteConfirm.docCount !== 1 ? "s" : ""}
+                  {deleteConfirm.subFolderCount > 0 ? " and " : ""}
+                </span>
+              )}
+              {deleteConfirm.subFolderCount > 0 && (
+                <span>
+                  <span className="font-bold">{deleteConfirm.subFolderCount}</span>{" "}
+                  subfolder{deleteConfirm.subFolderCount !== 1 ? "s" : ""}
+                </span>
+              )}{" "}
+              inside it. This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                className="px-4 py-2 text-xs font-bold uppercase tracking-wider font-mono border-2 border-black hover:bg-[var(--color-muted-bg)] transition-colors"
+                onClick={() => setDeleteConfirm(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 text-xs font-bold uppercase tracking-wider font-mono border-2 border-black bg-[var(--color-danger)] text-white hover:opacity-90 transition-opacity"
+                onClick={() => {
+                  deleteFolder(deleteConfirm.id);
+                  setDeleteConfirm(null);
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
