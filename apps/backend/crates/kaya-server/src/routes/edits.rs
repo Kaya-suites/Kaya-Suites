@@ -11,8 +11,13 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use kaya_core::{
-    ProposedEditKind, SessionStorage, StorageAdapter, auth::UserSession, edit::commit_edit,
-    model_router::ModelRouter, retrieval::index_document_chunks,
+    DocumentEmbeddingStatus, EmbeddingTaskContext, ProposedEditKind, SessionStorage,
+    StorageAdapter,
+    auth::UserSession,
+    edit::commit_edit,
+    model_router::ModelRouter,
+    retrieval::{chunk_document, index_document_chunks},
+    session::EditHistoryEntry,
     storage::Folder,
 };
 
@@ -21,6 +26,11 @@ use crate::state::StoredEdit;
 
 #[derive(Deserialize)]
 pub struct ApproveBody {
+    pub proposed: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct RejectBody {
     pub proposed: Option<String>,
 }
 
@@ -42,6 +52,7 @@ pub async fn approve_edit(
         .proposed
         .as_deref()
         .unwrap_or(&stored.proposed_paragraph);
+    let history_entry = build_edit_history_entry(&stored, "approved", final_proposed);
 
     let edit = if final_proposed != stored.proposed_paragraph {
         apply_user_modification(stored.edit, &stored.proposed_paragraph, final_proposed)
@@ -60,6 +71,9 @@ pub async fn approve_edit(
     let affected_id = commit_edit(edit, token, storage.clone())
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
+    let _ = sessions
+        .upsert_edit_history_entry(stored.session_id, &history_entry)
+        .await;
 
     // Folder creates: return the new folder so the frontend can update its tree.
     if is_folder_create {
@@ -78,9 +92,32 @@ pub async fn approve_edit(
         tokio::spawn(async move {
             match storage.get_document(doc_id).await {
                 Ok(doc) => {
-                    if let Err(e) =
-                        index_document_chunks(&doc, &storage, &router, Some(sessions.as_ref()))
-                            .await
+                    let task_id = Uuid::new_v4().to_string();
+                    let _ = sessions
+                        .upsert_document_embedding_status(&DocumentEmbeddingStatus {
+                            document_id: doc.id,
+                            task_id: Some(task_id.clone()),
+                            status: "queued".to_string(),
+                            expected_chunks: chunk_document(&doc).len() as u32,
+                            embedded_chunks: 0,
+                            last_error: None,
+                            updated_at: chrono::Utc::now().timestamp_millis(),
+                            last_indexed_at: None,
+                        })
+                        .await;
+                    if let Err(e) = index_document_chunks(
+                        &doc,
+                        &storage,
+                        &router,
+                        Some(sessions.as_ref()),
+                        Some(&EmbeddingTaskContext {
+                            task_id: Some(task_id),
+                            task_type: "document_index".to_string(),
+                            session_id: None,
+                            document_id: Some(doc.id),
+                        }),
+                    )
+                    .await
                     {
                         tracing::error!(document_id = %doc_id, error = %e, "reindex failed after approve");
                     }
@@ -91,6 +128,33 @@ pub async fn approve_edit(
             }
         });
     }
+
+    Ok(Json(json!({"ok": true})))
+}
+
+pub async fn reject_edit(
+    Extension(sessions): Extension<Arc<dyn SessionStorage>>,
+    Extension(pending_edits): Extension<Arc<Mutex<HashMap<Uuid, StoredEdit>>>>,
+    Path(edit_id): Path<Uuid>,
+    Json(body): Json<RejectBody>,
+) -> Result<Json<Value>, ApiError> {
+    let stored = pending_edits
+        .lock()
+        .await
+        .remove(&edit_id)
+        .ok_or_else(|| ApiError::not_found(format!("edit {edit_id}")))?;
+
+    let final_proposed = body
+        .proposed
+        .as_deref()
+        .unwrap_or(&stored.proposed_paragraph);
+
+    let _ = sessions
+        .upsert_edit_history_entry(
+            stored.session_id,
+            &build_edit_history_entry(&stored, "rejected", final_proposed),
+        )
+        .await;
 
     Ok(Json(json!({"ok": true})))
 }
@@ -120,4 +184,76 @@ fn apply_user_modification(
         *new_body = new_body.replacen(original, user_text, 1);
     }
     edit
+}
+
+fn build_edit_history_entry(
+    stored: &StoredEdit,
+    status: &str,
+    proposed_text: &str,
+) -> EditHistoryEntry {
+    let now = chrono::Utc::now().timestamp_millis();
+    EditHistoryEntry {
+        edit_id: stored.edit.id.to_string(),
+        kind: edit_kind_label(&stored.edit.kind).to_string(),
+        status: status.to_string(),
+        summary: edit_summary(stored, proposed_text),
+        created_at: now,
+        updated_at: now,
+    }
+}
+
+fn edit_kind_label(kind: &ProposedEditKind) -> &'static str {
+    match kind {
+        ProposedEditKind::Modify { .. } => "modify",
+        ProposedEditKind::Create { .. } => "create_document",
+        ProposedEditKind::UpdateContent { .. } => "update_content",
+        ProposedEditKind::DeleteDocument { .. } => "delete_document",
+        ProposedEditKind::CreateFolder { .. } => "create_folder",
+    }
+}
+
+fn edit_summary(stored: &StoredEdit, proposed_text: &str) -> String {
+    match &stored.edit.kind {
+        ProposedEditKind::Modify { .. } | ProposedEditKind::UpdateContent { .. } => {
+            let doc = if stored.doc_title.is_empty() {
+                "document".to_string()
+            } else {
+                format!("document \"{}\"", truncate_text(&stored.doc_title, 80))
+            };
+            format!(
+                "Updated {doc}. Original: {} Proposed: {}",
+                truncate_text(&stored.original_paragraph, 120),
+                truncate_text(proposed_text, 120)
+            )
+        }
+        ProposedEditKind::Create { title, body } => format!(
+            "Created document \"{}\" with draft content: {}",
+            truncate_text(title, 80),
+            truncate_text(body, 120)
+        ),
+        ProposedEditKind::DeleteDocument { .. } => {
+            if stored.doc_title.is_empty() {
+                "Deleted a document.".to_string()
+            } else {
+                format!("Deleted document \"{}\".", truncate_text(&stored.doc_title, 80))
+            }
+        }
+        ProposedEditKind::CreateFolder { name, parent_id } => {
+            if parent_id.is_some() {
+                format!("Created folder \"{}\" inside an existing parent.", truncate_text(name, 80))
+            } else {
+                format!("Created root folder \"{}\".", truncate_text(name, 80))
+            }
+        }
+    }
+}
+
+fn truncate_text(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+
+    let mut out = text.chars().take(max_chars).collect::<String>();
+    out.push_str("...");
+    out
 }

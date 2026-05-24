@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use kaya_core::{SessionStorage, UsageSummary};
+use kaya_core::{FolderSidebarState, SessionStorage, UsageSummary};
 
 use crate::error::ApiError;
 
@@ -116,6 +116,30 @@ pub async fn get_usage_summary(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
     Ok(Json(summary))
+}
+
+// ── GET/PUT /sessions/preferences/folder-sidebar ─────────────────────────────
+
+pub async fn get_folder_sidebar_state(
+    Extension(sessions): Extension<Arc<dyn SessionStorage>>,
+) -> Result<Json<FolderSidebarState>, ApiError> {
+    let state = sessions
+        .get_folder_sidebar_state()
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .unwrap_or_default();
+    Ok(Json(state))
+}
+
+pub async fn update_folder_sidebar_state(
+    Extension(sessions): Extension<Arc<dyn SessionStorage>>,
+    Json(body): Json<FolderSidebarState>,
+) -> Result<StatusCode, ApiError> {
+    sessions
+        .save_folder_sidebar_state(&body)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ── GET /sessions/:id/messages ────────────────────────────────────────────────

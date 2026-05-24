@@ -19,10 +19,11 @@ use uuid::Uuid;
 
 use kaya_core::{
     ParagraphChange, ProposedEdit, ProposedEditKind, SessionStorage, StorageAdapter,
-    agent::{AgentEvent, OrchestratorContext, SourcedEvent, orchestrate},
+    agent::{AgentEvent, ConversationSummarizer, OrchestratorContext, SourcedEvent, orchestrate},
     auth::UserSession,
     diff::compute_paragraph_diff,
     model_router::ModelRouter,
+    session::{ChatHistorySummary, EditHistoryEntry},
 };
 
 use crate::state::StoredEdit;
@@ -30,6 +31,7 @@ use crate::state::StoredEdit;
 #[derive(Deserialize)]
 pub struct ChatBody {
     pub message: String,
+    pub context: Option<String>,
 }
 
 pub async fn chat_stream(
@@ -52,6 +54,11 @@ pub async fn chat_stream(
         .get_prior_messages(session_id)
         .await
         .unwrap_or_default();
+    let chat_summary = sessions.get_chat_summary(session_id).await.unwrap_or(None);
+    let recent_edits = sessions
+        .get_recent_edit_history(session_id, 5)
+        .await
+        .unwrap_or_default();
 
     let is_first_turn = prior_messages.is_empty();
 
@@ -63,6 +70,21 @@ pub async fn chat_stream(
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(64);
     let message = body.message;
+    let recent_messages = prior_messages
+        .iter()
+        .rev()
+        .take(5)
+        .cloned()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
+    let conversation_context = build_conversation_context(
+        body.context.as_deref(),
+        chat_summary.as_ref(),
+        &recent_messages,
+        &recent_edits,
+    );
 
     tokio::spawn(async move {
         run_agent_stream(
@@ -72,7 +94,7 @@ pub async fn chat_stream(
             router,
             session_id,
             message,
-            prior_messages,
+            conversation_context,
             is_first_turn,
             tx,
         )
@@ -96,8 +118,8 @@ async fn run_agent_stream(
     pending_edits: Arc<Mutex<HashMap<Uuid, StoredEdit>>>,
     router: Arc<ModelRouter>,
     session_id: Uuid,
-    message: String,
-    _prior_messages: Vec<(String, String)>,
+    original_message: String,
+    conversation_context: Option<String>,
     is_first_turn: bool,
     tx: tokio::sync::mpsc::Sender<Bytes>,
 ) {
@@ -109,8 +131,9 @@ async fn run_agent_stream(
         sessions: sessions.clone(),
         router: router.clone(),
         session,
+        conversation_context: conversation_context.clone(),
     };
-    let mut events = orchestrate(&message, orch_ctx);
+    let mut events = orchestrate(&original_message, orch_ctx);
 
     let mut doc_title_cache: HashMap<Uuid, String> = HashMap::new();
     let mut assistant_text = String::new();
@@ -174,7 +197,15 @@ async fn run_agent_stream(
             },
 
             AgentEvent::ProposedEditEmitted { edit } => {
-                if let Some(sse_data) = build_edit_sse(&storage, &pending_edits, &edit).await {
+                if let Some(sse_data) = build_edit_sse(
+                    &storage,
+                    &sessions,
+                    &pending_edits,
+                    session_id,
+                    &edit,
+                )
+                .await
+                {
                     send!(sse_data);
                 }
             }
@@ -253,10 +284,17 @@ async fn run_agent_stream(
             )
             .await;
 
+        let sessions_for_summary = sessions.clone();
+        let router_for_summary = router.clone();
+        tokio::spawn(async move {
+            refresh_chat_summary_if_needed(sessions_for_summary, router_for_summary, session_id)
+                .await;
+        });
+
         if is_first_turn {
             let naming_prompt = format!(
                 "Generate a short title (3–6 words, no quotes, no trailing punctuation) \
-                 for a conversation that starts with this user message:\n\n{message}\n\nTitle:"
+                 for a conversation that starts with this user message:\n\n{original_message}\n\nTitle:"
             );
             if let Ok(resp) = router
                 .complete(
@@ -331,7 +369,9 @@ fn extract_citations(text: &str) -> (String, Vec<(String, String)>) {
 
 async fn build_edit_sse(
     storage: &Arc<dyn StorageAdapter>,
+    sessions: &Arc<dyn SessionStorage>,
     pending_edits: &Arc<Mutex<HashMap<Uuid, StoredEdit>>>,
+    session_id: Uuid,
     edit: &ProposedEdit,
 ) -> Option<Value> {
     let (doc_id, para_id, original, proposed) = match &edit.kind {
@@ -417,6 +457,7 @@ async fn build_edit_sse(
                 .map(|d| d.title)
                 .unwrap_or_default();
             let stored = StoredEdit {
+                session_id,
                 edit: edit.clone(),
                 doc_title: doc_title.clone(),
                 first_paragraph_id: String::new(),
@@ -424,6 +465,18 @@ async fn build_edit_sse(
                 proposed_paragraph: String::new(),
             };
             pending_edits.lock().await.insert(edit.id, stored);
+            let _ = sessions
+                .upsert_edit_history_entry(
+                    session_id,
+                    &build_edit_history_entry(
+                        edit,
+                        "pending",
+                        &doc_title,
+                        "",
+                        "",
+                    ),
+                )
+                .await;
             return Some(json!({
                 "type": "ProposedDeleteEmitted",
                 "editId": edit.id,
@@ -433,6 +486,7 @@ async fn build_edit_sse(
         }
         ProposedEditKind::CreateFolder { name, parent_id } => {
             let stored = StoredEdit {
+                session_id,
                 edit: edit.clone(),
                 doc_title: String::new(),
                 first_paragraph_id: String::new(),
@@ -440,6 +494,12 @@ async fn build_edit_sse(
                 proposed_paragraph: String::new(),
             };
             pending_edits.lock().await.insert(edit.id, stored);
+            let _ = sessions
+                .upsert_edit_history_entry(
+                    session_id,
+                    &build_edit_history_entry(edit, "pending", "", "", ""),
+                )
+                .await;
             return Some(json!({
                 "type": "ProposedFolderCreateEmitted",
                 "editId": edit.id,
@@ -460,13 +520,20 @@ async fn build_edit_sse(
     };
 
     let stored = StoredEdit {
+        session_id,
         edit: edit.clone(),
-        doc_title,
+        doc_title: doc_title.clone(),
         first_paragraph_id: para_id.clone(),
         original_paragraph: original.clone(),
         proposed_paragraph: proposed.clone(),
     };
     pending_edits.lock().await.insert(edit.id, stored);
+    let _ = sessions
+        .upsert_edit_history_entry(
+            session_id,
+            &build_edit_history_entry(edit, "pending", &doc_title, &original, &proposed),
+        )
+        .await;
 
     Some(json!({
         "type": "ProposedEditEmitted",
@@ -476,6 +543,166 @@ async fn build_edit_sse(
         "original": original,
         "proposed": proposed,
     }))
+}
+
+fn build_conversation_context(
+    request_context: Option<&str>,
+    summary: Option<&ChatHistorySummary>,
+    recent_messages: &[(String, String)],
+    recent_edits: &[EditHistoryEntry],
+) -> Option<String> {
+    let mut sections: Vec<String> = Vec::new();
+
+    if let Some(summary) = summary.filter(|s| !s.summary.trim().is_empty()) {
+        sections.push(format!(
+            "Chat summary (covers {} older messages):\n{}",
+            summary.covered_message_count, summary.summary
+        ));
+    }
+
+    if !recent_messages.is_empty() {
+        let rendered = recent_messages
+            .iter()
+            .map(|(role, content)| format!("{role}: {content}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        sections.push(format!("Recent messages (last {}):\n{rendered}", recent_messages.len()));
+    }
+
+    if !recent_edits.is_empty() {
+        let rendered = recent_edits
+            .iter()
+            .map(|entry| format!("- [{}] {}", entry.status, entry.summary))
+            .collect::<Vec<_>>()
+            .join("\n");
+        sections.push(format!("Recent edits (last {}):\n{rendered}", recent_edits.len()));
+    }
+
+    if let Some(context) = request_context.filter(|c| !c.trim().is_empty()) {
+        sections.push(format!(
+            "In-focus document for this turn:\n{context}"
+        ));
+    }
+
+    if sections.is_empty() {
+        None
+    } else {
+        Some(sections.join("\n\n"))
+    }
+}
+
+fn build_edit_history_entry(
+    edit: &ProposedEdit,
+    status: &str,
+    doc_title: &str,
+    original: &str,
+    proposed: &str,
+) -> EditHistoryEntry {
+    let now = chrono::Utc::now().timestamp_millis();
+    let kind = match &edit.kind {
+        ProposedEditKind::Modify { .. } => "modify",
+        ProposedEditKind::Create { .. } => "create_document",
+        ProposedEditKind::UpdateContent { .. } => "update_content",
+        ProposedEditKind::DeleteDocument { .. } => "delete_document",
+        ProposedEditKind::CreateFolder { .. } => "create_folder",
+    }
+    .to_string();
+
+    let summary = format_edit_history_summary(edit, doc_title, original, proposed);
+
+    EditHistoryEntry {
+        edit_id: edit.id.to_string(),
+        kind,
+        status: status.to_string(),
+        summary,
+        created_at: now,
+        updated_at: now,
+    }
+}
+
+fn format_edit_history_summary(
+    edit: &ProposedEdit,
+    doc_title: &str,
+    original: &str,
+    proposed: &str,
+) -> String {
+    match &edit.kind {
+        ProposedEditKind::Modify { .. } | ProposedEditKind::UpdateContent { .. } => {
+            let doc = if doc_title.is_empty() {
+                "document".to_string()
+            } else {
+                format!("document \"{}\"", truncate_text(doc_title, 80))
+            };
+            format!(
+                "Updated {doc}. Original: {} Proposed: {}",
+                truncate_text(original, 120),
+                truncate_text(proposed, 120)
+            )
+        }
+        ProposedEditKind::Create { title, body } => format!(
+            "Created document \"{}\" with draft content: {}",
+            truncate_text(title, 80),
+            truncate_text(body, 120)
+        ),
+        ProposedEditKind::DeleteDocument { .. } => {
+            if doc_title.is_empty() {
+                "Deleted a document.".to_string()
+            } else {
+                format!("Deleted document \"{}\".", truncate_text(doc_title, 80))
+            }
+        }
+        ProposedEditKind::CreateFolder { name, parent_id } => {
+            if parent_id.is_some() {
+                format!("Created folder \"{}\" inside an existing parent.", truncate_text(name, 80))
+            } else {
+                format!("Created root folder \"{}\".", truncate_text(name, 80))
+            }
+        }
+    }
+}
+
+async fn refresh_chat_summary_if_needed(
+    sessions: Arc<dyn SessionStorage>,
+    router: Arc<ModelRouter>,
+    session_id: Uuid,
+) {
+    let messages = match sessions.get_prior_messages(session_id).await {
+        Ok(messages) => messages,
+        Err(_) => return,
+    };
+
+    if messages.len() <= 5 {
+        return;
+    }
+
+    let covered_message_count = messages.len().saturating_sub(5);
+    if covered_message_count == 0 || covered_message_count % 5 != 0 {
+        return;
+    }
+
+    if let Ok(Some(existing)) = sessions.get_chat_summary(session_id).await {
+        if existing.covered_message_count as usize >= covered_message_count {
+            return;
+        }
+    }
+
+    let older_messages = &messages[..covered_message_count];
+    let summarizer = ConversationSummarizer::new();
+    let summary = match summarizer.summarize(router.as_ref(), older_messages).await {
+        Ok(summary) if !summary.trim().is_empty() => summary,
+        _ => return,
+    };
+
+    let _ = sessions
+        .save_chat_summary(
+            session_id,
+            &ChatHistorySummary {
+                summary,
+                covered_message_count: covered_message_count as u32,
+                updated_at: chrono::Utc::now().timestamp_millis(),
+            },
+        )
+        .await;
 }
 
 fn log_agent_event(source: &str, event: &AgentEvent) {

@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use kaya_core::{
-    SessionStorage, StorageAdapter, model_router::ModelRouter, retrieval::index_document_chunks,
+    DocumentEmbeddingStatus, EmbeddingTaskContext, SessionStorage, StorageAdapter,
+    model_router::ModelRouter,
+    retrieval::{chunk_document, index_document_chunks},
 };
 
 use crate::error::ApiError;
@@ -111,9 +113,33 @@ pub async fn create_document(
         let storage = storage.clone();
         let sessions = sessions.clone();
         let id = doc.id;
+        let task_id = Uuid::new_v4().to_string();
+        let _ = sessions
+            .upsert_document_embedding_status(&DocumentEmbeddingStatus {
+                document_id: doc.id,
+                task_id: Some(task_id.clone()),
+                status: "queued".to_string(),
+                expected_chunks: chunk_document(&doc).len() as u32,
+                embedded_chunks: 0,
+                last_error: None,
+                updated_at: chrono::Utc::now().timestamp_millis(),
+                last_indexed_at: None,
+            })
+            .await;
         tokio::spawn(async move {
-            if let Err(e) =
-                index_document_chunks(&doc, &storage, &router, Some(sessions.as_ref())).await
+            if let Err(e) = index_document_chunks(
+                &doc,
+                &storage,
+                &router,
+                Some(sessions.as_ref()),
+                Some(&EmbeddingTaskContext {
+                    task_id: Some(task_id),
+                    task_type: "document_index".to_string(),
+                    session_id: None,
+                    document_id: Some(doc.id),
+                }),
+            )
+            .await
             {
                 tracing::error!(document_id = %id, error = %e, "reindex failed after create");
             }
@@ -192,9 +218,33 @@ pub async fn update_document(
     if let Some(router) = llm {
         let storage = storage.clone();
         let sessions = sessions.clone();
+        let task_id = Uuid::new_v4().to_string();
+        let _ = sessions
+            .upsert_document_embedding_status(&DocumentEmbeddingStatus {
+                document_id: doc.id,
+                task_id: Some(task_id.clone()),
+                status: "queued".to_string(),
+                expected_chunks: chunk_document(&doc).len() as u32,
+                embedded_chunks: 0,
+                last_error: None,
+                updated_at: chrono::Utc::now().timestamp_millis(),
+                last_indexed_at: None,
+            })
+            .await;
         tokio::spawn(async move {
-            if let Err(e) =
-                index_document_chunks(&doc, &storage, &router, Some(sessions.as_ref())).await
+            if let Err(e) = index_document_chunks(
+                &doc,
+                &storage,
+                &router,
+                Some(sessions.as_ref()),
+                Some(&EmbeddingTaskContext {
+                    task_id: Some(task_id),
+                    task_type: "document_index".to_string(),
+                    session_id: None,
+                    document_id: Some(doc.id),
+                }),
+            )
+            .await
             {
                 tracing::error!(document_id = %id, error = %e, "reindex failed after update");
             }
@@ -218,6 +268,14 @@ pub async fn delete_document(
         .delete_document(id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let cleanup_storage = Arc::clone(&storage);
+    tokio::spawn(async move {
+        if let Err(err) = cleanup_storage.cleanup_deleted_document(id).await {
+            tracing::error!(document_id = %id, error = %err, "background document cleanup failed");
+        }
+    });
+
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -20,6 +20,7 @@ pub(crate) struct FolderResponse {
     id: Uuid,
     name: String,
     parent_id: Option<Uuid>,
+    sort_order: i64,
     created_at: String,
     updated_at: String,
 }
@@ -30,6 +31,7 @@ impl From<kaya_core::storage::Folder> for FolderResponse {
             id: f.id,
             name: f.name,
             parent_id: f.parent_id,
+            sort_order: f.sort_order,
             created_at: f.created_at,
             updated_at: f.updated_at,
         }
@@ -92,12 +94,26 @@ pub async fn get_folder(
 
 // ── PUT /folders/:id ──────────────────────────────────────────────────────────
 
+/// Deserializes a field that may be absent, null, or a value into
+/// `None` (absent), `Some(None)` (null), or `Some(Some(T))` (value).
+/// Serde treats absent and null identically for `Option<T>` by default,
+/// so we need this wrapper to distinguish the two cases.
+fn deserialize_double_option<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Ok(Some(Option::deserialize(d)?))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateFolderBody {
     pub name: Option<String>,
     /// Use `null` explicitly in JSON to move to root; omit the field to leave unchanged.
+    #[serde(default, deserialize_with = "deserialize_double_option")]
     pub parent_id: Option<Option<Uuid>>,
+    pub order_index: Option<usize>,
 }
 
 pub async fn update_folder(
@@ -115,9 +131,14 @@ pub async fn update_folder(
             .map_err(|_| ApiError::not_found(format!("folder {id}")))?;
     }
 
-    if let Some(new_parent) = body.parent_id {
+    if body.parent_id.is_some() || body.order_index.is_some() {
+        let current = storage
+            .get_folder(id)
+            .await
+            .map_err(|_| ApiError::not_found(format!("folder {id}")))?;
+        let new_parent = body.parent_id.unwrap_or(current.parent_id);
         storage
-            .move_folder(id, new_parent)
+            .move_folder(id, new_parent, body.order_index)
             .await
             .map_err(|_| ApiError::not_found(format!("folder {id}")))?;
     }

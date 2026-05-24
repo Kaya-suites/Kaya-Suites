@@ -58,6 +58,10 @@ where
         )
         .route("/sessions/usage", get(sessions::get_usage_summary))
         .route(
+            "/sessions/preferences/folder-sidebar",
+            get(sessions::get_folder_sidebar_state).put(sessions::update_folder_sidebar_state),
+        )
+        .route(
             "/sessions/{id}",
             patch(sessions::rename_session).delete(sessions::delete_session),
         )
@@ -68,4 +72,5 @@ where
         )
         .route("/sessions/{id}/chat", post(chat::chat_stream))
         .route("/edits/{id}/approve", post(edits::approve_edit))
+        .route("/edits/{id}/reject", post(edits::reject_edit))
 }
