@@ -54,5 +54,5 @@ export default function DocumentEditorPage({
     );
   }
 
-  return <DocumentEditor doc={doc} />;
+  return <DocumentEditor key={doc.id} doc={doc} />;
 }

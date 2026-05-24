@@ -12,15 +12,15 @@ type Props = {
   isStreaming?: boolean;
   onCitationClick: (ref: CitationRef) => void;
   onApproveEdit: (editId: string, finalText: string) => Promise<void>;
-  onRejectEdit: (editId: string) => void;
+  onRejectEdit: (editId: string) => Promise<void>;
   onApproveDelete: (editId: string) => Promise<void>;
-  onRejectDelete: (editId: string) => void;
+  onRejectDelete: (editId: string) => Promise<void>;
   onApproveFolderCreate: (editId: string) => Promise<void>;
-  onRejectFolderCreate: (editId: string) => void;
+  onRejectFolderCreate: (editId: string) => Promise<void>;
   onEditTextChange: (editId: string, text: string) => void;
   editTexts: Record<string, string>;
   onApproveAll: (messageId: string) => Promise<void>;
-  onRejectAll: (messageId: string) => void;
+  onRejectAll: (messageId: string) => Promise<void>;
 };
 
 function CitationText({
@@ -106,6 +106,15 @@ export function ChatMessage({
     }
   }
 
+  async function handleRejectAll() {
+    setApproveAllLoading(true);
+    try {
+      await onRejectAll(message.id);
+    } finally {
+      setApproveAllLoading(false);
+    }
+  }
+
   return (
     <div className="flex mb-5 gap-3">
       <div
@@ -169,8 +178,9 @@ export function ChatMessage({
         {pendingCount >= 2 && (
           <div className="mt-3 flex items-center gap-2 justify-end border-t-2 border-black pt-3">
             <button
-              onClick={() => onRejectAll(message.id)}
-              className="px-3 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black text-black hover:bg-[var(--color-muted-bg)] transition-all font-mono"
+              onClick={handleRejectAll}
+              disabled={approveAllLoading}
+              className="px-3 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black text-black hover:bg-[var(--color-muted-bg)] transition-all disabled:opacity-60 font-mono"
               style={{ borderRadius: "var(--border-radius)" }}
             >
               Reject all

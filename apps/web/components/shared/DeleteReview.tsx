@@ -6,7 +6,7 @@ import type { ProposedDelete } from "@/types/chat";
 type Props = {
   deletion: ProposedDelete;
   onApprove: (editId: string) => Promise<void>;
-  onReject: (editId: string) => void;
+  onReject: (editId: string) => Promise<void>;
 };
 
 export function DeleteReview({ deletion, onApprove, onReject }: Props) {

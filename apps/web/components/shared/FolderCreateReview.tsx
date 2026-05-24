@@ -6,7 +6,7 @@ import type { ProposedFolderCreate } from "@/types/chat";
 type Props = {
   proposal: ProposedFolderCreate;
   onApprove: (editId: string) => Promise<void>;
-  onReject: (editId: string) => void;
+  onReject: (editId: string) => Promise<void>;
 };
 
 export function FolderCreateReview({ proposal, onApprove, onReject }: Props) {

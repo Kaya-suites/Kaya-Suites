@@ -4,6 +4,7 @@ export type Folder = {
   id: string;
   name: string;
   parentId: string | null;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -64,6 +65,7 @@ export type KayaDocument = {
   body: string;
   tags: string[];
   lastReviewed?: string;
+  folderId?: string | null;
 };
 
 export type SSEEvent =

@@ -22,6 +22,7 @@ type Props = {
   onFolderCreated?: (folder: Folder) => void;
   onStepComplete?: (step: OnboardingStep) => void;
   onSessionRenamed?: (sessionId: string, title: string) => void;
+  requestContext?: string;
 };
 
 function randomId(): string {
@@ -46,7 +47,7 @@ const WELCOME: ChatMessageData = {
   timestamp: Date.now(),
 };
 
-export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFolderCreated, onStepComplete, onSessionRenamed }: Props) {
+export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFolderCreated, onStepComplete, onSessionRenamed, requestContext }: Props) {
   const [messages, setMessages] = useState<ChatMessageData[]>([WELCOME]);
   const [streamingId, setStreamingId] = useState<string | null>(null);
   // Tracks current text for each pending edit card so "Approve All" reads the right value
@@ -64,11 +65,7 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
 
   // Load message history when session changes
   useEffect(() => {
-    setStreamingId(null);
-    if (!sessionId) {
-      setMessages([WELCOME]);
-      return;
-    }
+    if (!sessionId) return;
     let cancelled = false;
     fetch(`/api/sessions/${sessionId}/messages`)
       .then((res) => (res.ok ? res.json() : []))
@@ -139,7 +136,7 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: sid, message: content }),
+        body: JSON.stringify({ sessionId: sid, message: content, context: requestContext }),
       });
 
       if (!res.ok) {
@@ -266,7 +263,7 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
           }
         }
       }
-    } catch (err) {
+    } catch {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
@@ -313,7 +310,18 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
     onDocumentUpdated(edit.docId);
   }
 
-  function rejectEdit(editId: string) {
+  async function rejectEdit(editId: string) {
+    const msg = messages.find((m) => m.proposedEdits?.some((e) => e.id === editId));
+    const edit = msg?.proposedEdits?.find((e) => e.id === editId);
+    if (!msg || !edit) return;
+
+    const res = await fetch(`/api/edits/${editId}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ proposed: pendingEditTexts[editId] ?? edit.proposed }),
+    });
+    if (!res.ok) throw new Error("reject failed");
+
     setMessages((prev) =>
       prev.map((m) =>
         m.proposedEdits?.some((e) => e.id === editId)
@@ -349,7 +357,14 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
     );
   }
 
-  function rejectDelete(editId: string) {
+  async function rejectDelete(editId: string) {
+    const res = await fetch(`/api/edits/${editId}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) throw new Error("reject failed");
+
     setMessages((prev) =>
       prev.map((m) =>
         m.proposedDeletes?.some((d) => d.id === editId)
@@ -387,7 +402,14 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
     );
   }
 
-  function rejectFolderCreate(editId: string) {
+  async function rejectFolderCreate(editId: string) {
+    const res = await fetch(`/api/edits/${editId}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) throw new Error("reject failed");
+
     setMessages((prev) =>
       prev.map((m) =>
         m.proposedFolderCreates?.some((f) => f.id === editId)
@@ -419,24 +441,19 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
     ]);
   }
 
-  function rejectAll(messageId: string) {
-    setMessages((prev) =>
-      prev.map((m) => {
-        if (m.id !== messageId) return m;
-        return {
-          ...m,
-          proposedEdits: m.proposedEdits?.map((e) =>
-            e.status === "pending" ? { ...e, status: "rejected" } : e,
-          ),
-          proposedDeletes: m.proposedDeletes?.map((d) =>
-            d.status === "pending" ? { ...d, status: "rejected" } : d,
-          ),
-          proposedFolderCreates: m.proposedFolderCreates?.map((f) =>
-            f.status === "pending" ? { ...f, status: "rejected" } : f,
-          ),
-        };
-      }),
-    );
+  async function rejectAll(messageId: string) {
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg) return;
+
+    const pendingEdits = msg.proposedEdits?.filter((e) => e.status === "pending") ?? [];
+    const pendingDeletes = msg.proposedDeletes?.filter((d) => d.status === "pending") ?? [];
+    const pendingFolders = msg.proposedFolderCreates?.filter((f) => f.status === "pending") ?? [];
+
+    await Promise.all([
+      ...pendingEdits.map((e) => rejectEdit(e.id)),
+      ...pendingDeletes.map((d) => rejectDelete(d.id)),
+      ...pendingFolders.map((f) => rejectFolderCreate(f.id)),
+    ]);
   }
 
   return (

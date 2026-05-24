@@ -9,7 +9,7 @@ type Props = {
   editedText: string;
   onTextChange: (editId: string, text: string) => void;
   onApprove: (editId: string, finalText: string) => Promise<void>;
-  onReject: (editId: string) => void;
+  onReject: (editId: string) => Promise<void>;
 };
 
 export function DiffReview({ edit, editedText, onTextChange, onApprove, onReject }: Props) {

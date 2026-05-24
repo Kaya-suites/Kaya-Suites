@@ -177,6 +177,7 @@ export function ChatLayout() {
         </div>
 
         <ChatPanel
+          key={sessionId ?? "empty-session"}
           sessionId={sessionId}
           onCitationClick={handleCitationClick}
           onDocumentUpdated={handleDocumentUpdated}

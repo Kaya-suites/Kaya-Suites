@@ -5,9 +5,10 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 // Proxies the SSE stream from the Rust backend so the browser doesn't need to
 // handle cross-origin streaming. Session cookie forwarding happens here too.
 export async function POST(request: NextRequest): Promise<Response> {
-  const body = (await request.json()) as { message?: string; sessionId?: string };
+  const body = (await request.json()) as { message?: string; sessionId?: string; context?: string };
   const sessionId = body.sessionId ?? "00000000-0000-0000-0000-000000000000";
   const message = body.message ?? "";
+  const context = body.context;
 
   const cookie = request.headers.get("cookie") ?? "";
   let upstream: globalThis.Response;
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         "Content-Type": "application/json",
         ...(cookie && { cookie }),
       },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, context }),
     });
   } catch {
     return Response.json({ error: "backend unreachable" }, { status: 502 });
