@@ -123,6 +123,11 @@ export default function AdminPage() {
   const [folders, setFolders] = useState<FolderRecord[] | null>(null);
   const [foldersError, setFoldersError] = useState<string | null>(null);
 
+  // Embeddings
+  const [embeddingCalls, setEmbeddingCalls] = useState<TableData | null>(null);
+  const [embeddingCoverage, setEmbeddingCoverage] = useState<TableData | null>(null);
+  const [embeddingsError, setEmbeddingsError] = useState<string | null>(null);
+
   // Table browser
   const [tables, setTables] = useState<string[]>([]);
   const [activeTable, setActiveTable] = useState<string | null>(null);
@@ -186,6 +191,23 @@ export default function AdminPage() {
     if (list.length > 0 && !activeTable) {
       setActiveTable(list[0]);
     }
+  }
+
+  async function fetchEmbeddings() {
+    setEmbeddingsError(null);
+    const [callsRes, coverageRes] = await Promise.all([
+      fetch(`${API_URL}/admin/embeddings?page=1&page_size=50`, { credentials: "include" }),
+      fetch(`${API_URL}/admin/embedding-coverage?page=1&page_size=50`, { credentials: "include" }),
+    ]);
+
+    if (!callsRes.ok || !coverageRes.ok) {
+      setEmbeddingsError("Failed to load embedding tables.");
+      return;
+    }
+
+    const [callsData, coverageData] = await Promise.all([callsRes.json(), coverageRes.json()]);
+    setEmbeddingCalls(callsData);
+    setEmbeddingCoverage(coverageData);
   }
 
   async function fetchTablePage(name: string, page = 1) {
@@ -267,15 +289,22 @@ export default function AdminPage() {
 
   // Load table data when active tab changes.
   useEffect(() => {
-    if (activeTable) fetchTablePage(activeTable);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!activeTable) return;
+    void (async () => {
+      await fetchTablePage(activeTable);
+    })();
   }, [activeTable]);
 
   useEffect(() => {
-    fetchStats();
-    fetchUsers();
-    fetchFolders();
-    fetchTables();
+    void (async () => {
+      await Promise.all([
+        fetchStats(),
+        fetchUsers(),
+        fetchFolders(),
+        fetchEmbeddings(),
+        fetchTables(),
+      ]);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -528,6 +557,40 @@ export default function AdminPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+          )}
+        </section>
+
+        {/* ── Embeddings ── */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">Embeddings</h2>
+            <button onClick={fetchEmbeddings} className="text-xs underline font-bold text-black hover:text-[var(--color-accent)]">
+              Reload
+            </button>
+          </div>
+
+          {embeddingsError ? (
+            <p className="text-[var(--color-danger)] font-bold text-xs uppercase tracking-wider">{embeddingsError}</p>
+          ) : !embeddingCalls || !embeddingCoverage ? (
+            <p className="text-[var(--color-muted)] text-xs uppercase tracking-wider animate-pulse">Loading…</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              <div className={`${cardClass} overflow-hidden`} style={cardStyle}>
+                <div className="px-6 py-4 border-b-2 border-black flex items-center justify-between" style={{ background: "var(--color-muted-bg)" }}>
+                  <h3 className="font-bold text-xs uppercase tracking-wider">Recent embedding API calls</h3>
+                  <span className="text-xs text-[var(--color-muted)]">{embeddingCalls.total} total</span>
+                </div>
+                <ResultTable columns={embeddingCalls.columns} rows={embeddingCalls.rows} />
+              </div>
+
+              <div className={`${cardClass} overflow-hidden`} style={cardStyle}>
+                <div className="px-6 py-4 border-b-2 border-black flex items-center justify-between" style={{ background: "var(--color-muted-bg)" }}>
+                  <h3 className="font-bold text-xs uppercase tracking-wider">Document embedding coverage</h3>
+                  <span className="text-xs text-[var(--color-muted)]">{embeddingCoverage.total} documents tracked</span>
+                </div>
+                <ResultTable columns={embeddingCoverage.columns} rows={embeddingCoverage.rows} />
+              </div>
             </div>
           )}
         </section>
