@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 interface UserStats {
   user_id: string;
   email: string;
@@ -28,12 +30,68 @@ interface UserRecord {
   created_at: string;
 }
 
+interface TableData {
+  columns: string[];
+  rows: unknown[][];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+interface QueryData {
+  columns: string[];
+  rows: unknown[][];
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 function fmt(usd: number) {
   return `$${usd.toFixed(4)}`;
 }
 
 const cardClass = "bg-[var(--color-surface)] border-2 border-black";
 const cardStyle = { borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" };
+
+function cellValue(v: unknown): string {
+  if (v === null || v === undefined) return "NULL";
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+
+// ── Shared result table ───────────────────────────────────────────────────────
+
+function ResultTable({ columns, rows }: { columns: string[]; rows: unknown[][] }) {
+  if (columns.length === 0) {
+    return <p className="text-[var(--color-muted)] text-xs px-6 py-4">No rows returned.</p>;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs min-w-max">
+        <thead>
+          <tr className="text-left border-b-2 border-black" style={{ background: "var(--color-background)" }}>
+            {columns.map((c) => (
+              <th key={c} className="px-4 py-3 font-bold uppercase tracking-wider whitespace-nowrap">{c}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-black/10">
+          {rows.map((row, i) => (
+            <tr key={i} className="hover:bg-[var(--color-muted-bg)]">
+              {row.map((cell, j) => (
+                <td key={j} className="px-4 py-2 font-mono text-xs text-black max-w-xs truncate whitespace-nowrap">
+                  {cellValue(cell)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function AdminPage() {
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -53,6 +111,19 @@ export default function AdminPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  // Table browser
+  const [tables, setTables] = useState<string[]>([]);
+  const [activeTable, setActiveTable] = useState<string | null>(null);
+  const [tableData, setTableData] = useState<TableData | null>(null);
+  const [tableLoading, setTableLoading] = useState(false);
+  const [tableError, setTableError] = useState<string | null>(null);
+
+  // SQL console
+  const [sql, setSql] = useState("SELECT * FROM users LIMIT 20");
+  const [queryResult, setQueryResult] = useState<QueryData | null>(null);
+  const [queryRunning, setQueryRunning] = useState(false);
+  const [queryError, setQueryError] = useState<string | null>(null);
+
   async function fetchStats() {
     const r = await fetch(`${API_URL}/admin/stats`, { credentials: "include" });
     if (r.status === 401) { setStatsError("Not authenticated."); return; }
@@ -70,6 +141,32 @@ export default function AdminPage() {
     setUsers(data);
     const me = data.find((u) => u.is_superadmin);
     if (me) setCurrentUserId(me.id);
+  }
+
+  async function fetchTables() {
+    const r = await fetch(`${API_URL}/admin/tables`, { credentials: "include" });
+    if (!r.ok) return;
+    const data = await r.json();
+    const list: string[] = data.tables ?? [];
+    setTables(list);
+    if (list.length > 0 && !activeTable) {
+      setActiveTable(list[0]);
+    }
+  }
+
+  async function fetchTablePage(name: string, page = 1) {
+    setTableLoading(true);
+    setTableError(null);
+    const r = await fetch(`${API_URL}/admin/table/${name}?page=${page}&page_size=50`, {
+      credentials: "include",
+    });
+    setTableLoading(false);
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      setTableError((body as { error?: string }).error ?? "Failed to load table.");
+      return;
+    }
+    setTableData(await r.json());
   }
 
   async function resetCircuitBreaker() {
@@ -115,17 +212,44 @@ export default function AdminPage() {
     fetchUsers();
   }
 
+  async function runQuery() {
+    setQueryRunning(true);
+    setQueryError(null);
+    setQueryResult(null);
+    const r = await fetch(`${API_URL}/admin/query`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sql }),
+    });
+    setQueryRunning(false);
+    const body = await r.json();
+    if (!r.ok) {
+      setQueryError((body as { error?: string }).error ?? "Query failed.");
+      return;
+    }
+    setQueryResult(body as QueryData);
+  }
+
+  // Load table data when active tab changes.
+  useEffect(() => {
+    if (activeTable) fetchTablePage(activeTable);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTable]);
+
   useEffect(() => {
     fetchStats();
     fetchUsers();
+    fetchTables();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <main className="min-h-screen p-8 font-mono" style={{ background: "var(--color-background)" }}>
-      <div className="max-w-5xl mx-auto space-y-8">
+      <div className="max-w-6xl mx-auto space-y-10">
         <h1 className="text-2xl font-black uppercase tracking-tight">Admin Dashboard</h1>
 
-        {/* ── Stats section ── */}
+        {/* ── Stats ── */}
         <section className="space-y-4">
           <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">Founder Stats</h2>
 
@@ -141,7 +265,7 @@ export default function AdminPage() {
                   style={{ borderRadius: "var(--border-radius)", boxShadow: "4px 4px 0px var(--color-danger)" }}
                 >
                   <p className="text-[var(--color-danger)] font-bold text-xs uppercase tracking-wider">
-                    ⚠ CIRCUIT BREAKER OPEN — new agent invocations are blocked.
+                    CIRCUIT BREAKER OPEN — new agent invocations are blocked.
                   </p>
                   <button
                     onClick={resetCircuitBreaker}
@@ -183,16 +307,14 @@ export default function AdminPage() {
                     ))}
                     {stats.top_users.length === 0 && (
                       <tr>
-                        <td colSpan={3} className="px-6 py-6 text-center text-[var(--color-muted)]">
-                          No usage this period.
-                        </td>
+                        <td colSpan={3} className="px-6 py-6 text-center text-[var(--color-muted)]">No usage this period.</td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
 
-              <p className="text-xs text-[var(--color-muted)] text-right">
+              <p className="text-xs text-right">
                 <button onClick={fetchStats} className="underline font-bold text-black hover:text-[var(--color-accent)]">
                   Reload stats
                 </button>
@@ -201,7 +323,7 @@ export default function AdminPage() {
           )}
         </section>
 
-        {/* ── User management section ── */}
+        {/* ── User management ── */}
         <section className="space-y-4">
           <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">User Management</h2>
 
@@ -256,39 +378,19 @@ export default function AdminPage() {
                     ))}
                     {users.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="px-6 py-6 text-center text-[var(--color-muted)]">
-                          No users yet.
-                        </td>
+                        <td colSpan={5} className="px-6 py-6 text-center text-[var(--color-muted)]">No users yet.</td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
 
-              {/* Create user form */}
               <div className={`${cardClass} p-6 space-y-4`} style={cardStyle}>
                 <h3 className="font-bold text-xs uppercase tracking-wider">Create user</h3>
                 <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Field
-                    label="Email"
-                    type="email"
-                    value={createForm.email}
-                    required
-                    onChange={(v) => setCreateForm((f) => ({ ...f, email: v }))}
-                  />
-                  <Field
-                    label="Username (optional)"
-                    type="text"
-                    value={createForm.username}
-                    onChange={(v) => setCreateForm((f) => ({ ...f, username: v }))}
-                  />
-                  <Field
-                    label="Password"
-                    type="password"
-                    value={createForm.password}
-                    required
-                    onChange={(v) => setCreateForm((f) => ({ ...f, password: v }))}
-                  />
+                  <Field label="Email" type="email" value={createForm.email} required onChange={(v) => setCreateForm((f) => ({ ...f, email: v }))} />
+                  <Field label="Username (optional)" type="text" value={createForm.username} onChange={(v) => setCreateForm((f) => ({ ...f, username: v }))} />
+                  <Field label="Password" type="password" value={createForm.password} required onChange={(v) => setCreateForm((f) => ({ ...f, password: v }))} />
                   <div className="flex items-center gap-3 pt-5">
                     <input
                       id="is_superadmin"
@@ -297,9 +399,7 @@ export default function AdminPage() {
                       onChange={(e) => setCreateForm((f) => ({ ...f, is_superadmin: e.target.checked }))}
                       className="w-4 h-4 border-2 border-black"
                     />
-                    <label htmlFor="is_superadmin" className="text-xs font-bold uppercase tracking-wider">
-                      Superadmin
-                    </label>
+                    <label htmlFor="is_superadmin" className="text-xs font-bold uppercase tracking-wider">Superadmin</label>
                   </div>
                   <div className="md:col-span-2 flex items-center gap-4">
                     <button
@@ -310,19 +410,139 @@ export default function AdminPage() {
                     >
                       {creating ? "Creating…" : "Create user"}
                     </button>
-                    {createError && (
-                      <p className="text-[var(--color-danger)] text-xs font-bold">{createError}</p>
-                    )}
+                    {createError && <p className="text-[var(--color-danger)] text-xs font-bold">{createError}</p>}
                   </div>
                 </form>
               </div>
             </>
           )}
         </section>
+
+        {/* ── Table browser ── */}
+        <section className="space-y-4">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">Table Browser</h2>
+
+          {tables.length === 0 ? (
+            <p className="text-[var(--color-muted)] text-xs uppercase tracking-wider animate-pulse">Loading…</p>
+          ) : (
+            <div className={`${cardClass} overflow-hidden`} style={cardStyle}>
+              {/* Tab bar */}
+              <div className="flex overflow-x-auto border-b-2 border-black" style={{ background: "var(--color-muted-bg)" }}>
+                {tables.map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => {
+                      setActiveTable(t);
+                      setTableData(null);
+                    }}
+                    className={[
+                      "px-4 py-3 text-xs font-bold uppercase tracking-wider whitespace-nowrap border-r-2 border-black",
+                      activeTable === t
+                        ? "bg-black text-white"
+                        : "hover:bg-black/5",
+                    ].join(" ")}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+
+              {/* Table content */}
+              <div className="min-h-[120px]">
+                {tableLoading ? (
+                  <p className="text-[var(--color-muted)] text-xs uppercase tracking-wider animate-pulse px-6 py-4">Loading…</p>
+                ) : tableError ? (
+                  <p className="text-[var(--color-danger)] text-xs font-bold px-6 py-4">{tableError}</p>
+                ) : tableData ? (
+                  <>
+                    <ResultTable columns={tableData.columns} rows={tableData.rows} />
+                    {/* Pagination */}
+                    <div className="px-6 py-3 border-t-2 border-black flex items-center justify-between" style={{ background: "var(--color-muted-bg)" }}>
+                      <span className="text-xs text-[var(--color-muted)]">
+                        {tableData.total} rows · page {tableData.page} of {Math.max(1, Math.ceil(tableData.total / tableData.page_size))}
+                      </span>
+                      <div className="flex gap-2">
+                        <button
+                          disabled={tableData.page <= 1}
+                          onClick={() => activeTable && fetchTablePage(activeTable, tableData.page - 1)}
+                          className="text-xs border-2 border-black px-3 py-1 font-bold uppercase tracking-wider disabled:opacity-30 hover:bg-black hover:text-white"
+                          style={{ borderRadius: "var(--border-radius)" }}
+                        >
+                          Prev
+                        </button>
+                        <button
+                          disabled={tableData.page >= Math.ceil(tableData.total / tableData.page_size)}
+                          onClick={() => activeTable && fetchTablePage(activeTable, tableData.page + 1)}
+                          className="text-xs border-2 border-black px-3 py-1 font-bold uppercase tracking-wider disabled:opacity-30 hover:bg-black hover:text-white"
+                          style={{ borderRadius: "var(--border-radius)" }}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* ── SQL console ── */}
+        <section className="space-y-4">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">SQL Console</h2>
+          <div className={`${cardClass} overflow-hidden`} style={cardStyle}>
+            <div className="px-6 py-4 border-b-2 border-black space-y-3" style={{ background: "var(--color-muted-bg)" }}>
+              <textarea
+                value={sql}
+                onChange={(e) => setSql(e.target.value)}
+                rows={8}
+                spellCheck={false}
+                className="w-full bg-[var(--color-background)] border-2 border-black px-3 py-2 text-xs font-mono focus:outline-none focus:border-[var(--color-accent)] resize-y"
+                style={{ borderRadius: "var(--border-radius)" }}
+                placeholder="SELECT * FROM users LIMIT 20"
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    runQuery();
+                  }
+                }}
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={runQuery}
+                  disabled={queryRunning || !sql.trim()}
+                  className="text-xs border-2 border-black bg-black text-white px-4 py-2 font-bold uppercase tracking-wider hover:bg-[var(--color-accent)] hover:border-[var(--color-accent)] disabled:opacity-50"
+                  style={{ borderRadius: "var(--border-radius)" }}
+                >
+                  {queryRunning ? "Running…" : "Run Query"}
+                </button>
+                <span className="text-xs text-[var(--color-muted)]">or ⌘↵ / Ctrl↵</span>
+                <span className="ml-auto text-xs text-[var(--color-muted)]">Read-only · SELECT only</span>
+              </div>
+            </div>
+
+            <div className="min-h-[80px]">
+              {queryError ? (
+                <p className="text-[var(--color-danger)] text-xs font-bold font-mono px-6 py-4">{queryError}</p>
+              ) : queryResult ? (
+                <>
+                  <ResultTable columns={queryResult.columns} rows={queryResult.rows} />
+                  <div className="px-6 py-2 border-t-2 border-black" style={{ background: "var(--color-muted-bg)" }}>
+                    <span className="text-xs text-[var(--color-muted)]">{queryResult.rows.length} row{queryResult.rows.length !== 1 ? "s" : ""} returned</span>
+                  </div>
+                </>
+              ) : (
+                <p className="text-[var(--color-muted)] text-xs px-6 py-4">Run a query to see results.</p>
+              )}
+            </div>
+          </div>
+        </section>
       </div>
     </main>
   );
 }
+
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 function Kpi({ label, value }: { label: string; value: string }) {
   return (

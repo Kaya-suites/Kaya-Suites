@@ -7,20 +7,23 @@
 //! - `GET  /admin/users`                 — list all users (superadmin only)
 //! - `POST /admin/users`                 — create a user (superadmin only)
 //! - `DELETE /admin/users/:id`           — delete a user (superadmin only)
+//! - `GET  /admin/tables`                — list browsable table names (founder only)
+//! - `GET  /admin/table/:name`           — paginated table rows (founder only)
+//! - `POST /admin/query`                 — execute a read-only SELECT (founder only)
 
 use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
-use kaya_metering::MeteringService;
 use kaya_auth::{AuthSession, AuthUser, KayaAuthBackend, PasswordAuthService};
+use kaya_metering::MeteringService;
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
+use sqlx::{Column, Row, TypeInfo as _};
 use uuid::Uuid;
 
 use crate::state::AppState;
@@ -32,6 +35,9 @@ pub fn router() -> Router<AppState> {
         .route("/admin/users", get(list_users))
         .route("/admin/users", post(create_user))
         .route("/admin/users/{id}", delete(delete_user))
+        .route("/admin/tables", get(list_tables))
+        .route("/admin/table/{name}", get(browse_table))
+        .route("/admin/query", post(run_query))
 }
 
 fn is_founder(user: &AuthUser, admin_email: &str) -> bool {
@@ -258,6 +264,254 @@ async fn delete_user(
         Err(e) => {
             tracing::error!(error = %e, "delete_user failed");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+// ── Database browser routes (founder only) ────────────────────────────────────
+
+const BROWSABLE_TABLES: &[&str] = &[
+    "users",
+    "documents",
+    "chat_sessions",
+    "chat_messages",
+    "usage_events",
+    "usage_counters",
+    "subscriptions",
+    "system_flags",
+];
+
+// Tables that have a created_at column for deterministic ordering.
+const TABLES_WITH_CREATED_AT: &[&str] = &[
+    "users",
+    "documents",
+    "chat_sessions",
+    "chat_messages",
+    "usage_events",
+    "usage_counters",
+    "subscriptions",
+];
+
+fn any_row_to_json(row: &sqlx::any::AnyRow) -> Vec<serde_json::Value> {
+    row.columns()
+        .iter()
+        .map(|col| {
+            let name = col.name();
+            let type_name = col.type_info().name().to_ascii_lowercase();
+            // Try integer types first, then float, then bool, then string, then null.
+            if type_name.contains("int") || type_name == "bigint" || type_name == "integer" {
+                if let Ok(v) = row.try_get::<i64, _>(name) {
+                    return serde_json::Value::Number(v.into());
+                }
+            }
+            if type_name.contains("real") || type_name.contains("float") || type_name.contains("double") || type_name.contains("numeric") || type_name.contains("decimal") {
+                if let Ok(v) = row.try_get::<f64, _>(name) {
+                    if let Some(n) = serde_json::Number::from_f64(v) {
+                        return serde_json::Value::Number(n);
+                    }
+                }
+            }
+            if type_name == "bool" || type_name == "boolean" {
+                if let Ok(v) = row.try_get::<bool, _>(name) {
+                    return serde_json::Value::Bool(v);
+                }
+            }
+            // Fallback: try i64 generically (catches booleans stored as ints).
+            if let Ok(v) = row.try_get::<i64, _>(name) {
+                return serde_json::Value::Number(v.into());
+            }
+            if let Ok(v) = row.try_get::<f64, _>(name) {
+                if let Some(n) = serde_json::Number::from_f64(v) {
+                    return serde_json::Value::Number(n);
+                }
+            }
+            if let Ok(v) = row.try_get::<String, _>(name) {
+                return serde_json::Value::String(v);
+            }
+            serde_json::Value::Null
+        })
+        .collect()
+}
+
+async fn list_tables(State(state): State<AppState>, auth: AuthSession<KayaAuthBackend>) -> Response {
+    let user = match auth.user {
+        Some(u) => u,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+    if !is_founder(&user, &state.admin_email) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    (StatusCode::OK, Json(serde_json::json!({ "tables": BROWSABLE_TABLES }))).into_response()
+}
+
+#[derive(Deserialize)]
+struct PaginationParams {
+    #[serde(default = "default_page")]
+    page: u32,
+    #[serde(default = "default_page_size")]
+    page_size: u32,
+}
+
+fn default_page() -> u32 { 1 }
+fn default_page_size() -> u32 { 50 }
+
+#[derive(Serialize)]
+struct TableResponse {
+    columns: Vec<String>,
+    rows: Vec<Vec<serde_json::Value>>,
+    total: i64,
+    page: u32,
+    page_size: u32,
+}
+
+async fn browse_table(
+    State(state): State<AppState>,
+    auth: AuthSession<KayaAuthBackend>,
+    Path(table_name): Path<String>,
+    Query(params): Query<PaginationParams>,
+) -> Response {
+    let user = match auth.user {
+        Some(u) => u,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+    if !is_founder(&user, &state.admin_email) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if !BROWSABLE_TABLES.contains(&table_name.as_str()) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "unknown_table"})),
+        )
+            .into_response();
+    }
+
+    let page_size = params.page_size.clamp(1, 200);
+    let page = params.page.max(1);
+    let offset = (page - 1) * page_size;
+
+    let order = if TABLES_WITH_CREATED_AT.contains(&table_name.as_str()) {
+        "ORDER BY created_at DESC"
+    } else {
+        ""
+    };
+
+    let select_sql = format!(
+        "SELECT * FROM {table_name} {order} LIMIT {page_size} OFFSET {offset}"
+    );
+    let count_sql = format!("SELECT COUNT(*) as n FROM {table_name}");
+
+    let rows_result = sqlx::query(&select_sql).fetch_all(&state.pool).await;
+    let count_result = sqlx::query(&count_sql).fetch_one(&state.pool).await;
+
+    match (rows_result, count_result) {
+        (Ok(rows), Ok(count_row)) => {
+            let total: i64 = count_row.try_get::<i64, _>("n")
+                .or_else(|_| count_row.try_get::<i64, _>(0))
+                .unwrap_or(0);
+
+            let columns: Vec<String> = rows
+                .first()
+                .map(|r| r.columns().iter().map(|c| c.name().to_string()).collect())
+                .unwrap_or_default();
+
+            let data: Vec<Vec<serde_json::Value>> = rows.iter().map(any_row_to_json).collect();
+
+            (
+                StatusCode::OK,
+                Json(TableResponse {
+                    columns,
+                    rows: data,
+                    total,
+                    page,
+                    page_size,
+                }),
+            )
+                .into_response()
+        }
+        (Err(e), _) | (_, Err(e)) => {
+            tracing::error!(error = %e, table = %table_name, "browse_table failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct QueryBody {
+    sql: String,
+}
+
+#[derive(Serialize)]
+struct QueryResponse {
+    columns: Vec<String>,
+    rows: Vec<Vec<serde_json::Value>>,
+}
+
+fn validate_select_only(sql: &str) -> Result<(), &'static str> {
+    let upper = sql.trim().to_ascii_uppercase();
+
+    if !upper.starts_with("SELECT") {
+        return Err("Only SELECT statements are allowed.");
+    }
+    if upper.contains(';') {
+        return Err("Multi-statement queries are not allowed.");
+    }
+    // Split on non-alpha chars and check each token against the banned list.
+    let tokens: Vec<&str> = upper
+        .split(|c: char| !c.is_ascii_alphabetic())
+        .filter(|t| !t.is_empty())
+        .collect();
+    const BANNED: &[&str] = &[
+        "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER",
+        "TRUNCATE", "GRANT", "REVOKE",
+    ];
+    for banned in BANNED {
+        if tokens.contains(banned) {
+            return Err("DML and DDL statements are not allowed.");
+        }
+    }
+    Ok(())
+}
+
+async fn run_query(
+    State(state): State<AppState>,
+    auth: AuthSession<KayaAuthBackend>,
+    Json(body): Json<QueryBody>,
+) -> Response {
+    let user = match auth.user {
+        Some(u) => u,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+    if !is_founder(&user, &state.admin_email) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    if let Err(msg) = validate_select_only(body.sql.trim()) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": msg})),
+        )
+            .into_response();
+    }
+
+    match sqlx::query(body.sql.trim()).fetch_all(&state.pool).await {
+        Ok(rows) => {
+            let columns: Vec<String> = rows
+                .first()
+                .map(|r| r.columns().iter().map(|c| c.name().to_string()).collect())
+                .unwrap_or_default();
+
+            let data: Vec<Vec<serde_json::Value>> = rows.iter().map(any_row_to_json).collect();
+
+            (StatusCode::OK, Json(QueryResponse { columns, rows: data })).into_response()
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "admin query failed");
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+                .into_response()
         }
     }
 }
