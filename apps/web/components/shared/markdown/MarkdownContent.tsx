@@ -196,23 +196,21 @@ export function MarkdownContent({ markdown, className, decorateText, isStreaming
               </p>
             );
           case "heading": {
-            const shared = {
-              key: block.id,
-              className:
-                block.level === 1
-                  ? "mb-3 text-2xl font-bold font-mono"
-                  : block.level === 2
-                    ? "mb-3 mt-6 text-lg font-bold font-mono"
-                    : "mb-3 mt-4 text-base font-bold font-mono",
-            };
+            const headingKey = block.id;
+            const headingClass =
+              block.level === 1
+                ? "mb-3 text-2xl font-bold font-mono"
+                : block.level === 2
+                  ? "mb-3 mt-6 text-lg font-bold font-mono"
+                  : "mb-3 mt-4 text-base font-bold font-mono";
 
             const content = <InlineMarkdown markdown={inlineHtmlToMarkdown(block.html)} decorateText={decorateText} />;
-            if (block.level === 1) return <h1 {...shared}>{content}</h1>;
-            if (block.level === 2) return <h2 {...shared}>{content}</h2>;
-            if (block.level === 3) return <h3 {...shared}>{content}</h3>;
-            if (block.level === 4) return <h4 {...shared}>{content}</h4>;
-            if (block.level === 5) return <h5 {...shared}>{content}</h5>;
-            return <h6 {...shared}>{content}</h6>;
+            if (block.level === 1) return <h1 key={headingKey} className={headingClass}>{content}</h1>;
+            if (block.level === 2) return <h2 key={headingKey} className={headingClass}>{content}</h2>;
+            if (block.level === 3) return <h3 key={headingKey} className={headingClass}>{content}</h3>;
+            if (block.level === 4) return <h4 key={headingKey} className={headingClass}>{content}</h4>;
+            if (block.level === 5) return <h5 key={headingKey} className={headingClass}>{content}</h5>;
+            return <h6 key={headingKey} className={headingClass}>{content}</h6>;
           }
           case "blockquote":
             return (
