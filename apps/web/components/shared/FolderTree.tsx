@@ -3,18 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  DndContext,
-  DragEndEvent,
-  DragOverEvent,
-  DragOverlay,
-  DragStartEvent,
-  PointerSensor,
-  closestCenter,
-  pointerWithin,
   useDraggable,
   useDroppable,
-  useSensor,
-  useSensors,
 } from "@dnd-kit/core";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -39,6 +29,7 @@ type Props = {
   folders: Folder[];
   documents: DocumentSummary[];
   selectedFolderId: string | null | "root";
+  overFolderId?: string | null;
   onSelectFolder: (id: string | null) => void;
   onFolderCreated: (folder: Folder) => void;
   onFolderRenamed: (folder: Folder) => void;
@@ -355,6 +346,7 @@ export function FolderTree({
   folders,
   documents,
   selectedFolderId,
+  overFolderId,
   onSelectFolder,
   onFolderCreated,
   onFolderRenamed,
@@ -368,8 +360,6 @@ export function FolderTree({
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [creating, setCreating] = useState<{ parentId: string | null } | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [overFolderId, setOverFolderId] = useState<string | null | undefined>(undefined);
   const [docKebabMenu, setDocKebabMenu] = useState<DocKebabMenu | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null);
   const renameRef = useRef<HTMLInputElement>(null);
@@ -382,10 +372,6 @@ export function FolderTree({
   useEffect(() => {
     if (creating) createRef.current?.focus();
   }, [creating]);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
-  );
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedIds((prev) => {
@@ -508,159 +494,75 @@ export function FolderTree({
     setNewFolderName("");
   }
 
-  function handleDragStart(event: DragStartEvent) {
-    setActiveId(event.active.id as string);
-    setOverFolderId(undefined);
-  }
-
-  function handleDragOver(event: DragOverEvent) {
-    const { over } = event;
-    if (!over) { setOverFolderId(undefined); return; }
-    const data = over.data.current as { folderId?: string | null };
-    setOverFolderId(data?.folderId !== undefined ? data.folderId : undefined);
-  }
-
-  async function handleDragEnd(event: DragEndEvent) {
-    setActiveId(null);
-    setOverFolderId(undefined);
-    const { active, over } = event;
-    if (!over) return;
-
-    const activeData = active.data.current as { type: string; folderId?: string; docId?: string };
-    const overData = over.data.current as { folderId?: string | null };
-    const targetFolderId = overData?.folderId !== undefined ? overData.folderId : null;
-
-    if (activeData.type === "folder" && activeData.folderId) {
-      if (activeData.folderId === targetFolderId) return;
-      try {
-        const res = await fetch(`/api/folders/${activeData.folderId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parentId: targetFolderId }),
-        });
-        if (res.ok) {
-          const updated = await res.json() as Folder;
-          onFolderMoved(activeData.folderId, updated.parentId);
-        }
-      } catch {}
-    } else if (activeData.type === "document" && activeData.docId) {
-      try {
-        const res = await fetch(`/api/documents/${activeData.docId}/folder`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ folderId: targetFolderId }),
-        });
-        if (res.ok || res.status === 204) {
-          onDocumentMoved(activeData.docId, targetFolderId);
-        }
-      } catch {}
-    }
-  }
-
   const rootFolders = folders.filter((f) => f.parentId === null);
   const unfiledDocs = documents.filter((d) => !d.folderId);
 
-  const activeFolderName = activeId?.startsWith("folder:")
-    ? folders.find((f) => f.id === activeId.slice(7))?.name
-    : null;
-  const activeDoc = activeId?.startsWith("doc:")
-    ? documents.find((d) => d.id === activeId.slice(4))
-    : null;
-
   return (
     <div className="relative" onClick={closeAll}>
-      <DndContext
-        sensors={sensors}
-        collisionDetection={(args) => {
-          const hits = pointerWithin(args);
-          return hits.length > 0 ? hits : closestCenter(args);
-        }}
-        onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
-        onDragEnd={handleDragEnd}
-      >
-        <div className="py-1">
-          <div className="px-2 py-1 flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-muted)] font-mono">Folders</span>
-            <button
-              onClick={(e) => { e.stopPropagation(); startCreate(null); }}
-              className="text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"
-              title="New folder"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-            </button>
-          </div>
-
-          <RootDropZone
-            selectedFolderId={selectedFolderId}
-            isOver={overFolderId === null}
-            onSelectFolder={onSelectFolder}
-          />
-
-          {rootFolders.map((folder) => (
-            <DraggableFolderNode
-              key={folder.id}
-              folder={folder}
-              depth={0}
-              folders={folders}
-              documents={documents}
-              selectedFolderId={selectedFolderId}
-              expandedIds={expandedIds}
-              overFolderId={overFolderId}
-              onSelectFolder={onSelectFolder}
-              onToggleExpand={toggleExpand}
-              onContextMenu={handleContextMenu}
-              onDocKebab={openDocKebab}
-            />
-          ))}
-
-          {creating && (
-            <div className="flex items-center gap-1.5 px-2 py-1" style={{ paddingLeft: creating.parentId ? "24px" : "8px" }}>
-              <span className="w-3 h-3 shrink-0" />
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--color-accent)]">
-                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-              </svg>
-              <input
-                ref={createRef}
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submitCreate();
-                  if (e.key === "Escape") setCreating(null);
-                }}
-                onBlur={submitCreate}
-                className="flex-1 text-xs font-mono font-bold uppercase tracking-wider border-b-2 border-[var(--color-accent)] bg-transparent outline-none text-black py-0.5"
-                placeholder="Folder name"
-                onClick={(e) => e.stopPropagation()}
-              />
-            </div>
-          )}
-
-          {unfiledDocs.map((doc) => (
-            <UnfiledDocRow key={doc.id} doc={doc} onKebabDoc={openDocKebab} />
-          ))}
+      <div className="py-1">
+        <div className="px-2 py-1 flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-muted)] font-mono">Folders</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); startCreate(null); }}
+            className="text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"
+            title="New folder"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
         </div>
 
-        <DragOverlay>
-          {activeFolderName && (
-            <div className="text-xs font-mono font-bold uppercase tracking-wider px-3 py-1.5 bg-white border-2 border-[var(--color-accent)] shadow-lg opacity-90">
-              {activeFolderName}
-            </div>
-          )}
-          {activeDoc && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white border-2 border-[var(--color-accent)] shadow-lg opacity-90 text-xs font-mono text-[var(--color-muted)]">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-              </svg>
-              <span className="truncate max-w-32">{activeDoc.title}</span>
-            </div>
-          )}
-        </DragOverlay>
-      </DndContext>
+        <RootDropZone
+          selectedFolderId={selectedFolderId}
+          isOver={overFolderId === null}
+          onSelectFolder={onSelectFolder}
+        />
+
+        {rootFolders.map((folder) => (
+          <DraggableFolderNode
+            key={folder.id}
+            folder={folder}
+            depth={0}
+            folders={folders}
+            documents={documents}
+            selectedFolderId={selectedFolderId}
+            expandedIds={expandedIds}
+            overFolderId={overFolderId}
+            onSelectFolder={onSelectFolder}
+            onToggleExpand={toggleExpand}
+            onContextMenu={handleContextMenu}
+            onDocKebab={openDocKebab}
+          />
+        ))}
+
+        {creating && (
+          <div className="flex items-center gap-1.5 px-2 py-1" style={{ paddingLeft: creating.parentId ? "24px" : "8px" }}>
+            <span className="w-3 h-3 shrink-0" />
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--color-accent)]">
+              <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+            </svg>
+            <input
+              ref={createRef}
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitCreate();
+                if (e.key === "Escape") setCreating(null);
+              }}
+              onBlur={submitCreate}
+              className="flex-1 text-xs font-mono font-bold uppercase tracking-wider border-b-2 border-[var(--color-accent)] bg-transparent outline-none text-black py-0.5"
+              placeholder="Folder name"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        )}
+
+        {unfiledDocs.map((doc) => (
+          <UnfiledDocRow key={doc.id} doc={doc} onKebabDoc={openDocKebab} />
+        ))}
+      </div>
 
       {/* Folder right-click / kebab context menu */}
       {contextMenu && (
@@ -798,6 +700,29 @@ export function DraggableDocument({
 
   return (
     <div ref={setNodeRef} {...listeners} {...attributes} style={{ opacity: isDragging ? 0.4 : 1 }}>
+      {children}
+    </div>
+  );
+}
+
+// ── Draggable folder wrapper (used by documents page main list) ────────────────
+
+export function DraggableFolder({
+  folderId,
+  parentId,
+  children,
+}: {
+  folderId: string;
+  parentId: string | null;
+  children: React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `folder-main:${folderId}`,
+    data: { type: "folder", folderId, parentId },
+  });
+
+  return (
+    <div ref={setNodeRef} {...listeners} {...attributes} style={{ opacity: isDragging ? 0.4 : 1, cursor: "grab" }}>
       {children}
     </div>
   );

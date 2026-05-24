@@ -1,6 +1,7 @@
 //! Concrete tool implementations (FR-13).
 
 mod create_document;
+mod create_folder;
 mod delete_document;
 mod find_stale_references;
 mod list_documents;
@@ -10,6 +11,7 @@ mod search_documents;
 mod update_document;
 
 pub use create_document::CreateDocument;
+pub use create_folder::CreateFolder;
 pub use delete_document::DeleteDocument;
 pub use find_stale_references::FindStaleReferences;
 pub use list_documents::ListDocuments;
@@ -29,19 +31,21 @@ impl ReadTool for ListDocuments {}
 impl ReadTool for FindStaleReferences {}
 
 impl WriteTool for CreateDocument {}
+impl WriteTool for CreateFolder {}
 impl WriteTool for DeleteDocument {}
 impl WriteTool for ProposeEdit {}
 impl WriteTool for UpdateDocument {}
 
 // ── Tool set constructors ─────────────────────────────────────────────────────
 
-/// Build the default FR-13 tool set (all 8 tools, used by legacy `AgentLoop`).
+/// Build the default FR-13 tool set (all 9 tools, used by legacy `AgentLoop`).
 pub fn default_tools() -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(SearchDocuments),
         Arc::new(ReadDocument),
         Arc::new(ListDocuments),
         Arc::new(CreateDocument),
+        Arc::new(CreateFolder),
         Arc::new(DeleteDocument),
         Arc::new(ProposeEdit),
         Arc::new(UpdateDocument),
@@ -63,6 +67,7 @@ pub fn read_tools() -> Vec<Arc<dyn ReadTool>> {
 pub fn write_tools() -> Vec<Arc<dyn WriteTool>> {
     vec![
         Arc::new(CreateDocument),
+        Arc::new(CreateFolder),
         Arc::new(DeleteDocument),
         Arc::new(ProposeEdit),
         Arc::new(UpdateDocument),

@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { ChatMessageData, CitationRef } from "@/types/chat";
 import { DiffReview } from "./DiffReview";
 import { DeleteReview } from "./DeleteReview";
+import { FolderCreateReview } from "./FolderCreateReview";
 import { MarkdownContent } from "./markdown/MarkdownContent";
 
 type Props = {
@@ -14,6 +15,8 @@ type Props = {
   onRejectEdit: (editId: string) => void;
   onApproveDelete: (editId: string) => Promise<void>;
   onRejectDelete: (editId: string) => void;
+  onApproveFolderCreate: (editId: string) => Promise<void>;
+  onRejectFolderCreate: (editId: string) => void;
   onEditTextChange: (editId: string, text: string) => void;
   editTexts: Record<string, string>;
   onApproveAll: (messageId: string) => Promise<void>;
@@ -66,6 +69,8 @@ export function ChatMessage({
   onRejectEdit,
   onApproveDelete,
   onRejectDelete,
+  onApproveFolderCreate,
+  onRejectFolderCreate,
   onEditTextChange,
   editTexts,
   onApproveAll,
@@ -89,7 +94,8 @@ export function ChatMessage({
 
   const pendingEdits = message.proposedEdits?.filter((e) => e.status === "pending") ?? [];
   const pendingDeletes = message.proposedDeletes?.filter((d) => d.status === "pending") ?? [];
-  const pendingCount = pendingEdits.length + pendingDeletes.length;
+  const pendingFolderCreates = message.proposedFolderCreates?.filter((f) => f.status === "pending") ?? [];
+  const pendingCount = pendingEdits.length + pendingDeletes.length + pendingFolderCreates.length;
 
   async function handleApproveAll() {
     setApproveAllLoading(true);
@@ -148,6 +154,15 @@ export function ChatMessage({
             deletion={deletion}
             onApprove={onApproveDelete}
             onReject={onRejectDelete}
+          />
+        ))}
+
+        {message.proposedFolderCreates?.map((proposal) => (
+          <FolderCreateReview
+            key={proposal.id}
+            proposal={proposal}
+            onApprove={onApproveFolderCreate}
+            onReject={onRejectFolderCreate}
           />
         ))}
 

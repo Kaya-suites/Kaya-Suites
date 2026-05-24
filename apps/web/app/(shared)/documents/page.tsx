@@ -3,9 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useResizable } from "@/hooks/useResizable";
 import Link from "next/link";
-import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import {
+  DndContext,
+  DragEndEvent,
+  DragOverEvent,
+  DragOverlay,
+  DragStartEvent,
+  PointerSensor,
+  closestCenter,
+  pointerWithin,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
 import { DocumentList } from "@/components/shared/DocumentList";
-import { DraggableDocument, Folder, FolderTree } from "@/components/shared/FolderTree";
+import { DraggableDocument, DraggableFolder, Folder, FolderTree } from "@/components/shared/FolderTree";
 
 type DocumentSummary = {
   id: string;
@@ -29,11 +40,26 @@ export default function DocumentsPage() {
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
 
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [overFolderId, setOverFolderId] = useState<string | null | undefined>(undefined);
+
   const { width: sidebarWidth, onMouseDown: onResizeStart } = useResizable("sidebar-width", 200);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveId(event.active.id as string);
+    setOverFolderId(undefined);
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    const { over } = event;
+    if (!over) { setOverFolderId(undefined); return; }
+    const data = over.data.current as { folderId?: string | null };
+    setOverFolderId(data?.folderId !== undefined ? data.folderId : undefined);
+  }
 
   // Load folders and documents on mount.
   useEffect(() => {
@@ -62,11 +88,12 @@ export default function DocumentsPage() {
     : folders.filter((f) => f.parentId === selectedFolderId);
 
   // Breadcrumb path from root to selectedFolderId.
-  function buildBreadcrumb(folderId: string | null): Folder[] {
-    if (!folderId) return [];
+  function buildBreadcrumb(folderId: string | null, visited = new Set<string>()): Folder[] {
+    if (!folderId || visited.has(folderId)) return [];
     const folder = folders.find((f) => f.id === folderId);
     if (!folder) return [];
-    return [...buildBreadcrumb(folder.parentId), folder];
+    visited.add(folderId);
+    return [...buildBreadcrumb(folder.parentId, visited), folder];
   }
   const breadcrumb = buildBreadcrumb(selectedFolderId);
 
@@ -152,14 +179,39 @@ export default function DocumentsPage() {
   }, []);
 
   async function handleDragEnd(event: DragEndEvent) {
+    setActiveId(null);
+    setOverFolderId(undefined);
     const { active, over } = event;
     if (!over) return;
 
     const activeData = active.data.current as { type: string; docId?: string; folderId?: string };
-    const overData = over.data.current as { type: string; folderId: string | null };
+    const overData = over.data.current as { folderId?: string | null };
+    const targetFolderId = overData?.folderId !== undefined ? overData.folderId : null;
 
-    if (activeData.type === "document" && activeData.docId) {
-      const targetFolderId = overData?.folderId ?? null;
+    if (activeData.type === "folder" && activeData.folderId) {
+      if (activeData.folderId === targetFolderId) return;
+      // Prevent moving a folder into one of its own descendants (cycle).
+      if (targetFolderId !== null) {
+        const descendants = new Set<string>();
+        const queue = [activeData.folderId];
+        while (queue.length) {
+          const cur = queue.pop()!;
+          descendants.add(cur);
+          folders.filter((f) => f.parentId === cur).forEach((f) => queue.push(f.id));
+        }
+        if (descendants.has(targetFolderId)) return;
+      }
+      try {
+        const res = await fetch(`/api/folders/${activeData.folderId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parentId: targetFolderId }),
+        });
+        if (res.ok) {
+          handleFolderMoved(activeData.folderId, targetFolderId);
+        }
+      } catch {}
+    } else if (activeData.type === "document" && activeData.docId) {
       try {
         const res = await fetch(`/api/documents/${activeData.docId}/folder`, {
           method: "PUT",
@@ -177,7 +229,16 @@ export default function DocumentsPage() {
     "w-full text-sm border-2 border-black px-3 py-2 focus:outline-none focus:border-[var(--color-accent)] bg-white text-black font-mono placeholder:text-[var(--color-muted)]";
 
   return (
-    <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={(args) => {
+        const hits = pointerWithin(args);
+        return hits.length > 0 ? hits : closestCenter(args);
+      }}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragEnd={handleDragEnd}
+    >
       <div className="flex h-full overflow-hidden" style={{ background: "var(--color-background)" }}>
         {/* Sidebar folder tree */}
         <div
@@ -188,6 +249,7 @@ export default function DocumentsPage() {
             folders={folders}
             documents={documents}
             selectedFolderId={showAllDocs ? null : selectedFolderId}
+            overFolderId={overFolderId}
             onSelectFolder={selectFolder}
             onFolderCreated={handleFolderCreated}
             onFolderRenamed={handleFolderRenamed}
@@ -317,10 +379,44 @@ export default function DocumentsPage() {
                   {node}
                 </DraggableDocument>
               )}
+              renderFolderWrapper={(folder, node) => (
+                <DraggableFolder key={folder.id} folderId={folder.id} parentId={folder.parentId}>
+                  {node}
+                </DraggableFolder>
+              )}
             />
           </div>
         </div>
       </div>
+
+      <DragOverlay>
+        {activeId?.startsWith("folder") && (() => {
+          const folderId = activeId.startsWith("folder-main:")
+            ? activeId.slice(12)
+            : activeId.slice(7);
+          const name = folders.find((f) => f.id === folderId)?.name;
+          return name ? (
+            <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider px-3 py-1.5 bg-white border-2 border-[var(--color-accent)] shadow-lg opacity-90">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+              </svg>
+              {name}
+            </div>
+          ) : null;
+        })()}
+        {activeId?.startsWith("doc:") && (() => {
+          const doc = documents.find((d) => d.id === activeId.slice(4));
+          return doc ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white border-2 border-[var(--color-accent)] shadow-lg opacity-90 text-xs font-mono text-[var(--color-muted)]">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+              <span className="truncate max-w-32">{doc.title}</span>
+            </div>
+          ) : null;
+        })()}
+      </DragOverlay>
     </DndContext>
   );
 }

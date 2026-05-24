@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import type {
   ChatMessageData,
   CitationRef,
+  Folder,
   Role,
   SSEEvent,
   ProposedEdit,
   ProposedDelete,
+  ProposedFolderCreate,
 } from "@/types/chat";
 import type { OnboardingStep } from "@/hooks/useOnboarding";
 import { ChatMessage } from "./ChatMessage";
@@ -17,6 +19,7 @@ type Props = {
   sessionId: string | null;
   onCitationClick: (ref: CitationRef) => void;
   onDocumentUpdated: (docId: string) => void;
+  onFolderCreated?: (folder: Folder) => void;
   onStepComplete?: (step: OnboardingStep) => void;
   onSessionRenamed?: (sessionId: string, title: string) => void;
 };
@@ -43,15 +46,16 @@ const WELCOME: ChatMessageData = {
   timestamp: Date.now(),
 };
 
-export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onStepComplete, onSessionRenamed }: Props) {
+export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFolderCreated, onStepComplete, onSessionRenamed }: Props) {
   const [messages, setMessages] = useState<ChatMessageData[]>([WELCOME]);
   const [streamingId, setStreamingId] = useState<string | null>(null);
   // Tracks current text for each pending edit card so "Approve All" reads the right value
   const [pendingEditTexts, setPendingEditTexts] = useState<Record<string, string>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
-  // Buffers edits/deletes during a streaming turn; flushed all at once on Done
+  // Buffers edits/deletes/folder-creates during a streaming turn; flushed all at once on Done
   const editBufferRef = useRef<ProposedEdit[]>([]);
   const deleteBufferRef = useRef<ProposedDelete[]>([]);
+  const folderCreateBufferRef = useRef<ProposedFolderCreate[]>([]);
 
   // Scroll to bottom on new content
   useEffect(() => {
@@ -128,6 +132,7 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onSte
     setStreamingId(assistantId);
     editBufferRef.current = [];
     deleteBufferRef.current = [];
+    folderCreateBufferRef.current = [];
     if (isFirstMessage) onStepComplete?.("send_first_message");
 
     try {
@@ -210,16 +215,25 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onSte
                 docTitle: event.docTitle,
                 status: "pending",
               });
+            } else if (event.type === "ProposedFolderCreateEmitted") {
+              folderCreateBufferRef.current.push({
+                id: event.editId,
+                name: event.name,
+                parentId: event.parentId,
+                status: "pending",
+              });
             } else if (event.type === "SessionRenamed") {
                 onSessionRenamed?.(event.sessionId, event.title);
             } else if (event.type === "Done") {
-              // Flush all buffered edits/deletes at once so cards appear together
+              // Flush all buffered edits/deletes/folder-creates at once so cards appear together
               const edits = editBufferRef.current;
               const deletes = deleteBufferRef.current;
+              const folderCreates = folderCreateBufferRef.current;
               editBufferRef.current = [];
               deleteBufferRef.current = [];
+              folderCreateBufferRef.current = [];
 
-              if (edits.length > 0 || deletes.length > 0) {
+              if (edits.length > 0 || deletes.length > 0 || folderCreates.length > 0) {
                 const newTexts: Record<string, string> = {};
                 for (const e of edits) newTexts[e.id] = e.proposed;
                 setPendingEditTexts((prev) => ({ ...prev, ...newTexts }));
@@ -231,6 +245,7 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onSte
                           ...m,
                           ...(edits.length > 0 ? { proposedEdits: edits } : {}),
                           ...(deletes.length > 0 ? { proposedDeletes: deletes } : {}),
+                          ...(folderCreates.length > 0 ? { proposedFolderCreates: folderCreates } : {}),
                         }
                       : m,
                   ),
@@ -349,18 +364,58 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onSte
     );
   }
 
+  async function approveFolderCreate(editId: string) {
+    const res = await fetch(`/api/edits/${editId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) throw new Error("approve failed");
+    const data = await res.json().catch(() => null) as { folder?: Folder } | null;
+    if (data?.folder) onFolderCreated?.(data.folder);
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.proposedFolderCreates?.some((f) => f.id === editId)
+          ? {
+              ...m,
+              proposedFolderCreates: m.proposedFolderCreates!.map((f) =>
+                f.id === editId ? { ...f, status: "approved" } : f,
+              ),
+            }
+          : m,
+      ),
+    );
+  }
+
+  function rejectFolderCreate(editId: string) {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.proposedFolderCreates?.some((f) => f.id === editId)
+          ? {
+              ...m,
+              proposedFolderCreates: m.proposedFolderCreates!.map((f) =>
+                f.id === editId ? { ...f, status: "rejected" } : f,
+              ),
+            }
+          : m,
+      ),
+    );
+  }
+
   async function approveAll(messageId: string) {
     const msg = messages.find((m) => m.id === messageId);
     if (!msg) return;
 
     const pendingEdits = msg.proposedEdits?.filter((e) => e.status === "pending") ?? [];
     const pendingDeletes = msg.proposedDeletes?.filter((d) => d.status === "pending") ?? [];
+    const pendingFolders = msg.proposedFolderCreates?.filter((f) => f.status === "pending") ?? [];
 
     await Promise.all([
       ...pendingEdits.map((e) =>
         approveEdit(e.id, pendingEditTexts[e.id] ?? e.proposed),
       ),
       ...pendingDeletes.map((d) => approveDelete(d.id)),
+      ...pendingFolders.map((f) => approveFolderCreate(f.id)),
     ]);
   }
 
@@ -375,6 +430,9 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onSte
           ),
           proposedDeletes: m.proposedDeletes?.map((d) =>
             d.status === "pending" ? { ...d, status: "rejected" } : d,
+          ),
+          proposedFolderCreates: m.proposedFolderCreates?.map((f) =>
+            f.status === "pending" ? { ...f, status: "rejected" } : f,
           ),
         };
       }),
@@ -395,6 +453,8 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onSte
             onRejectEdit={rejectEdit}
             onApproveDelete={approveDelete}
             onRejectDelete={rejectDelete}
+            onApproveFolderCreate={approveFolderCreate}
+            onRejectFolderCreate={rejectFolderCreate}
             onEditTextChange={onEditTextChange}
             editTexts={pendingEditTexts}
             onApproveAll={approveAll}

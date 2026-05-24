@@ -431,6 +431,22 @@ async fn build_edit_sse(
                 "docTitle": doc_title,
             }));
         }
+        ProposedEditKind::CreateFolder { name, parent_id } => {
+            let stored = StoredEdit {
+                edit: edit.clone(),
+                doc_title: String::new(),
+                first_paragraph_id: String::new(),
+                original_paragraph: String::new(),
+                proposed_paragraph: String::new(),
+            };
+            pending_edits.lock().await.insert(edit.id, stored);
+            return Some(json!({
+                "type": "ProposedFolderCreateEmitted",
+                "editId": edit.id,
+                "name": name,
+                "parentId": parent_id,
+            }));
+        }
     };
 
     let doc_title = if let Some(id) = doc_id {
@@ -531,6 +547,12 @@ fn describe_edit(edit: &ProposedEdit) -> String {
             document_id,
             diff.changes.len(),
             truncate_text(new_body, 240)
+        ),
+        ProposedEditKind::CreateFolder { name, parent_id } => format!(
+            "id={} kind=create_folder name={} parent_id={:?}",
+            edit.id,
+            truncate_text(name, 120),
+            parent_id
         ),
     }
 }

@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export function useResizable(storageKey: string, initial: number, min = 120, max = 480) {
-  const [width, setWidth] = useState(() => {
-    if (typeof window === "undefined") return initial;
+  const [width, setWidth] = useState(initial);
+
+  useEffect(() => {
     const stored = localStorage.getItem(storageKey);
     if (stored) {
       const parsed = parseInt(stored, 10);
-      if (!isNaN(parsed)) return Math.min(max, Math.max(min, parsed));
+      if (!isNaN(parsed)) setWidth(Math.min(max, Math.max(min, parsed)));
     }
-    return initial;
-  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey]);
 
   const dragging = useRef(false);
   const startX = useRef(0);

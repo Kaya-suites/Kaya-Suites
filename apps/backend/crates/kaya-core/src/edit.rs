@@ -40,6 +40,12 @@ pub enum ProposedEditKind {
         diff: ParagraphDiff,
         new_body: String,
     },
+    /// Create a new folder. Requires approval before it is persisted.
+    /// `parent_id = None` creates a root-level folder.
+    CreateFolder {
+        name: String,
+        parent_id: Option<Uuid>,
+    },
 }
 
 /// An agent-proposed change that is awaiting user approval.
@@ -155,6 +161,10 @@ pub async fn commit_edit(
             doc.body = new_body;
             storage.save_document(&doc).await?;
             Ok(Some(document_id))
+        }
+        ProposedEditKind::CreateFolder { name, parent_id } => {
+            let folder = storage.create_folder(&name, parent_id).await?;
+            Ok(Some(folder.id))
         }
     }
 }

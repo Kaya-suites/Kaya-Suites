@@ -30,6 +30,14 @@ interface UserRecord {
   created_at: string;
 }
 
+interface FolderRecord {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface TableData {
   columns: string[];
   rows: unknown[][];
@@ -111,6 +119,10 @@ export default function AdminPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  // Folders
+  const [folders, setFolders] = useState<FolderRecord[] | null>(null);
+  const [foldersError, setFoldersError] = useState<string | null>(null);
+
   // Table browser
   const [tables, setTables] = useState<string[]>([]);
   const [activeTable, setActiveTable] = useState<string | null>(null);
@@ -141,6 +153,28 @@ export default function AdminPage() {
     setUsers(data);
     const me = data.find((u) => u.is_superadmin);
     if (me) setCurrentUserId(me.id);
+  }
+
+  async function fetchFolders() {
+    setFoldersError(null);
+    const r = await fetch("/api/folders", { credentials: "include" });
+    if (!r.ok) { setFoldersError("Failed to load folders."); return; }
+    setFolders(await r.json());
+  }
+
+  async function moveFolderToRoot(id: string) {
+    const r = await fetch(`/api/folders/${id}`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parentId: null }),
+    });
+    if (r.ok) fetchFolders();
+  }
+
+  async function deleteFolderAdmin(id: string) {
+    const r = await fetch(`/api/folders/${id}`, { method: "DELETE", credentials: "include" });
+    if (r.ok || r.status === 204) setFolders((prev) => prev?.filter((f) => f.id !== id) ?? null);
   }
 
   async function fetchTables() {
@@ -240,6 +274,7 @@ export default function AdminPage() {
   useEffect(() => {
     fetchStats();
     fetchUsers();
+    fetchFolders();
     fetchTables();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -415,6 +450,85 @@ export default function AdminPage() {
                 </form>
               </div>
             </>
+          )}
+        </section>
+
+        {/* ── Folders ── */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">Folders</h2>
+            <button onClick={fetchFolders} className="text-xs underline font-bold text-black hover:text-[var(--color-accent)]">
+              Reload
+            </button>
+          </div>
+
+          {foldersError ? (
+            <p className="text-[var(--color-danger)] font-bold text-xs uppercase tracking-wider">{foldersError}</p>
+          ) : !folders ? (
+            <p className="text-[var(--color-muted)] text-xs uppercase tracking-wider animate-pulse">Loading…</p>
+          ) : (
+            <div className={`${cardClass} overflow-hidden`} style={cardStyle}>
+              <div className="px-6 py-4 border-b-2 border-black" style={{ background: "var(--color-muted-bg)" }}>
+                <h3 className="font-bold text-xs uppercase tracking-wider">All folders ({folders.length})</h3>
+              </div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left border-b-2 border-black" style={{ background: "var(--color-background)" }}>
+                    <th className="px-6 py-3 font-bold uppercase tracking-wider">Name</th>
+                    <th className="px-6 py-3 font-bold uppercase tracking-wider">Parent</th>
+                    <th className="px-6 py-3 font-bold uppercase tracking-wider">ID</th>
+                    <th className="px-6 py-3 font-bold uppercase tracking-wider">Created</th>
+                    <th className="px-6 py-3 font-bold uppercase tracking-wider"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y-2 divide-black">
+                  {folders.map((f) => {
+                    const parent = folders.find((p) => p.id === f.parentId);
+                    return (
+                      <tr key={f.id}>
+                        <td className="px-6 py-3 font-bold text-black">{f.name}</td>
+                        <td className="px-6 py-3 text-[var(--color-muted)]">
+                          {parent ? (
+                            <span className="font-mono">{parent.name}</span>
+                          ) : f.parentId ? (
+                            <span className="text-[var(--color-danger)] font-bold">MISSING ({f.parentId.slice(0, 8)}…)</span>
+                          ) : (
+                            <span className="text-[var(--color-muted)]">Root</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-3 font-mono text-[var(--color-muted)]">{f.id.slice(0, 8)}…</td>
+                        <td className="px-6 py-3 text-[var(--color-muted)]">
+                          {new Date(f.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="px-6 py-3 flex items-center gap-2">
+                          {f.parentId !== null && (
+                            <button
+                              onClick={() => moveFolderToRoot(f.id)}
+                              className="text-xs border-2 border-black px-2 py-1 font-bold uppercase tracking-wider hover:bg-black hover:text-white"
+                              style={{ borderRadius: "var(--border-radius)" }}
+                            >
+                              Move to root
+                            </button>
+                          )}
+                          <button
+                            onClick={() => deleteFolderAdmin(f.id)}
+                            className="text-xs border-2 border-[var(--color-danger)] text-[var(--color-danger)] px-2 py-1 font-bold uppercase tracking-wider hover:bg-[var(--color-danger)] hover:text-white"
+                            style={{ borderRadius: "var(--border-radius)" }}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {folders.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-6 text-center text-[var(--color-muted)]">No folders yet.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           )}
         </section>
 
