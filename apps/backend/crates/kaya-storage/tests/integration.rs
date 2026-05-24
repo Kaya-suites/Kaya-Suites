@@ -206,19 +206,25 @@ async fn test_retrieval_seed_corpus() {
     let storage: Arc<dyn StorageAdapter> = adapter;
     for doc in [&doc_a, &doc_b, &doc_c] {
         storage.save_document(doc).await.unwrap();
-        index_document_chunks(doc, &storage, &router, None)
+        index_document_chunks(doc, &storage, &router, None, None)
             .await
             .unwrap();
     }
 
-    let results = retrieve("alpha", 3, &storage, &router, None).await.unwrap();
+    let results = retrieve("alpha", 3, &storage, &router, None, None)
+        .await
+        .unwrap();
     assert!(!results.is_empty());
     assert_eq!(results[0].document_id, doc_a.id, "alpha query → alpha doc");
 
-    let results = retrieve("beta", 3, &storage, &router, None).await.unwrap();
+    let results = retrieve("beta", 3, &storage, &router, None, None)
+        .await
+        .unwrap();
     assert_eq!(results[0].document_id, doc_b.id, "beta query → beta doc");
 
-    let results = retrieve("gamma", 3, &storage, &router, None).await.unwrap();
+    let results = retrieve("gamma", 3, &storage, &router, None, None)
+        .await
+        .unwrap();
     assert_eq!(results[0].document_id, doc_c.id, "gamma query → gamma doc");
 }
 
@@ -239,11 +245,13 @@ async fn test_citation_round_trip() {
 
     let storage: Arc<dyn StorageAdapter> = adapter;
     storage.save_document(&doc).await.unwrap();
-    index_document_chunks(&doc, &storage, &router, None)
+    index_document_chunks(&doc, &storage, &router, None, None)
         .await
         .unwrap();
 
-    let results = retrieve("alpha", 1, &storage, &router, None).await.unwrap();
+    let results = retrieve("alpha", 1, &storage, &router, None, None)
+        .await
+        .unwrap();
     assert!(!results.is_empty(), "retrieve must return a result");
 
     let hit = &results[0];
@@ -294,7 +302,7 @@ async fn test_reembedding_efficiency() {
 
     let storage: Arc<dyn StorageAdapter> = adapter;
     storage.save_document(&doc).await.unwrap();
-    let first_embed_calls = index_document_chunks(&doc, &storage, &router, None)
+    let first_embed_calls = index_document_chunks(&doc, &storage, &router, None, None)
         .await
         .unwrap();
     assert_eq!(
@@ -307,7 +315,7 @@ async fn test_reembedding_efficiency() {
         body: make_body(true),
         ..doc.clone()
     };
-    let second_embed_calls = index_document_chunks(&edited_doc, &storage, &router, None)
+    let second_embed_calls = index_document_chunks(&edited_doc, &storage, &router, None, None)
         .await
         .unwrap();
 
@@ -343,13 +351,13 @@ async fn test_performance_smoke() {
         };
 
         storage.save_document(&doc).await.unwrap();
-        index_document_chunks(&doc, &storage, &router, None)
+        index_document_chunks(&doc, &storage, &router, None, None)
             .await
             .unwrap();
     }
 
     let start = Instant::now();
-    let results = retrieve("alpha concepts", 5, &storage, &router, None)
+    let results = retrieve("alpha concepts", 5, &storage, &router, None, None)
         .await
         .unwrap();
     let elapsed = start.elapsed();

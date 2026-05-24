@@ -19,6 +19,7 @@ pub struct Folder {
     pub id: Uuid,
     pub name: String,
     pub parent_id: Option<Uuid>,
+    pub sort_order: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -119,6 +120,15 @@ pub trait StorageAdapter: Send + Sync {
     /// Remove a document by ID. No-op if the document does not exist.
     async fn delete_document(&self, id: Uuid) -> Result<(), StorageError>;
 
+    /// Purge derived retrieval data for a previously deleted document.
+    ///
+    /// This is intended for background cleanup after [`delete_document`]
+    /// marks the document deleted. Implementations should remove any chunk,
+    /// FTS, or embedding state that could otherwise accumulate indefinitely.
+    async fn cleanup_deleted_document(&self, _id: Uuid) -> Result<(), StorageError> {
+        Ok(())
+    }
+
     /// Return all non-deleted documents.
     async fn list_documents(&self) -> Result<Vec<Document>, StorageError>;
 
@@ -183,6 +193,7 @@ pub trait StorageAdapter: Send + Sync {
         &self,
         _id: Uuid,
         _new_parent_id: Option<Uuid>,
+        _new_index: Option<usize>,
     ) -> Result<Folder, StorageError> {
         Err(StorageError::Backend(Box::new(std::io::Error::other(
             "move_folder not implemented for this adapter",

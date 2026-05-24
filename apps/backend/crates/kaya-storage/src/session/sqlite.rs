@@ -3,8 +3,9 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use kaya_core::session::{
-    EmbeddingModelUsage, MessageRecord, ModelUsage, Session, SessionError, SessionStorage,
-    SessionTokenUsage, UsageSummary,
+    ChatHistorySummary, DocumentEmbeddingStatus, EditHistoryEntry, EmbeddingCall,
+    EmbeddingModelUsage, FolderSidebarState, MessageRecord, ModelUsage, Session, SessionError,
+    SessionStorage, SessionTokenUsage, UsageSummary,
 };
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
@@ -13,6 +14,9 @@ use uuid::Uuid;
 pub struct SqliteSessionStorage {
     pool: SqlitePool,
 }
+
+const FOLDER_SIDEBAR_STATE_KEY: &str = "folder_sidebar_state";
+const EDIT_HISTORY_LIMIT: usize = 5;
 
 impl SqliteSessionStorage {
     pub fn new(pool: SqlitePool) -> Self {
@@ -77,10 +81,62 @@ impl SqliteSessionStorage {
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS embedding_calls (
-                id         TEXT    PRIMARY KEY,
-                model      TEXT    NOT NULL,
-                tokens     INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL
+                id          TEXT    PRIMARY KEY,
+                model       TEXT    NOT NULL,
+                tokens      INTEGER NOT NULL DEFAULT 0,
+                task_id     TEXT,
+                task_type   TEXT    NOT NULL DEFAULT 'unknown',
+                session_id  TEXT,
+                document_id TEXT,
+                paragraph_id TEXT,
+                created_at  INTEGER NOT NULL
+            )",
+        )
+        .execute(pool)
+        .await?;
+
+        for stmt in [
+            "ALTER TABLE embedding_calls ADD COLUMN task_id TEXT",
+            "ALTER TABLE embedding_calls ADD COLUMN task_type TEXT NOT NULL DEFAULT 'unknown'",
+            "ALTER TABLE embedding_calls ADD COLUMN session_id TEXT",
+            "ALTER TABLE embedding_calls ADD COLUMN document_id TEXT",
+            "ALTER TABLE embedding_calls ADD COLUMN paragraph_id TEXT",
+        ] {
+            let _ = sqlx::query(stmt).execute(pool).await;
+        }
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS document_embedding_status (
+                document_id      TEXT    PRIMARY KEY,
+                task_id          TEXT,
+                status           TEXT    NOT NULL DEFAULT 'pending',
+                expected_chunks  INTEGER NOT NULL DEFAULT 0,
+                embedded_chunks  INTEGER NOT NULL DEFAULT 0,
+                last_error       TEXT,
+                updated_at       INTEGER NOT NULL,
+                last_indexed_at  INTEGER
+            )",
+        )
+        .execute(pool)
+        .await?;
+
+        for stmt in [
+            "ALTER TABLE document_embedding_status ADD COLUMN task_id TEXT",
+            "ALTER TABLE document_embedding_status ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'",
+            "ALTER TABLE document_embedding_status ADD COLUMN expected_chunks INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE document_embedding_status ADD COLUMN embedded_chunks INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE document_embedding_status ADD COLUMN last_error TEXT",
+            "ALTER TABLE document_embedding_status ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE document_embedding_status ADD COLUMN last_indexed_at INTEGER",
+        ] {
+            let _ = sqlx::query(stmt).execute(pool).await;
+        }
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ui_preferences (
+                key        TEXT    PRIMARY KEY,
+                value      TEXT    NOT NULL,
+                updated_at INTEGER NOT NULL
             )",
         )
         .execute(pool)
@@ -92,6 +148,57 @@ impl SqliteSessionStorage {
 
 fn box_err<E: std::error::Error + Send + Sync + 'static>(e: E) -> SessionError {
     SessionError::Backend(Box::new(e))
+}
+
+fn chat_summary_key(session_id: Uuid) -> String {
+    format!("chat_summary:{session_id}")
+}
+
+fn edit_history_key(session_id: Uuid) -> String {
+    format!("edit_history:{session_id}")
+}
+
+async fn get_pref_json<T>(pool: &SqlitePool, key: &str) -> Result<Option<T>, SessionError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let row = sqlx::query("SELECT value FROM ui_preferences WHERE key = ?")
+        .bind(key)
+        .fetch_optional(pool)
+        .await
+        .map_err(box_err)?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let value: String = row.try_get("value").map_err(box_err)?;
+    let parsed = serde_json::from_str(&value).map_err(box_err)?;
+    Ok(Some(parsed))
+}
+
+async fn set_pref_json<T>(pool: &SqlitePool, key: &str, value: &T) -> Result<(), SessionError>
+where
+    T: serde::Serialize,
+{
+    let now = Utc::now().timestamp_millis();
+    let value = serde_json::to_string(value).map_err(box_err)?;
+
+    sqlx::query(
+        "INSERT INTO ui_preferences (key, value, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = excluded.updated_at",
+    )
+    .bind(key)
+    .bind(value)
+    .bind(now)
+    .execute(pool)
+    .await
+    .map_err(box_err)?;
+
+    Ok(())
 }
 
 #[async_trait]
@@ -204,6 +311,55 @@ impl SessionStorage for SqliteSessionStorage {
             .collect()
     }
 
+    async fn get_chat_summary(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Option<ChatHistorySummary>, SessionError> {
+        get_pref_json(&self.pool, &chat_summary_key(session_id)).await
+    }
+
+    async fn save_chat_summary(
+        &self,
+        session_id: Uuid,
+        summary: &ChatHistorySummary,
+    ) -> Result<(), SessionError> {
+        set_pref_json(&self.pool, &chat_summary_key(session_id), summary).await
+    }
+
+    async fn get_recent_edit_history(
+        &self,
+        session_id: Uuid,
+        limit: usize,
+    ) -> Result<Vec<EditHistoryEntry>, SessionError> {
+        let mut entries: Vec<EditHistoryEntry> =
+            get_pref_json(&self.pool, &edit_history_key(session_id))
+                .await?
+                .unwrap_or_default();
+        entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        entries.truncate(limit.min(EDIT_HISTORY_LIMIT));
+        Ok(entries)
+    }
+
+    async fn upsert_edit_history_entry(
+        &self,
+        session_id: Uuid,
+        entry: &EditHistoryEntry,
+    ) -> Result<(), SessionError> {
+        let key = edit_history_key(session_id);
+        let mut entries: Vec<EditHistoryEntry> =
+            get_pref_json(&self.pool, &key).await?.unwrap_or_default();
+
+        if let Some(existing) = entries.iter_mut().find(|e| e.edit_id == entry.edit_id) {
+            *existing = entry.clone();
+        } else {
+            entries.push(entry.clone());
+        }
+
+        entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        entries.truncate(EDIT_HISTORY_LIMIT);
+        set_pref_json(&self.pool, &key, &entries).await
+    }
+
     async fn save_user_message(
         &self,
         session_id: Uuid,
@@ -302,6 +458,12 @@ impl SessionStorage for SqliteSessionStorage {
             .execute(&self.pool)
             .await
             .map_err(box_err)?;
+        sqlx::query("DELETE FROM ui_preferences WHERE key IN (?, ?)")
+            .bind(chat_summary_key(session_id))
+            .bind(edit_history_key(session_id))
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
         sqlx::query("DELETE FROM chat_sessions WHERE id = ?")
             .bind(&id)
             .execute(&self.pool)
@@ -320,19 +482,68 @@ impl SessionStorage for SqliteSessionStorage {
         Ok(())
     }
 
-    async fn save_embedding_call(&self, model: &str, tokens: u32) -> Result<(), SessionError> {
+    async fn save_embedding_call(&self, call: &EmbeddingCall) -> Result<(), SessionError> {
         let now = chrono::Utc::now().timestamp_millis();
         sqlx::query(
-            "INSERT INTO embedding_calls (id, model, tokens, created_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO embedding_calls
+                 (id, model, tokens, task_id, task_type, session_id, document_id, paragraph_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(uuid::Uuid::new_v4().to_string())
-        .bind(model)
-        .bind(tokens as i64)
+        .bind(&call.model)
+        .bind(call.tokens as i64)
+        .bind(call.task_id.as_deref())
+        .bind(&call.task_type)
+        .bind(call.session_id.map(|id| id.to_string()))
+        .bind(call.document_id.map(|id| id.to_string()))
+        .bind(call.paragraph_id.as_deref())
         .bind(now)
         .execute(&self.pool)
         .await
         .map_err(box_err)?;
         Ok(())
+    }
+
+    async fn upsert_document_embedding_status(
+        &self,
+        status: &DocumentEmbeddingStatus,
+    ) -> Result<(), SessionError> {
+        sqlx::query(
+            "INSERT INTO document_embedding_status
+                 (document_id, task_id, status, expected_chunks, embedded_chunks, last_error, updated_at, last_indexed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(document_id) DO UPDATE SET
+                 task_id = excluded.task_id,
+                 status = excluded.status,
+                 expected_chunks = excluded.expected_chunks,
+                 embedded_chunks = excluded.embedded_chunks,
+                 last_error = excluded.last_error,
+                 updated_at = excluded.updated_at,
+                 last_indexed_at = excluded.last_indexed_at",
+        )
+        .bind(status.document_id.to_string())
+        .bind(status.task_id.as_deref())
+        .bind(&status.status)
+        .bind(status.expected_chunks as i64)
+        .bind(status.embedded_chunks as i64)
+        .bind(status.last_error.as_deref())
+        .bind(status.updated_at)
+        .bind(status.last_indexed_at)
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn get_folder_sidebar_state(&self) -> Result<Option<FolderSidebarState>, SessionError> {
+        get_pref_json(&self.pool, FOLDER_SIDEBAR_STATE_KEY).await
+    }
+
+    async fn save_folder_sidebar_state(
+        &self,
+        state: &FolderSidebarState,
+    ) -> Result<(), SessionError> {
+        set_pref_json(&self.pool, FOLDER_SIDEBAR_STATE_KEY, state).await
     }
 
     async fn get_usage_summary(&self) -> Result<UsageSummary, SessionError> {

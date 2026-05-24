@@ -17,8 +17,7 @@ use kaya_core::storage::{
     Chunk, ChunkHit, Document, Embedding, Folder, StorageAdapter, StorageError,
 };
 
-pub static SQLITE_MIGRATOR: sqlx::migrate::Migrator =
-    sqlx::migrate!("./migrations/sqlite");
+pub static SQLITE_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/sqlite");
 
 use crate::document::sha256_hex;
 
@@ -134,15 +133,18 @@ impl StorageAdapter for SqliteAdapter {
                 .execute(&self.inner.pool)
                 .await
                 .map_err(box_err)?;
-
-            self.delete_chunks_for_document(id).await?;
-            sqlx::query("DELETE FROM chunk_embeddings WHERE document_id = ?")
-                .bind(&id_str)
-                .execute(&self.inner.pool)
-                .await
-                .map_err(box_err)?;
         }
 
+        Ok(())
+    }
+
+    async fn cleanup_deleted_document(&self, id: Uuid) -> Result<(), StorageError> {
+        self.delete_chunks_for_document(id).await?;
+        sqlx::query("DELETE FROM chunk_embeddings WHERE document_id = ?")
+            .bind(id.to_string())
+            .execute(&self.inner.pool)
+            .await
+            .map_err(box_err)?;
         Ok(())
     }
 
@@ -244,18 +246,24 @@ impl StorageAdapter for SqliteAdapter {
         name: &str,
         parent_id: Option<Uuid>,
     ) -> Result<Folder, StorageError> {
+        if let Some(pid) = parent_id {
+            self.get_folder(pid).await?;
+        }
+
         let id = Uuid::new_v4();
         let id_str = id.to_string();
         let parent_id_str = parent_id.map(|p| p.to_string());
         let now = chrono::Utc::now().to_rfc3339();
+        let sort_order = next_folder_sort_order_sqlite(&self.inner.pool, parent_id).await?;
 
         sqlx::query(
-            "INSERT INTO folders (id, name, parent_id, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO folders (id, name, parent_id, sort_order, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&id_str)
         .bind(name)
         .bind(&parent_id_str)
+        .bind(sort_order)
         .bind(&now)
         .bind(&now)
         .execute(&self.inner.pool)
@@ -266,6 +274,7 @@ impl StorageAdapter for SqliteAdapter {
             id,
             name: name.to_owned(),
             parent_id,
+            sort_order,
             created_at: now.clone(),
             updated_at: now,
         })
@@ -274,7 +283,7 @@ impl StorageAdapter for SqliteAdapter {
     async fn get_folder(&self, id: Uuid) -> Result<Folder, StorageError> {
         let id_str = id.to_string();
         let row = sqlx::query(
-            "SELECT id, name, parent_id, created_at, updated_at FROM folders WHERE id = ?",
+            "SELECT id, name, parent_id, sort_order, created_at, updated_at FROM folders WHERE id = ?",
         )
         .bind(&id_str)
         .fetch_optional(&self.inner.pool)
@@ -287,7 +296,9 @@ impl StorageAdapter for SqliteAdapter {
 
     async fn list_folders(&self) -> Result<Vec<Folder>, StorageError> {
         let rows = sqlx::query(
-            "SELECT id, name, parent_id, created_at, updated_at FROM folders ORDER BY name ASC",
+            "SELECT id, name, parent_id, sort_order, created_at, updated_at
+             FROM folders
+             ORDER BY COALESCE(parent_id, ''), sort_order ASC, name ASC, created_at ASC",
         )
         .fetch_all(&self.inner.pool)
         .await
@@ -322,55 +333,55 @@ impl StorageAdapter for SqliteAdapter {
         &self,
         id: Uuid,
         new_parent_id: Option<Uuid>,
+        new_index: Option<usize>,
     ) -> Result<Folder, StorageError> {
-        let id_str = id.to_string();
-        let parent_str = new_parent_id.map(|p| p.to_string());
-        let now = chrono::Utc::now().to_rfc3339();
-
-        let affected = sqlx::query("UPDATE folders SET parent_id = ?, updated_at = ? WHERE id = ?")
-            .bind(&parent_str)
-            .bind(&now)
-            .bind(&id_str)
-            .execute(&self.inner.pool)
-            .await
-            .map_err(box_err)?
-            .rows_affected();
-
-        if affected == 0 {
-            return Err(StorageError::FolderNotFound(id));
+        if let Some(pid) = new_parent_id {
+            self.get_folder(pid).await?;
         }
 
+        let id_str = id.to_string();
+        let current = self.get_folder(id).await?;
+        let current_parent = current.parent_id;
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
+
+        let mut target_ids = list_folder_ids_sqlite(&mut *tx, new_parent_id, Some(id)).await?;
+        let insert_at = new_index.unwrap_or(target_ids.len()).min(target_ids.len());
+        target_ids.insert(insert_at, id_str.clone());
+        write_folder_positions_sqlite(&mut *tx, new_parent_id, &target_ids, &now).await?;
+
+        if current_parent != new_parent_id {
+            let previous_ids = list_folder_ids_sqlite(&mut *tx, current_parent, Some(id)).await?;
+            write_folder_positions_sqlite(&mut *tx, current_parent, &previous_ids, &now).await?;
+        }
+
+        tx.commit().await.map_err(box_err)?;
         self.get_folder(id).await
     }
 
     async fn delete_folder(&self, id: Uuid) -> Result<(), StorageError> {
         let id_str = id.to_string();
         let now = chrono::Utc::now().to_rfc3339();
+        let folder = self.get_folder(id).await?;
+        let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
 
         // Move all documents in this folder to root.
         sqlx::query("UPDATE documents SET folder_id = NULL, updated_at = ? WHERE folder_id = ?")
             .bind(&now)
             .bind(&id_str)
-            .execute(&self.inner.pool)
+            .execute(&mut *tx)
             .await
             .map_err(box_err)?;
 
-        // Re-parent any direct child folders to this folder's parent.
-        sqlx::query(
-            "UPDATE folders SET parent_id = \
-             (SELECT parent_id FROM folders WHERE id = ?), updated_at = ? \
-             WHERE parent_id = ?",
-        )
-        .bind(&id_str)
-        .bind(&now)
-        .bind(&id_str)
-        .execute(&self.inner.pool)
-        .await
-        .map_err(box_err)?;
+        let mut parent_children =
+            list_folder_ids_sqlite(&mut *tx, folder.parent_id, Some(id)).await?;
+        let child_ids = list_folder_ids_sqlite(&mut *tx, Some(id), None).await?;
+        parent_children.extend(child_ids);
+        write_folder_positions_sqlite(&mut *tx, folder.parent_id, &parent_children, &now).await?;
 
         let affected = sqlx::query("DELETE FROM folders WHERE id = ?")
             .bind(&id_str)
-            .execute(&self.inner.pool)
+            .execute(&mut *tx)
             .await
             .map_err(box_err)?
             .rows_affected();
@@ -379,6 +390,7 @@ impl StorageAdapter for SqliteAdapter {
             return Err(StorageError::FolderNotFound(id));
         }
 
+        tx.commit().await.map_err(box_err)?;
         Ok(())
     }
 
@@ -464,9 +476,11 @@ impl StorageAdapter for SqliteAdapter {
         }
 
         let rows = sqlx::query(
-            "SELECT document_id, paragraph_id, content, ordinal
-             FROM chunk_fts
+            "SELECT fts.document_id, fts.paragraph_id, fts.content, fts.ordinal
+             FROM chunk_fts fts
+             JOIN documents d ON d.id = fts.document_id
              WHERE chunk_fts MATCH ?
+               AND d.deleted_at IS NULL
              ORDER BY rank
              LIMIT ?",
         )
@@ -548,7 +562,10 @@ impl StorageAdapter for SqliteAdapter {
              FROM chunk_embeddings ce
              JOIN chunks c
                ON c.document_id = ce.document_id
-              AND c.paragraph_id = ce.paragraph_id",
+              AND c.paragraph_id = ce.paragraph_id
+             JOIN documents d
+               ON d.id = ce.document_id
+             WHERE d.deleted_at IS NULL",
         )
         .fetch_all(&self.inner.pool)
         .await
@@ -663,9 +680,43 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), StorageError> {
             id         TEXT PRIMARY KEY,
             name       TEXT NOT NULL,
             parent_id  TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (parent_id) REFERENCES folders(id)
+        )",
+    )
+    .execute(pool)
+    .await
+    .map_err(box_err)?;
+
+    let _ = sqlx::query("ALTER TABLE folders ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS folders_parent_sort_idx
+         ON folders (parent_id, sort_order)",
+    )
+    .execute(pool)
+    .await
+    .map_err(box_err)?;
+
+    sqlx::query(
+        "WITH ranked AS (
+            SELECT
+                id,
+                ROW_NUMBER() OVER (
+                    PARTITION BY COALESCE(parent_id, '__root__')
+                    ORDER BY sort_order ASC, name ASC, created_at ASC, id ASC
+                ) - 1 AS rn
+            FROM folders
+        )
+        UPDATE folders
+        SET sort_order = (
+            SELECT ranked.rn
+            FROM ranked
+            WHERE ranked.id = folders.id
         )",
     )
     .execute(pool)
@@ -713,6 +764,112 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), StorageError> {
     .execute(pool)
     .await
     .map_err(box_err)?;
+
+    Ok(())
+}
+
+async fn next_folder_sort_order_sqlite(
+    pool: &SqlitePool,
+    parent_id: Option<Uuid>,
+) -> Result<i64, StorageError> {
+    let row = match parent_id {
+        Some(parent_id) => sqlx::query(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort
+             FROM folders
+             WHERE parent_id = ?",
+        )
+        .bind(parent_id.to_string())
+        .fetch_one(pool)
+        .await
+        .map_err(box_err)?,
+        None => sqlx::query(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort
+             FROM folders
+             WHERE parent_id IS NULL",
+        )
+        .fetch_one(pool)
+        .await
+        .map_err(box_err)?,
+    };
+
+    row.try_get::<i64, _>("next_sort").map_err(box_err)
+}
+
+async fn list_folder_ids_sqlite(
+    executor: &mut sqlx::SqliteConnection,
+    parent_id: Option<Uuid>,
+    exclude_id: Option<Uuid>,
+) -> Result<Vec<String>, StorageError> {
+    let rows = match (parent_id, exclude_id) {
+        (Some(parent_id), Some(exclude_id)) => sqlx::query(
+            "SELECT id
+             FROM folders
+             WHERE parent_id = ? AND id != ?
+             ORDER BY sort_order ASC, name ASC, created_at ASC",
+        )
+        .bind(parent_id.to_string())
+        .bind(exclude_id.to_string())
+        .fetch_all(&mut *executor)
+        .await
+        .map_err(box_err)?,
+        (Some(parent_id), None) => sqlx::query(
+            "SELECT id
+             FROM folders
+             WHERE parent_id = ?
+             ORDER BY sort_order ASC, name ASC, created_at ASC",
+        )
+        .bind(parent_id.to_string())
+        .fetch_all(&mut *executor)
+        .await
+        .map_err(box_err)?,
+        (None, Some(exclude_id)) => sqlx::query(
+            "SELECT id
+             FROM folders
+             WHERE parent_id IS NULL AND id != ?
+             ORDER BY sort_order ASC, name ASC, created_at ASC",
+        )
+        .bind(exclude_id.to_string())
+        .fetch_all(&mut *executor)
+        .await
+        .map_err(box_err)?,
+        (None, None) => sqlx::query(
+            "SELECT id
+             FROM folders
+             WHERE parent_id IS NULL
+             ORDER BY sort_order ASC, name ASC, created_at ASC",
+        )
+        .fetch_all(&mut *executor)
+        .await
+        .map_err(box_err)?,
+    };
+
+    rows.into_iter()
+        .map(|row| row.try_get("id").map_err(box_err))
+        .collect()
+}
+
+async fn write_folder_positions_sqlite(
+    executor: &mut sqlx::SqliteConnection,
+    parent_id: Option<Uuid>,
+    folder_ids: &[String],
+    now: &str,
+) -> Result<(), StorageError> {
+    let parent_id_str = parent_id.map(|id| id.to_string());
+
+    for (index, folder_id) in folder_ids.iter().enumerate() {
+        sqlx::query(
+            "UPDATE folders
+             SET parent_id = ?, sort_order = ?, updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(&parent_id_str)
+        .bind(index as i64)
+        .bind(now)
+        .bind(folder_id)
+        .execute(&mut *executor)
+        .await
+        .map_err(box_err)?;
+    }
 
     Ok(())
 }
@@ -796,6 +953,7 @@ fn row_to_folder(row: &sqlx::sqlite::SqliteRow) -> Result<Folder, sqlx::Error> {
         id,
         name: row.try_get("name")?,
         parent_id,
+        sort_order: row.try_get("sort_order")?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
     })

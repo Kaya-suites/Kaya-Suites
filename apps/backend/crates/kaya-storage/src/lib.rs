@@ -18,9 +18,9 @@ pub mod postgres;
 
 // Re-export the trait so callers can depend on only this crate.
 pub use kaya_core::StorageAdapter;
-pub use mysql::{MySqlAdapter, MYSQL_MIGRATOR};
+pub use mysql::{MYSQL_MIGRATOR, MySqlAdapter};
 pub use session::{MySqlSessionStorage, SqliteSessionStorage};
-pub use sqlite::{SqliteAdapter, SQLITE_MIGRATOR};
+pub use sqlite::{SQLITE_MIGRATOR, SqliteAdapter};
 
 #[cfg(feature = "postgres")]
 pub use postgres::{MIGRATOR as POSTGRES_MIGRATOR, PostgresAdapter};

@@ -3,8 +3,8 @@
 // sqlx::test creates a fresh SQLite database per test and applies the migration
 // automatically — no DATABASE_URL required.
 
-use kaya_core::storage::{Chunk, Document, Embedding, Folder, StorageAdapter, StorageError};
-use kaya_storage::{SqliteAdapter, SQLITE_MIGRATOR};
+use kaya_core::storage::{Chunk, Document, Embedding, StorageAdapter, StorageError};
+use kaya_storage::{SQLITE_MIGRATOR, SqliteAdapter};
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
@@ -99,6 +99,7 @@ async fn folder_create_and_list(pool: SqlitePool) {
     let folder = adapter.create_folder("Notes", None).await.unwrap();
     assert_eq!(folder.name, "Notes");
     assert!(folder.parent_id.is_none());
+    assert_eq!(folder.sort_order, 0);
 
     let list = adapter.list_folders().await.unwrap();
     assert_eq!(list.len(), 1);
@@ -150,6 +151,31 @@ async fn move_document_to_folder(pool: SqlitePool) {
         .unwrap();
     assert_eq!(folder_docs.len(), 1);
     assert_eq!(folder_docs[0].id, doc.id);
+}
+
+/// move_folder can reorder siblings without changing parents.
+#[sqlx::test(migrator = "SQLITE_MIGRATOR")]
+async fn move_folder_reorders_siblings(pool: SqlitePool) {
+    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+
+    let first = adapter.create_folder("First", None).await.unwrap();
+    let second = adapter.create_folder("Second", None).await.unwrap();
+    let third = adapter.create_folder("Third", None).await.unwrap();
+
+    let moved = adapter.move_folder(third.id, None, Some(1)).await.unwrap();
+    assert_eq!(moved.parent_id, None);
+    assert_eq!(moved.sort_order, 1);
+
+    let ordered_ids: Vec<Uuid> = adapter
+        .list_folders()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|folder| folder.parent_id.is_none())
+        .map(|folder| folder.id)
+        .collect();
+
+    assert_eq!(ordered_ids, vec![first.id, third.id, second.id]);
 }
 
 // ── Chunks + FTS ──────────────────────────────────────────────────────────────
@@ -268,6 +294,42 @@ async fn embedding_round_trip(pool: SqlitePool) {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].paragraph_id, "p0");
     let _ = dim; // suppress unused warning
+}
+
+/// Deleted document's embeddings do not appear in vector search.
+#[sqlx::test(migrator = "SQLITE_MIGRATOR")]
+async fn embeddings_exclude_deleted_document(pool: SqlitePool) {
+    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let doc = make_doc();
+    adapter.save_document(&doc).await.unwrap();
+
+    adapter
+        .save_chunk(&Chunk {
+            document_id: doc.id,
+            paragraph_id: "p0".to_string(),
+            content: "embedding cleanup guard".to_string(),
+            ordinal: 0,
+        })
+        .await
+        .unwrap();
+
+    let v = vec![1.0_f32, 0.0, 0.0];
+    adapter
+        .save_embeddings(&Embedding {
+            document_id: doc.id,
+            paragraph_id: "p0".to_string(),
+            vector: v.clone(),
+        })
+        .await
+        .unwrap();
+
+    adapter.delete_document(doc.id).await.unwrap();
+
+    let hits = adapter.search_embeddings(&v, 5).await.unwrap();
+    assert!(
+        hits.is_empty(),
+        "embeddings from deleted documents must not appear in vector search"
+    );
 }
 
 /// Nearest-neighbour ordering: the most similar vector ranks first.

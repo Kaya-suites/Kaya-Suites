@@ -3,8 +3,9 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use kaya_core::session::{
-    EmbeddingModelUsage, MessageRecord, ModelUsage, Session, SessionError, SessionStorage,
-    SessionTokenUsage, UsageSummary,
+    ChatHistorySummary, DocumentEmbeddingStatus, EditHistoryEntry, EmbeddingCall,
+    EmbeddingModelUsage, FolderSidebarState, MessageRecord, ModelUsage, Session, SessionError,
+    SessionStorage, SessionTokenUsage, UsageSummary,
 };
 use sqlx::{MySqlPool, Row};
 use uuid::Uuid;
@@ -14,6 +15,9 @@ pub struct MySqlSessionStorage {
     pool: MySqlPool,
     user_id: Uuid,
 }
+
+const FOLDER_SIDEBAR_STATE_KEY: &str = "folder_sidebar_state";
+const EDIT_HISTORY_LIMIT: usize = 5;
 
 impl MySqlSessionStorage {
     pub fn new(pool: MySqlPool, user_id: Uuid) -> Self {
@@ -61,13 +65,69 @@ impl MySqlSessionStorage {
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS embedding_calls (
-                id         VARCHAR(36)  NOT NULL,
-                user_id    VARCHAR(36)  NOT NULL,
-                model      VARCHAR(200) NOT NULL,
-                tokens     INT          NOT NULL DEFAULT 0,
-                created_at BIGINT       NOT NULL,
+                id           VARCHAR(36)  NOT NULL,
+                user_id      VARCHAR(36)  NOT NULL,
+                model        VARCHAR(200) NOT NULL,
+                tokens       INT          NOT NULL DEFAULT 0,
+                task_id      VARCHAR(64),
+                task_type    VARCHAR(64)  NOT NULL DEFAULT 'unknown',
+                session_id   VARCHAR(36),
+                document_id  VARCHAR(36),
+                paragraph_id VARCHAR(255),
+                created_at   BIGINT       NOT NULL,
                 PRIMARY KEY (id),
                 KEY idx_embedding_calls_user (user_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+        )
+        .execute(pool)
+        .await?;
+
+        for stmt in [
+            "ALTER TABLE embedding_calls ADD COLUMN task_id VARCHAR(64)",
+            "ALTER TABLE embedding_calls ADD COLUMN task_type VARCHAR(64) NOT NULL DEFAULT 'unknown'",
+            "ALTER TABLE embedding_calls ADD COLUMN session_id VARCHAR(36)",
+            "ALTER TABLE embedding_calls ADD COLUMN document_id VARCHAR(36)",
+            "ALTER TABLE embedding_calls ADD COLUMN paragraph_id VARCHAR(255)",
+        ] {
+            let _ = sqlx::query(stmt).execute(pool).await;
+        }
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS document_embedding_status (
+                user_id         VARCHAR(36)  NOT NULL,
+                document_id     VARCHAR(36)  NOT NULL,
+                task_id         VARCHAR(64),
+                status          VARCHAR(32)  NOT NULL DEFAULT 'pending',
+                expected_chunks INT          NOT NULL DEFAULT 0,
+                embedded_chunks INT          NOT NULL DEFAULT 0,
+                last_error      TEXT,
+                updated_at      BIGINT       NOT NULL,
+                last_indexed_at BIGINT,
+                PRIMARY KEY (user_id, document_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+        )
+        .execute(pool)
+        .await?;
+
+        for stmt in [
+            "ALTER TABLE document_embedding_status ADD COLUMN task_id VARCHAR(64)",
+            "ALTER TABLE document_embedding_status ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'pending'",
+            "ALTER TABLE document_embedding_status ADD COLUMN expected_chunks INT NOT NULL DEFAULT 0",
+            "ALTER TABLE document_embedding_status ADD COLUMN embedded_chunks INT NOT NULL DEFAULT 0",
+            "ALTER TABLE document_embedding_status ADD COLUMN last_error TEXT",
+            "ALTER TABLE document_embedding_status ADD COLUMN updated_at BIGINT NOT NULL DEFAULT 0",
+            "ALTER TABLE document_embedding_status ADD COLUMN last_indexed_at BIGINT",
+        ] {
+            let _ = sqlx::query(stmt).execute(pool).await;
+        }
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS user_ui_preferences (
+                user_id          VARCHAR(36)  NOT NULL,
+                preference_key   VARCHAR(120) NOT NULL,
+                preference_value LONGTEXT     NOT NULL,
+                updated_at       BIGINT       NOT NULL,
+                PRIMARY KEY (user_id, preference_key)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
         )
         .execute(pool)
@@ -79,6 +139,73 @@ impl MySqlSessionStorage {
 
 fn box_err<E: std::error::Error + Send + Sync + 'static>(e: E) -> SessionError {
     SessionError::Backend(Box::new(e))
+}
+
+fn chat_summary_key(session_id: Uuid) -> String {
+    format!("chat_summary:{session_id}")
+}
+
+fn edit_history_key(session_id: Uuid) -> String {
+    format!("edit_history:{session_id}")
+}
+
+async fn get_pref_json<T>(
+    pool: &MySqlPool,
+    user_id: Uuid,
+    key: &str,
+) -> Result<Option<T>, SessionError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let row = sqlx::query(
+        "SELECT preference_value
+         FROM user_ui_preferences
+         WHERE user_id = ? AND preference_key = ?",
+    )
+    .bind(user_id.to_string())
+    .bind(key)
+    .fetch_optional(pool)
+    .await
+    .map_err(box_err)?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let value: String = row.try_get("preference_value").map_err(box_err)?;
+    let parsed = serde_json::from_str(&value).map_err(box_err)?;
+    Ok(Some(parsed))
+}
+
+async fn set_pref_json<T>(
+    pool: &MySqlPool,
+    user_id: Uuid,
+    key: &str,
+    value: &T,
+) -> Result<(), SessionError>
+where
+    T: serde::Serialize,
+{
+    let now = Utc::now().timestamp_millis();
+    let value = serde_json::to_string(value).map_err(box_err)?;
+
+    sqlx::query(
+        "INSERT INTO user_ui_preferences
+             (user_id, preference_key, preference_value, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+             preference_value = VALUES(preference_value),
+             updated_at = VALUES(updated_at)",
+    )
+    .bind(user_id.to_string())
+    .bind(key)
+    .bind(value)
+    .bind(now)
+    .execute(pool)
+    .await
+    .map_err(box_err)?;
+
+    Ok(())
 }
 
 #[async_trait]
@@ -213,6 +340,56 @@ impl SessionStorage for MySqlSessionStorage {
             .collect()
     }
 
+    async fn get_chat_summary(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Option<ChatHistorySummary>, SessionError> {
+        get_pref_json(&self.pool, self.user_id, &chat_summary_key(session_id)).await
+    }
+
+    async fn save_chat_summary(
+        &self,
+        session_id: Uuid,
+        summary: &ChatHistorySummary,
+    ) -> Result<(), SessionError> {
+        set_pref_json(&self.pool, self.user_id, &chat_summary_key(session_id), summary).await
+    }
+
+    async fn get_recent_edit_history(
+        &self,
+        session_id: Uuid,
+        limit: usize,
+    ) -> Result<Vec<EditHistoryEntry>, SessionError> {
+        let mut entries: Vec<EditHistoryEntry> =
+            get_pref_json(&self.pool, self.user_id, &edit_history_key(session_id))
+                .await?
+                .unwrap_or_default();
+        entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        entries.truncate(limit.min(EDIT_HISTORY_LIMIT));
+        Ok(entries)
+    }
+
+    async fn upsert_edit_history_entry(
+        &self,
+        session_id: Uuid,
+        entry: &EditHistoryEntry,
+    ) -> Result<(), SessionError> {
+        let key = edit_history_key(session_id);
+        let mut entries: Vec<EditHistoryEntry> = get_pref_json(&self.pool, self.user_id, &key)
+            .await?
+            .unwrap_or_default();
+
+        if let Some(existing) = entries.iter_mut().find(|e| e.edit_id == entry.edit_id) {
+            *existing = entry.clone();
+        } else {
+            entries.push(entry.clone());
+        }
+
+        entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        entries.truncate(EDIT_HISTORY_LIMIT);
+        set_pref_json(&self.pool, self.user_id, &key, &entries).await
+    }
+
     async fn save_user_message(
         &self,
         session_id: Uuid,
@@ -322,6 +499,16 @@ impl SessionStorage for MySqlSessionStorage {
             .execute(&self.pool)
             .await
             .map_err(box_err)?;
+        sqlx::query(
+            "DELETE FROM user_ui_preferences
+             WHERE user_id = ? AND preference_key IN (?, ?)",
+        )
+        .bind(&uid)
+        .bind(chat_summary_key(session_id))
+        .bind(edit_history_key(session_id))
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
         sqlx::query("DELETE FROM chat_sessions WHERE id = ? AND user_id = ?")
             .bind(&id)
             .bind(&uid)
@@ -436,19 +623,69 @@ impl SessionStorage for MySqlSessionStorage {
         })
     }
 
-    async fn save_embedding_call(&self, model: &str, tokens: u32) -> Result<(), SessionError> {
+    async fn save_embedding_call(&self, call: &EmbeddingCall) -> Result<(), SessionError> {
         let now = Utc::now().timestamp_millis();
         sqlx::query(
-            "INSERT INTO embedding_calls (id, user_id, model, tokens, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO embedding_calls
+                 (id, user_id, model, tokens, task_id, task_type, session_id, document_id, paragraph_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(uuid::Uuid::new_v4().to_string())
         .bind(self.user_id.to_string())
-        .bind(model)
-        .bind(tokens as i32)
+        .bind(&call.model)
+        .bind(call.tokens as i32)
+        .bind(call.task_id.as_deref())
+        .bind(&call.task_type)
+        .bind(call.session_id.map(|id| id.to_string()))
+        .bind(call.document_id.map(|id| id.to_string()))
+        .bind(call.paragraph_id.as_deref())
         .bind(now)
         .execute(&self.pool)
         .await
         .map_err(box_err)?;
         Ok(())
+    }
+
+    async fn upsert_document_embedding_status(
+        &self,
+        status: &DocumentEmbeddingStatus,
+    ) -> Result<(), SessionError> {
+        sqlx::query(
+            "INSERT INTO document_embedding_status
+                 (user_id, document_id, task_id, status, expected_chunks, embedded_chunks, last_error, updated_at, last_indexed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                 task_id = VALUES(task_id),
+                 status = VALUES(status),
+                 expected_chunks = VALUES(expected_chunks),
+                 embedded_chunks = VALUES(embedded_chunks),
+                 last_error = VALUES(last_error),
+                 updated_at = VALUES(updated_at),
+                 last_indexed_at = VALUES(last_indexed_at)",
+        )
+        .bind(self.user_id.to_string())
+        .bind(status.document_id.to_string())
+        .bind(status.task_id.as_deref())
+        .bind(&status.status)
+        .bind(status.expected_chunks as i32)
+        .bind(status.embedded_chunks as i32)
+        .bind(status.last_error.as_deref())
+        .bind(status.updated_at)
+        .bind(status.last_indexed_at)
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn get_folder_sidebar_state(&self) -> Result<Option<FolderSidebarState>, SessionError> {
+        get_pref_json(&self.pool, self.user_id, FOLDER_SIDEBAR_STATE_KEY).await
+    }
+
+    async fn save_folder_sidebar_state(
+        &self,
+        state: &FolderSidebarState,
+    ) -> Result<(), SessionError> {
+        set_pref_json(&self.pool, self.user_id, FOLDER_SIDEBAR_STATE_KEY, state).await
     }
 }

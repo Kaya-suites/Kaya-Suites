@@ -117,6 +117,80 @@ async fn delete_document_hides_from_owner(pool: PgPool) {
     assert!(adapter.list_documents().await.unwrap().is_empty());
 }
 
+/// Deleted document's chunks do not appear in search_text.
+#[ignore = "requires DATABASE_URL pointing to a Postgres instance with pgvector"]
+#[sqlx::test(migrator = "POSTGRES_MIGRATOR")]
+async fn deleted_document_is_excluded_from_text_search(pool: PgPool) {
+    let uid = Uuid::new_v4();
+    create_test_user(&pool, uid).await;
+    let adapter = PostgresAdapter::new(pool, make_user_ctx(uid));
+
+    let doc = make_doc();
+    adapter.save_document(&doc).await.unwrap();
+    adapter
+        .save_chunk(&Chunk {
+            document_id: doc.id,
+            paragraph_id: "para0".to_string(),
+            content: "xyzzy_deleted_postgres_chunk".to_string(),
+            ordinal: 0,
+        })
+        .await
+        .unwrap();
+
+    adapter.delete_document(doc.id).await.unwrap();
+
+    let hits = adapter
+        .search_text("xyzzy_deleted_postgres_chunk", 10)
+        .await
+        .unwrap();
+    assert!(
+        hits.is_empty(),
+        "deleted document chunks must not appear in search"
+    );
+}
+
+/// Deleted document's embeddings do not appear in vector search.
+#[ignore = "requires DATABASE_URL pointing to a Postgres instance with pgvector"]
+#[sqlx::test(migrator = "POSTGRES_MIGRATOR")]
+async fn deleted_document_is_excluded_from_vector_search(pool: PgPool) {
+    let uid = Uuid::new_v4();
+    create_test_user(&pool, uid).await;
+    let adapter = PostgresAdapter::new(pool, make_user_ctx(uid));
+
+    let doc = make_doc();
+    adapter.save_document(&doc).await.unwrap();
+    adapter
+        .save_chunk(&Chunk {
+            document_id: doc.id,
+            paragraph_id: "para0".to_string(),
+            content: "semantic search test paragraph".to_string(),
+            ordinal: 0,
+        })
+        .await
+        .unwrap();
+
+    let dim = 1536_usize;
+    let norm = (dim as f32).sqrt();
+    let unit_vec: Vec<f32> = vec![1.0 / norm; dim];
+
+    adapter
+        .save_embeddings(&Embedding {
+            document_id: doc.id,
+            paragraph_id: "para0".to_string(),
+            vector: unit_vec.clone(),
+        })
+        .await
+        .unwrap();
+
+    adapter.delete_document(doc.id).await.unwrap();
+
+    let hits = adapter.search_embeddings(&unit_vec, 5).await.unwrap();
+    assert!(
+        hits.is_empty(),
+        "deleted document embeddings must not appear in vector search"
+    );
+}
+
 // ── Chunk and FTS isolation ───────────────────────────────────────────────────
 
 /// save_chunk / search_text results are isolated per user.
