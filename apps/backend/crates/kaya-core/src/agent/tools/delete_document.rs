@@ -1,10 +1,13 @@
 //! `delete_document` — produce a [`ProposedEditKind::DeleteDocument`] awaiting approval.
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::agent::{AgentContext, tool::{Tool, ToolOutput}};
+use crate::agent::{
+    AgentContext,
+    tool::{Tool, ToolOutput},
+};
 use crate::edit::{ProposedEdit, ProposedEditKind};
 use crate::error::KayaError;
 

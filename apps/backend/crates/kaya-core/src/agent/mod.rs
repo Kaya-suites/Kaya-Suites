@@ -31,21 +31,29 @@
 //! # }
 //! ```
 
+pub mod editor;
 pub mod log;
+pub mod orchestrator;
+pub mod researcher;
 pub mod tool;
 pub mod tools;
 
+pub use editor::Editor;
 pub use log::{InvocationLog, ToolInvocation};
-pub use tool::{Tool, ToolOutput};
+pub use orchestrator::{AgentPlan, OrchestratorContext, orchestrate};
+pub use researcher::{ResearchResult, Researcher, RetrievedChunk, StaleRef};
+pub use tool::{ReadTool, Tool, ToolOutput, WriteTool};
 pub use tools::default_tools;
+
+// AgentSource and SourcedEvent are defined in this file — no re-export needed.
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::Utc;
+use futures::SinkExt;
 use futures::channel::mpsc;
 use futures::stream::BoxStream;
-use futures::SinkExt;
 use uuid::Uuid;
 
 use crate::auth::UserSession;
@@ -74,7 +82,10 @@ pub enum AgentEvent {
     /// Incremental reasoning text (emitted if the model streams thinking).
     ThinkingChunk { text: String },
     /// The model decided to call a tool.
-    ToolCall { name: String, input: serde_json::Value },
+    ToolCall {
+        name: String,
+        input: serde_json::Value,
+    },
     /// A tool returned a result (or error).
     ToolResult {
         name: String,
@@ -87,7 +98,29 @@ pub enum AgentEvent {
     /// The model's final text response — the agent turn is complete.
     FinalMessage { text: String },
     /// Token counts for the completed turn, computed locally from message text.
-    Usage { input_tokens: u32, output_tokens: u32, model: String },
+    Usage {
+        input_tokens: u32,
+        output_tokens: u32,
+        model: String,
+    },
+}
+
+// ── Source tagging ────────────────────────────────────────────────────────────
+
+/// Which agent produced an event (used for SSE transparency labelling).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentSource {
+    Orchestrator,
+    Researcher,
+    Editor,
+}
+
+/// An [`AgentEvent`] annotated with the agent that produced it.
+#[derive(Debug, Clone)]
+pub struct SourcedEvent {
+    pub source: AgentSource,
+    pub event: AgentEvent,
 }
 
 // ── Loop ─────────────────────────────────────────────────────────────────────
@@ -105,7 +138,10 @@ pub struct AgentLoop {
 
 impl AgentLoop {
     pub fn new(tools: Vec<Arc<dyn Tool>>) -> Self {
-        Self { tools, max_turns: 10 }
+        Self {
+            tools,
+            max_turns: 10,
+        }
     }
 
     pub fn with_max_turns(mut self, n: usize) -> Self {
@@ -175,7 +211,11 @@ async fn agent_task(
         let turns = prior_turns
             .iter()
             .map(|(role, content)| {
-                let label = if role == "assistant" { "Assistant" } else { "User" };
+                let label = if role == "assistant" {
+                    "Assistant"
+                } else {
+                    "User"
+                };
                 format!("{label}: {content}")
             })
             .collect::<Vec<_>>()
@@ -184,7 +224,8 @@ async fn agent_task(
     };
 
     for _ in 0..max_turns {
-        let prompt = format!("{system_prompt}{conversation_context}\nUser: {message}\n{tool_history}");
+        let prompt =
+            format!("{system_prompt}{conversation_context}\nUser: {message}\n{tool_history}");
         // Count before moving prompt into the request; use cl100k_base as a universal baseline.
         total_input_tokens = total_input_tokens.saturating_add(count_tokens(&prompt, "gpt-4"));
 
@@ -280,8 +321,7 @@ async fn agent_task(
 
                 // ── Append to within-turn tool history ──────────────────────
                 let result_json = serde_json::to_string(&output_json).unwrap_or_default();
-                let args_json =
-                    serde_json::to_string(&tool_call.arguments).unwrap_or_default();
+                let args_json = serde_json::to_string(&tool_call.arguments).unwrap_or_default();
                 tool_history.push_str(&format!(
                     "\n[Calling: {}({args_json})]\n[Result]: {result_json}\n",
                     tool_call.tool_name,
@@ -295,11 +335,13 @@ async fn agent_task(
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| "Done.".to_owned());
                 total_output_tokens = count_tokens(&text, &resp.usage.model);
-                let _ = tx.send(Ok(AgentEvent::Usage {
-                    input_tokens: total_input_tokens,
-                    output_tokens: total_output_tokens,
-                    model: last_model.clone(),
-                })).await;
+                let _ = tx
+                    .send(Ok(AgentEvent::Usage {
+                        input_tokens: total_input_tokens,
+                        output_tokens: total_output_tokens,
+                        model: last_model.clone(),
+                    }))
+                    .await;
                 let _ = tx.send(Ok(AgentEvent::FinalMessage { text })).await;
                 return;
             }

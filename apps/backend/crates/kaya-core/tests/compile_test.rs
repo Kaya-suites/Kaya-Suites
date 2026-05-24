@@ -8,3 +8,13 @@ fn approval_token_is_unforgeable() {
     t.pass("tests/pass/with_token.rs");
     t.compile_fail("tests/fail/without_token.rs");
 }
+
+/// Tool isolation enforcement:
+///
+/// - `Editor::new` only accepts `Vec<Arc<dyn WriteTool>>` — read tools are
+///   rejected at compile time.
+#[test]
+fn tool_isolation_is_compile_enforced() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/fail/editor_with_read_tool.rs");
+}

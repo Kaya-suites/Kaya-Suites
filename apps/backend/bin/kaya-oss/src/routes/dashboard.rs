@@ -14,15 +14,14 @@ use axum::{
     routing::get,
 };
 use chrono::Datelike as _;
-use kaya_metering::MeteringService;
 use kaya_auth::{AuthSession, KayaAuthBackend};
+use kaya_metering::MeteringService;
 use serde::Serialize;
 
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/metering/summary", get(metering_summary))
+    Router::new().route("/metering/summary", get(metering_summary))
 }
 
 #[derive(Serialize)]
@@ -46,13 +45,9 @@ async fn metering_summary(
     match metering_svc.monthly_summary(user.id).await {
         Ok(summary) => {
             let now = chrono::Utc::now();
-            let period_start = chrono::NaiveDate::from_ymd_opt(
-                now.year(),
-                now.month(),
-                1,
-            )
-            .unwrap()
-            .to_string();
+            let period_start = chrono::NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
+                .unwrap()
+                .to_string();
 
             (
                 StatusCode::OK,

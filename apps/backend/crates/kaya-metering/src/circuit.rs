@@ -75,11 +75,9 @@ impl CircuitBreaker {
     pub async fn reset(&self, pool: &AnyPool) {
         self.tripped.store(false, Ordering::Relaxed);
         *self.last_check.lock().expect("circuit lock poisoned") = None;
-        let _ = sqlx::query(
-            "DELETE FROM system_flags WHERE key = 'circuit_breaker_tripped'",
-        )
-        .execute(pool)
-        .await;
+        let _ = sqlx::query("DELETE FROM system_flags WHERE key = 'circuit_breaker_tripped'")
+            .execute(pool)
+            .await;
         info!("circuit breaker reset");
     }
 

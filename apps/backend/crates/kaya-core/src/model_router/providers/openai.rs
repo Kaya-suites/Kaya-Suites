@@ -1,14 +1,13 @@
 //! OpenAI provider backed by `rig-core`.
 
 use async_trait::async_trait;
-use futures::stream::BoxStream;
 use futures::StreamExt;
+use futures::stream::BoxStream;
 use rig_core::client::{CompletionClient, EmbeddingsClient};
 use rig_core::completion::{CompletionModel, GetTokenUsage, ToolDefinition as RigToolDefinition};
 use rig_core::embeddings::EmbeddingModel;
 use rig_core::message::AssistantContent;
 use rig_core::providers::openai;
-use rig_core::providers::openai::responses_api::CompletionResponse as OpenAIResponse;
 use rig_core::streaming::StreamedAssistantContent;
 
 use crate::error::KayaError;
@@ -32,8 +31,7 @@ impl OpenAIProvider {
     }
 
     fn client(&self) -> Result<openai::Client, KayaError> {
-        openai::Client::new(&self.api_key)
-            .map_err(|e| KayaError::Internal(e.to_string()))
+        openai::Client::new(&self.api_key).map_err(|e| KayaError::Internal(e.to_string()))
     }
 }
 
@@ -85,11 +83,14 @@ fn extract_tool_or_text(
     (None, None)
 }
 
-fn completion_usage(raw: &OpenAIResponse) -> (u32, u32, String) {
-    let model = raw.model.clone();
-    match raw.usage.as_ref().and_then(|u| u.token_usage()) {
-        Some(u) => (u.input_tokens as u32, u.output_tokens as u32, model),
-        None => (0, 0, model),
+fn completion_usage<U: GetTokenUsage>(usage: Option<&U>, model: &str) -> (u32, u32, String) {
+    match usage.and_then(GetTokenUsage::token_usage) {
+        Some(u) => (
+            u.input_tokens as u32,
+            u.output_tokens as u32,
+            model.to_owned(),
+        ),
+        None => (0, 0, model.to_owned()),
     }
 }
 
@@ -120,7 +121,8 @@ impl LlmProvider for OpenAIProvider {
             .map_err(|e| KayaError::Internal(e.to_string()))?;
 
         let content = extract_text(&resp.choice);
-        let (input_tokens, output_tokens, model_name) = completion_usage(&resp.raw_response);
+        let (input_tokens, output_tokens, model_name) =
+            completion_usage(resp.raw_response.usage.as_ref(), &resp.raw_response.model);
 
         Ok(CompletionResponse {
             content,
@@ -177,6 +179,9 @@ impl LlmProvider for OpenAIProvider {
     async fn embed(&self, request: EmbeddingRequest) -> Result<EmbeddingResponse, KayaError> {
         let client = self.client()?;
         let model = client.embedding_model(&request.model);
+        // rig's embed_text does not surface the usage field from the API response,
+        // so we estimate token count via the standard BPE approximation (~4 chars/token).
+        let estimated_tokens = (request.text.len() as f32 / 4.0).ceil() as u32;
         let embedding = model
             .embed_text(&request.text)
             .await
@@ -185,7 +190,7 @@ impl LlmProvider for OpenAIProvider {
         Ok(EmbeddingResponse {
             embedding: embedding.vec.iter().map(|&v| v as f32).collect(),
             usage: TokenUsage {
-                input_tokens: 0,
+                input_tokens: estimated_tokens,
                 output_tokens: 0,
                 model: request.model,
                 operation: OperationType::Embedding,
@@ -193,10 +198,7 @@ impl LlmProvider for OpenAIProvider {
         })
     }
 
-    async fn tool_call(
-        &self,
-        request: ToolCallRequest,
-    ) -> Result<ToolCallResponse, KayaError> {
+    async fn tool_call(&self, request: ToolCallRequest) -> Result<ToolCallResponse, KayaError> {
         let client = self.client()?;
         let model = client.completion_model(&request.model);
         let resp = model
@@ -208,7 +210,8 @@ impl LlmProvider for OpenAIProvider {
             .map_err(|e| KayaError::Internal(e.to_string()))?;
 
         let (tool_result, content) = extract_tool_or_text(&resp.choice);
-        let (input_tokens, output_tokens, model_name) = completion_usage(&resp.raw_response);
+        let (input_tokens, output_tokens, model_name) =
+            completion_usage(resp.raw_response.usage.as_ref(), &resp.raw_response.model);
 
         Ok(ToolCallResponse {
             result: tool_result,

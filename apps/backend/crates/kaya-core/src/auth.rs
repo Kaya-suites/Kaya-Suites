@@ -1,8 +1,8 @@
 //! AuthAdapter trait and user-session types.
 
+use crate::error::KayaError;
 use async_trait::async_trait;
 use uuid::Uuid;
-use crate::error::KayaError;
 
 /// An authenticated user session.
 #[derive(Debug, Clone)]

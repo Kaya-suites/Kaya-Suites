@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useResizable } from "@/hooks/useResizable";
 import Link from "next/link";
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { DocumentList } from "@/components/shared/DocumentList";
@@ -27,6 +28,8 @@ export default function DocumentsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
+
+  const { width: sidebarWidth, onMouseDown: onResizeStart } = useResizable(200);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -164,8 +167,8 @@ export default function DocumentsPage() {
       <div className="flex h-full overflow-hidden" style={{ background: "var(--color-background)" }}>
         {/* Sidebar folder tree */}
         <div
-          className="shrink-0 border-r-2 border-black overflow-y-auto"
-          style={{ width: "200px", background: "var(--color-background)" }}
+          className="shrink-0 overflow-y-auto"
+          style={{ width: `${sidebarWidth}px`, background: "var(--color-background)" }}
         >
           <FolderTree
             folders={folders}
@@ -179,6 +182,12 @@ export default function DocumentsPage() {
             onFolderMoved={handleFolderMoved}
           />
         </div>
+
+        {/* Resize handle */}
+        <div
+          className="shrink-0 w-0.5 border-r-2 border-black cursor-col-resize hover:border-[var(--color-accent)] transition-colors"
+          onMouseDown={onResizeStart}
+        />
 
         {/* Main content area */}
         <div className="flex-1 min-w-0 overflow-y-auto">

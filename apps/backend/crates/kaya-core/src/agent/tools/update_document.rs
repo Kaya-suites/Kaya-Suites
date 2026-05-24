@@ -1,10 +1,13 @@
 //! `update_document` — replace a document's full body, producing a [`ProposedEdit::UpdateContent`].
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::agent::{AgentContext, tool::{Tool, ToolOutput}};
+use crate::agent::{
+    AgentContext,
+    tool::{Tool, ToolOutput},
+};
 use crate::diff::compute_paragraph_diff;
 use crate::edit::{ProposedEdit, ProposedEditKind};
 use crate::error::KayaError;

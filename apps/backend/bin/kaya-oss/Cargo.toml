@@ -1,3 +1,7 @@
+[[bin]]
+name = "kaya-vec"
+path = "src/bin/kaya_vec.rs"
+
 [package]
 name    = "kaya-oss"
 version = "0.1.0"
@@ -39,6 +43,9 @@ sqlx = { version = "0.8", features = [
 
 # Async trait
 async-trait = { workspace = true }
+
+# CLI argument parsing (kaya-vec binary)
+clap = { version = "4", features = ["derive", "env"] }
 
 # Export archive
 zip = "2"

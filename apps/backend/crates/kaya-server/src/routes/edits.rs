@@ -10,7 +10,10 @@ use serde_json::{Value, json};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use kaya_core::{ProposedEditKind, SessionStorage, StorageAdapter, auth::UserSession, edit::commit_edit, model_router::ModelRouter, retrieval::index_document_chunks};
+use kaya_core::{
+    ProposedEditKind, SessionStorage, StorageAdapter, auth::UserSession, edit::commit_edit,
+    model_router::ModelRouter, retrieval::index_document_chunks,
+};
 
 use crate::error::ApiError;
 use crate::state::StoredEdit;
@@ -34,7 +37,10 @@ pub async fn approve_edit(
         .remove(&edit_id)
         .ok_or_else(|| ApiError::not_found(format!("edit {edit_id}")))?;
 
-    let final_proposed = body.proposed.as_deref().unwrap_or(&stored.proposed_paragraph);
+    let final_proposed = body
+        .proposed
+        .as_deref()
+        .unwrap_or(&stored.proposed_paragraph);
 
     let edit = if final_proposed != stored.proposed_paragraph {
         apply_user_modification(stored.edit, &stored.proposed_paragraph, final_proposed)
@@ -42,7 +48,9 @@ pub async fn approve_edit(
         stored.edit
     };
 
-    let session = UserSession { user_id: Uuid::nil() };
+    let session = UserSession {
+        user_id: Uuid::nil(),
+    };
     let token = session.approve_edit(&edit);
 
     let affected_doc_id = commit_edit(edit, token, storage.clone())
@@ -55,11 +63,16 @@ pub async fn approve_edit(
         tokio::spawn(async move {
             match storage.get_document(doc_id).await {
                 Ok(doc) => {
-                    if let Err(e) = index_document_chunks(&doc, &storage, &router, Some(sessions.as_ref())).await {
+                    if let Err(e) =
+                        index_document_chunks(&doc, &storage, &router, Some(sessions.as_ref()))
+                            .await
+                    {
                         tracing::error!(document_id = %doc_id, error = %e, "reindex failed after approve");
                     }
                 }
-                Err(e) => tracing::error!(document_id = %doc_id, error = %e, "get_document failed after approve"),
+                Err(e) => {
+                    tracing::error!(document_id = %doc_id, error = %e, "get_document failed after approve")
+                }
             }
         });
     }
@@ -72,7 +85,10 @@ fn apply_user_modification(
     original: &str,
     user_text: &str,
 ) -> kaya_core::ProposedEdit {
-    if let ProposedEditKind::Modify { ref mut new_body, .. } = edit.kind {
+    if let ProposedEditKind::Modify {
+        ref mut new_body, ..
+    } = edit.kind
+    {
         *new_body = new_body.replacen(original, user_text, 1);
     }
     edit

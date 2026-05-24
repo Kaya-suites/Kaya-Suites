@@ -173,20 +173,31 @@ export function ChatMessage({
 
         {message.citations.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {message.citations.map((c) => (
+            {Array.from(
+              message.citations.reduce((map, c) => {
+                if (!map.has(c.docId)) map.set(c.docId, { first: c, labels: [] });
+                map.get(c.docId)!.labels.push(c.label);
+                return map;
+              }, new Map<string, { first: CitationRef; labels: number[] }>())
+            ).map(([docId, { first, labels }]) => (
               <button
-                key={c.label}
-                onClick={() => onCitationClick(c)}
+                key={docId}
+                onClick={() => onCitationClick(first)}
                 className="inline-flex items-center gap-1.5 px-2 py-1 border-2 border-black bg-[var(--color-surface)] text-xs text-black font-bold uppercase tracking-wide hover:bg-[var(--color-muted-bg)] transition-all font-mono"
                 style={{ borderRadius: "var(--border-radius)" }}
               >
-                <span
-                  className="inline-flex items-center justify-center w-3.5 h-3.5 border border-black bg-[var(--color-accent)] text-[9px] font-bold text-white"
-                  style={{ borderRadius: "var(--border-radius)" }}
-                >
-                  {c.label}
+                <span className="inline-flex items-center gap-0.5">
+                  {labels.map((label) => (
+                    <span
+                      key={label}
+                      className="inline-flex items-center justify-center w-3.5 h-3.5 border border-black bg-[var(--color-accent)] text-[9px] font-bold text-white"
+                      style={{ borderRadius: "var(--border-radius)" }}
+                    >
+                      {label}
+                    </span>
+                  ))}
                 </span>
-                {c.title}
+                {first.title}
               </button>
             ))}
           </div>

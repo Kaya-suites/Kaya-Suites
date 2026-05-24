@@ -1,10 +1,13 @@
 //! `read_document` — return a document's full Markdown body and frontmatter.
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::agent::{AgentContext, tool::{Tool, ToolOutput}};
+use crate::agent::{
+    AgentContext,
+    tool::{Tool, ToolOutput},
+};
 use crate::error::KayaError;
 
 pub struct ReadDocument;

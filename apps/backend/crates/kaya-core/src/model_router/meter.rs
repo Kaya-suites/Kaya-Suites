@@ -34,7 +34,10 @@ impl Meter {
 
     /// Append a usage record.
     pub fn record(&self, usage: TokenUsage) {
-        self.records.lock().expect("meter lock poisoned").push(usage);
+        self.records
+            .lock()
+            .expect("meter lock poisoned")
+            .push(usage);
     }
 
     pub fn total_input_tokens(&self) -> u32 {

@@ -15,9 +15,12 @@ pub use auth::{AuthAdapter, UserContext, UserSession};
 pub use diff::{ParagraphChange, ParagraphDiff};
 pub use edit::{ApprovalToken, ProposedEdit, ProposedEditKind, commit_edit};
 pub use error::KayaError;
-pub use model_router::{
-    ConfigError, LlmProvider, Meter, ModelRouter, OperationType, TokenUsage,
+pub use model_router::{ConfigError, LlmProvider, Meter, ModelRouter, OperationType, TokenUsage};
+pub use retrieval::{
+    RetrievalResult, chunk_document, index_document_chunks, make_paragraph_id, retrieve,
 };
-pub use retrieval::{RetrievalResult, chunk_document, index_document_chunks, make_paragraph_id, retrieve};
-pub use session::{EmbeddingModelUsage, MessageRecord, ModelUsage, Session, SessionError, SessionStorage, SessionTokenUsage, UsageSummary};
+pub use session::{
+    EmbeddingModelUsage, MessageRecord, ModelUsage, Session, SessionError, SessionStorage,
+    SessionTokenUsage, UsageSummary,
+};
 pub use storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter, StorageError};

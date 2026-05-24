@@ -19,10 +19,9 @@ use uuid::Uuid;
 
 use kaya_core::{
     ParagraphChange, ProposedEdit, ProposedEditKind, SessionStorage, StorageAdapter,
-    diff::compute_paragraph_diff,
-    agent::tools::default_tools,
-    agent::{AgentContext, AgentEvent, AgentLoop, InvocationLog},
+    agent::{AgentEvent, OrchestratorContext, SourcedEvent, orchestrate},
     auth::UserSession,
+    diff::compute_paragraph_diff,
     model_router::ModelRouter,
 };
 
@@ -98,22 +97,20 @@ async fn run_agent_stream(
     router: Arc<ModelRouter>,
     session_id: Uuid,
     message: String,
-    prior_messages: Vec<(String, String)>,
+    _prior_messages: Vec<(String, String)>,
     is_first_turn: bool,
     tx: tokio::sync::mpsc::Sender<Bytes>,
 ) {
     let session = UserSession {
         user_id: Uuid::nil(),
     };
-    let ctx = Arc::new(AgentContext {
+    let orch_ctx = OrchestratorContext {
         storage: storage.clone(),
         sessions: sessions.clone(),
         router: router.clone(),
         session,
-    });
-    let log = Arc::new(InvocationLog::new());
-    let agent = AgentLoop::new(default_tools());
-    let mut events = agent.run(message.clone(), prior_messages, ctx, log);
+    };
+    let mut events = orchestrate(&message, orch_ctx);
 
     let mut doc_title_cache: HashMap<Uuid, String> = HashMap::new();
     let mut assistant_text = String::new();
@@ -132,49 +129,57 @@ async fn run_agent_stream(
     }
 
     while let Some(result) = events.next().await {
-        match result {
+        let sourced = match result {
             Err(e) => {
                 send!(json!({"type": "Error", "message": e.to_string()}));
                 break;
             }
+            Ok(s) => s,
+        };
 
-            Ok(AgentEvent::ToolResult { name, output, .. }) => {
-                println!("RESULT: ");
-                println!("name:{} ", name.to_string());
-                match name.as_str() {
-                    "search_documents" => {
-                        if let Some(arr) = output.get("documents").and_then(|v| v.as_array()) {
-                            for item in arr {
-                                if let (Some(id_str), Some(title)) =
-                                    (item["id"].as_str(), item["title"].as_str())
-                                {
-                                    if let Ok(id) = Uuid::parse_str(id_str) {
-                                        doc_title_cache.insert(id, title.to_string());
-                                    }
+        let SourcedEvent { source, event } = sourced;
+        let source_str = match source {
+            kaya_core::agent::AgentSource::Orchestrator => "orchestrator",
+            kaya_core::agent::AgentSource::Researcher => "researcher",
+            kaya_core::agent::AgentSource::Editor => "editor",
+        };
+
+        log_agent_event(source_str, &event);
+
+        match event {
+            AgentEvent::ToolResult { name, output, .. } => match name.as_str() {
+                "search_documents" => {
+                    if let Some(arr) = output.get("documents").and_then(|v| v.as_array()) {
+                        for item in arr {
+                            if let (Some(id_str), Some(title)) =
+                                (item["id"].as_str(), item["title"].as_str())
+                            {
+                                if let Ok(id) = Uuid::parse_str(id_str) {
+                                    doc_title_cache.insert(id, title.to_string());
                                 }
                             }
                         }
                     }
-                    "read_document" => {
-                        if let (Some(id_str), Some(title)) =
-                            (output["id"].as_str(), output["title"].as_str())
-                        {
-                            if let Ok(id) = Uuid::parse_str(id_str) {
-                                doc_title_cache.insert(id, title.to_string());
-                            }
+                }
+                "read_document" => {
+                    if let (Some(id_str), Some(title)) =
+                        (output["id"].as_str(), output["title"].as_str())
+                    {
+                        if let Ok(id) = Uuid::parse_str(id_str) {
+                            doc_title_cache.insert(id, title.to_string());
                         }
                     }
-                    _ => {}
                 }
-            }
+                _ => {}
+            },
 
-            Ok(AgentEvent::ProposedEditEmitted { edit }) => {
+            AgentEvent::ProposedEditEmitted { edit } => {
                 if let Some(sse_data) = build_edit_sse(&storage, &pending_edits, &edit).await {
                     send!(sse_data);
                 }
             }
 
-            Ok(AgentEvent::FinalMessage { text }) => {
+            AgentEvent::FinalMessage { text } => {
                 let (clean_text, raw_citations) = extract_citations(&text);
 
                 for (label, (doc_id_str, para_id)) in raw_citations.iter().enumerate() {
@@ -219,17 +224,17 @@ async fn run_agent_stream(
                 assistant_text = clean_text;
             }
 
-            Ok(AgentEvent::Usage {
+            AgentEvent::Usage {
                 input_tokens,
                 output_tokens,
                 model,
-            }) => {
+            } => {
                 turn_input_tokens = input_tokens;
                 turn_output_tokens = output_tokens;
                 turn_model = model;
             }
 
-            Ok(_) => {}
+            _ => {}
         }
     }
 
@@ -341,7 +346,9 @@ async fn build_edit_sse(
             let mut new_parts: Vec<&str> = Vec::new();
             for c in &diff.changes {
                 match c {
-                    ParagraphChange::Modify { old_text, new_text, .. } => {
+                    ParagraphChange::Modify {
+                        old_text, new_text, ..
+                    } => {
                         old_parts.push(old_text.as_str());
                         new_parts.push(new_text.as_str());
                     }
@@ -382,7 +389,9 @@ async fn build_edit_sse(
             let mut new_parts: Vec<&str> = Vec::new();
             for c in &diff.changes {
                 match c {
-                    ParagraphChange::Modify { old_text, new_text, .. } => {
+                    ParagraphChange::Modify {
+                        old_text, new_text, ..
+                    } => {
                         old_parts.push(old_text.as_str());
                         new_parts.push(new_text.as_str());
                     }
@@ -451,4 +460,97 @@ async fn build_edit_sse(
         "original": original,
         "proposed": proposed,
     }))
+}
+
+fn log_agent_event(source: &str, event: &AgentEvent) {
+    match event {
+        AgentEvent::ThinkingChunk { text } => {
+            println!("[agent][{source}][thinking] {}", truncate_text(text, 400));
+        }
+        AgentEvent::ToolCall { name, input } => {
+            println!(
+                "[agent][{source}][tool_call] {name} {}",
+                truncate_json(input, 600)
+            );
+        }
+        AgentEvent::ToolResult {
+            name,
+            output,
+            latency_ms,
+        } => {
+            println!(
+                "[agent][{source}][tool_result] {name} latency_ms={latency_ms} {}",
+                truncate_json(output, 600)
+            );
+        }
+        AgentEvent::ProposedEditEmitted { edit } => {
+            println!("[agent][{source}][proposed_edit] {}", describe_edit(edit));
+        }
+        AgentEvent::FinalMessage { text } => {
+            println!("[agent][{source}][final] {}", truncate_text(text, 500));
+        }
+        AgentEvent::Usage {
+            input_tokens,
+            output_tokens,
+            model,
+        } => {
+            println!(
+                "[agent][{source}][usage] model={model} input_tokens={input_tokens} output_tokens={output_tokens}"
+            );
+        }
+    }
+}
+
+fn describe_edit(edit: &ProposedEdit) -> String {
+    match &edit.kind {
+        ProposedEditKind::Create { title, body } => format!(
+            "id={} kind=create title={} body_preview={}",
+            edit.id,
+            truncate_text(title, 120),
+            truncate_text(body, 240)
+        ),
+        ProposedEditKind::DeleteDocument { document_id } => {
+            format!("id={} kind=delete document_id={document_id}", edit.id)
+        }
+        ProposedEditKind::UpdateContent {
+            document_id,
+            new_content,
+        } => format!(
+            "id={} kind=update_content document_id={} new_content_preview={}",
+            edit.id,
+            document_id,
+            truncate_text(new_content, 240)
+        ),
+        ProposedEditKind::Modify {
+            document_id,
+            diff,
+            new_body,
+        } => format!(
+            "id={} kind=modify document_id={} changed_paragraphs={} new_body_preview={}",
+            edit.id,
+            document_id,
+            diff.changes.len(),
+            truncate_text(new_body, 240)
+        ),
+    }
+}
+
+fn truncate_json(value: &Value, max_chars: usize) -> String {
+    let serialized =
+        serde_json::to_string(value).unwrap_or_else(|_| "<failed to serialize json>".to_string());
+    truncate_text(&serialized, max_chars)
+}
+
+fn truncate_text(text: &str, max_chars: usize) -> String {
+    let total_chars = text.chars().count();
+    if total_chars <= max_chars {
+        return text.replace('\n', "\\n");
+    }
+
+    let truncated: String = text.chars().take(max_chars).collect();
+    format!(
+        "{}… ({} chars)",
+        truncated.replace('\n', "\\n"),
+        total_chars
+    )
 }

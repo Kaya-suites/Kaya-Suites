@@ -1,9 +1,12 @@
 //! `find_stale_references` — scan documents mentioning a hint entity.
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::agent::{AgentContext, tool::{Tool, ToolOutput}};
+use crate::agent::{
+    AgentContext,
+    tool::{Tool, ToolOutput},
+};
 use crate::error::KayaError;
 
 pub struct FindStaleReferences;
@@ -62,11 +65,7 @@ impl Tool for FindStaleReferences {
                     format!("Title references '{hint}' — check if still accurate.")
                 } else {
                     // Count occurrences to gauge staleness risk.
-                    let occurrences = doc
-                        .body
-                        .to_lowercase()
-                        .matches(hint_lower.as_str())
-                        .count();
+                    let occurrences = doc.body.to_lowercase().matches(hint_lower.as_str()).count();
                     format!("Body mentions '{hint}' {occurrences} time(s) — verify currency.")
                 };
                 Some(json!({

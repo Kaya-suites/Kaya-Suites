@@ -1,4 +1,7 @@
-use axum::{Router, routing::{get, patch, post, put}};
+use axum::{
+    Router,
+    routing::{get, patch, post, put},
+};
 
 mod chat;
 mod documents;
@@ -21,30 +24,48 @@ where
     S: Clone + Send + Sync + 'static,
 {
     Router::new()
-        .route("/documents", get(documents::list_documents).post(documents::create_document))
+        .route(
+            "/documents",
+            get(documents::list_documents).post(documents::create_document),
+        )
         .route(
             "/documents/{id}",
             get(documents::get_document)
                 .put(documents::update_document)
                 .delete(documents::delete_document),
         )
-        .route("/documents/{id}/export.pdf", get(documents::export_document_pdf))
-        .route("/documents/{id}/folder", put(folders::move_document_to_folder))
-        .route("/folders", get(folders::list_folders).post(folders::create_folder))
+        .route(
+            "/documents/{id}/export.pdf",
+            get(documents::export_document_pdf),
+        )
+        .route(
+            "/documents/{id}/folder",
+            put(folders::move_document_to_folder),
+        )
+        .route(
+            "/folders",
+            get(folders::list_folders).post(folders::create_folder),
+        )
         .route(
             "/folders/{id}",
             get(folders::get_folder)
                 .put(folders::update_folder)
                 .delete(folders::delete_folder),
         )
-        .route("/sessions", get(sessions::list_sessions).post(sessions::create_session))
+        .route(
+            "/sessions",
+            get(sessions::list_sessions).post(sessions::create_session),
+        )
         .route("/sessions/usage", get(sessions::get_usage_summary))
         .route(
             "/sessions/{id}",
             patch(sessions::rename_session).delete(sessions::delete_session),
         )
         .route("/sessions/{id}/pin", post(sessions::pin_session))
-        .route("/sessions/{id}/messages", get(sessions::get_session_messages))
+        .route(
+            "/sessions/{id}/messages",
+            get(sessions::get_session_messages),
+        )
         .route("/sessions/{id}/chat", post(chat::chat_stream))
         .route("/edits/{id}/approve", post(edits::approve_edit))
 }

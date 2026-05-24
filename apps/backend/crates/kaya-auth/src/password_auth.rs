@@ -50,42 +50,38 @@ impl PasswordAuthService {
             .to_string();
 
         // Check if email already exists
-        let email_count: i64 = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM users WHERE email = ?",
-        )
-        .bind(email)
-        .fetch_one(&self.pool)
-        .await
-        .unwrap_or(0);
+        let email_count: i64 =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE email = ?")
+                .bind(email)
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(0);
         if email_count > 0 {
             return Err(RegisterError::EmailAlreadyExists);
         }
 
         // Check if username already exists
         if let Some(uname) = username {
-            let uname_count: i64 = sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM users WHERE username = ?",
-            )
-            .bind(uname)
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or(0);
+            let uname_count: i64 =
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE username = ?")
+                    .bind(uname)
+                    .fetch_one(&self.pool)
+                    .await
+                    .unwrap_or(0);
             if uname_count > 0 {
                 return Err(RegisterError::UsernameTaken);
             }
         }
 
         let id = Uuid::new_v4();
-        sqlx::query(
-            "INSERT INTO users (id, email, username, password_hash) VALUES (?, ?, ?, ?)",
-        )
-        .bind(id.to_string())
-        .bind(email)
-        .bind(username)
-        .bind(&hash)
-        .execute(&self.pool)
-        .await
-        .map_err(RegisterError::Database)?;
+        sqlx::query("INSERT INTO users (id, email, username, password_hash) VALUES (?, ?, ?, ?)")
+            .bind(id.to_string())
+            .bind(email)
+            .bind(username)
+            .bind(&hash)
+            .execute(&self.pool)
+            .await
+            .map_err(RegisterError::Database)?;
 
         Ok(AuthUser {
             id,
@@ -104,13 +100,12 @@ impl PasswordAuthService {
         username: &str,
         password: &str,
     ) -> Result<(), SeedError> {
-        let exists: i64 = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM users WHERE username = ?",
-        )
-        .bind(username)
-        .fetch_one(&self.pool)
-        .await
-        .unwrap_or(0);
+        let exists: i64 =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE username = ?")
+                .bind(username)
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(0);
 
         if exists > 0 {
             return Ok(());

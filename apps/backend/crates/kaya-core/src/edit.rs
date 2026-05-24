@@ -8,8 +8,8 @@
 //! external code cannot fabricate one — the only path to a token is through
 //! a real [`UserSession`].
 
-use std::sync::Arc;
 use chrono::{DateTime, Utc};
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::UserSession;
@@ -28,14 +28,9 @@ pub enum ProposedEditKind {
         new_content: String,
     },
     /// Delete a document entirely.
-    DeleteDocument {
-        document_id: Uuid,
-    },
+    DeleteDocument { document_id: Uuid },
     /// Create a brand-new document. Requires approval before it is persisted.
-    Create {
-        title: String,
-        body: String,
-    },
+    Create { title: String, body: String },
     /// Modify an existing document at the paragraph level.
     ///
     /// `diff` is for display (UI diff renderer). `new_body` is the
@@ -123,7 +118,10 @@ pub async fn commit_edit(
     );
 
     match edit.kind {
-        ProposedEditKind::UpdateContent { document_id, new_content } => {
+        ProposedEditKind::UpdateContent {
+            document_id,
+            new_content,
+        } => {
             let mut doc = storage.get_document(document_id).await?;
             doc.body = new_content;
             storage.save_document(&doc).await?;
@@ -148,7 +146,11 @@ pub async fn commit_edit(
             storage.save_document(&doc).await?;
             Ok(Some(doc_id))
         }
-        ProposedEditKind::Modify { document_id, new_body, .. } => {
+        ProposedEditKind::Modify {
+            document_id,
+            new_body,
+            ..
+        } => {
             let mut doc = storage.get_document(document_id).await?;
             doc.body = new_body;
             storage.save_document(&doc).await?;

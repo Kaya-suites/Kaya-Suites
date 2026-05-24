@@ -9,6 +9,7 @@ This directory contains documentation for the Apache 2.0 open-source distributio
 | Document | Description |
 |---|---|
 | [Architecture](architecture.md) | System overview, two-build-system layout, dependency graph |
+| [Agent Architecture](agent/architecture.md) | Orchestrator, researcher/editor split, SSE review flow |
 | [Storage Adapter](storage-adapter.md) | `StorageAdapter` trait, domain types, `SqliteAdapter` |
 | [Auth Adapter](auth-adapter.md) | `AuthAdapter` trait and `LocalAuthAdapter` (single-user) |
 | [LLM Provider](llm-provider.md) | `LlmProvider` trait, `ModelRouter`, routing config |

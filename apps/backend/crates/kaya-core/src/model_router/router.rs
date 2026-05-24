@@ -58,11 +58,17 @@ impl ModelRouter {
             let provider = providers[&entry.provider].clone();
             routes.insert(
                 op.clone(),
-                Route { provider, model: entry.model.clone() },
+                Route {
+                    provider,
+                    model: entry.model.clone(),
+                },
             );
         }
 
-        Ok(Self { routes, meter: Arc::new(Meter::new()) })
+        Ok(Self {
+            routes,
+            meter: Arc::new(Meter::new()),
+        })
     }
 
     /// Load `kaya.yaml` from `path` and build the router.
@@ -77,7 +83,10 @@ impl ModelRouter {
             .into_iter()
             .map(|(op, (provider, model))| (op, Route { provider, model }))
             .collect();
-        Self { routes, meter: Arc::new(Meter::new()) }
+        Self {
+            routes,
+            meter: Arc::new(Meter::new()),
+        }
     }
 
     fn route(&self, op: &OperationType) -> Result<(&dyn LlmProvider, &str), KayaError> {
@@ -124,7 +133,10 @@ impl ModelRouter {
 
     pub async fn embed(&self, text: impl Into<String>) -> Result<EmbeddingResponse, KayaError> {
         let (provider, model) = self.route(&OperationType::Embedding)?;
-        let req = EmbeddingRequest { text: text.into(), model: model.to_owned() };
+        let req = EmbeddingRequest {
+            text: text.into(),
+            model: model.to_owned(),
+        };
         let resp = provider.embed(req).await?;
         self.meter.record(resp.usage.clone());
         Ok(resp)
@@ -136,7 +148,10 @@ impl ModelRouter {
         request: ToolCallRequest,
     ) -> Result<ToolCallResponse, KayaError> {
         let (provider, model) = self.route(&op)?;
-        let req = ToolCallRequest { model: model.to_owned(), ..request };
+        let req = ToolCallRequest {
+            model: model.to_owned(),
+            ..request
+        };
         let resp = provider.tool_call(req).await?;
         self.meter.record(resp.usage.clone());
         Ok(resp)

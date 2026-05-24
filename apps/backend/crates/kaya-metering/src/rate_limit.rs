@@ -133,11 +133,7 @@ pub async fn check_rate_limit(
 /// Increment the hourly and daily buckets by the actual token count consumed.
 ///
 /// Call after a successful LLM call to keep buckets accurate.
-pub async fn record_usage(
-    pool: &AnyPool,
-    user_id: Uuid,
-    tokens: i64,
-) -> Result<(), MeteringError> {
+pub async fn record_usage(pool: &AnyPool, user_id: Uuid, tokens: i64) -> Result<(), MeteringError> {
     let now = Utc::now();
     increment_window(pool, user_id, "hourly", truncate_to_hour(now), tokens).await?;
     increment_window(pool, user_id, "daily", truncate_to_day(now), tokens).await?;

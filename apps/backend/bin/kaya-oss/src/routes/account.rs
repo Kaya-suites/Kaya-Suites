@@ -149,9 +149,7 @@ async fn build_export(
     let docs: Vec<DocRow> = doc_rows
         .iter()
         .map(|r| {
-            let updated_at = r
-                .try_get::<String, _>("updated_at")
-                .unwrap_or_default();
+            let updated_at = r.try_get::<String, _>("updated_at").unwrap_or_default();
             DocRow {
                 id: r.try_get::<String, _>("id").unwrap_or_default(),
                 title: r.try_get("title").unwrap_or_default(),
@@ -184,9 +182,7 @@ async fn build_export(
         let messages = msg_rows
             .iter()
             .map(|m| {
-                let created_at = m
-                    .try_get::<String, _>("created_at")
-                    .unwrap_or_default();
+                let created_at = m.try_get::<String, _>("created_at").unwrap_or_default();
                 ChatMsg {
                     role: m.try_get("role").unwrap_or_default(),
                     content: m.try_get("content").unwrap_or_default(),
@@ -205,10 +201,9 @@ async fn build_export(
     let email_owned = email.to_owned();
     let now = chrono::Utc::now();
 
-    let bytes = tokio::task::spawn_blocking(move || {
-        create_zip(&docs, &chat_sessions, &email_owned, now)
-    })
-    .await??;
+    let bytes =
+        tokio::task::spawn_blocking(move || create_zip(&docs, &chat_sessions, &email_owned, now))
+            .await??;
 
     Ok(bytes)
 }
@@ -221,8 +216,8 @@ fn create_zip(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     let buf = Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(buf);
-    let opts =
-        zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+    let opts = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
 
     zip.start_file("manifest.json", opts)?;
     let manifest = serde_json::json!({
@@ -237,11 +232,7 @@ fn create_zip(
         let safe_title = sanitize_filename(&doc.title);
         let filename = format!("documents/{safe_title}.md");
         zip.start_file(&filename, opts)?;
-        let header = format!(
-            "# {}\n\n> Last updated: {}\n\n",
-            doc.title,
-            doc.updated_at,
-        );
+        let header = format!("# {}\n\n> Last updated: {}\n\n", doc.title, doc.updated_at,);
         zip.write_all(header.as_bytes())?;
         zip.write_all(doc.body.as_bytes())?;
     }

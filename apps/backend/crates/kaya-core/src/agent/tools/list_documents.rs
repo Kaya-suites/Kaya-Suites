@@ -1,9 +1,12 @@
 //! `list_documents` — return metadata for all documents (no body text).
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::agent::{AgentContext, tool::{Tool, ToolOutput}};
+use crate::agent::{
+    AgentContext,
+    tool::{Tool, ToolOutput},
+};
 use crate::error::KayaError;
 
 pub struct ListDocuments;
@@ -31,13 +34,15 @@ impl Tool for ListDocuments {
         let docs = ctx.storage.list_documents().await?;
         let items: Vec<Value> = docs
             .into_iter()
-            .map(|d| json!({
-                "id": d.id,
-                "title": d.title,
-                "owner": d.owner,
-                "last_reviewed": d.last_reviewed,
-                "tags": d.tags,
-            }))
+            .map(|d| {
+                json!({
+                    "id": d.id,
+                    "title": d.title,
+                    "owner": d.owner,
+                    "last_reviewed": d.last_reviewed,
+                    "tags": d.tags,
+                })
+            })
             .collect();
 
         Ok(ToolOutput::value(json!({ "documents": items })))

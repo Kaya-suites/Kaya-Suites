@@ -68,6 +68,10 @@ pub enum OperationType {
     StaleDetection,
     /// Embed text for vector search (dedicated embedding model).
     Embedding,
+    /// Classify user intent: research-only or research-then-edit (fast model).
+    IntentClassification,
+    /// Researcher final synthesis turn (strong model).
+    ResearchSynthesis,
 }
 
 // ---- Request / response types ---------------------------------------------
@@ -313,6 +317,12 @@ routing:
   embedding:
     provider: nonexistent
     model: text-embedding-3-small
+  intent_classification:
+    provider: nonexistent
+    model: gpt-4o-mini
+  research_synthesis:
+    provider: nonexistent
+    model: gpt-4o
 providers:
   openai:
     api_key_env: OPENAI_API_KEY

@@ -37,10 +37,7 @@ pub enum ParagraphChange {
         after_id: Option<String>,
     },
     /// A paragraph was removed from the old document.
-    Remove {
-        paragraph_id: String,
-        text: String,
-    },
+    Remove { paragraph_id: String, text: String },
     /// A paragraph was present in both documents but its text changed.
     Modify {
         paragraph_id: String,
@@ -243,7 +240,9 @@ mod tests {
         let new = "Para one.\n\nPara two.\n\nPara three.";
         let diff = compute_paragraph_diff(old, new);
         assert_eq!(diff.changes.len(), 1);
-        assert!(matches!(&diff.changes[0], ParagraphChange::Add { text, .. } if text == "Para two."));
+        assert!(
+            matches!(&diff.changes[0], ParagraphChange::Add { text, .. } if text == "Para two.")
+        );
     }
 
     #[test]
@@ -252,28 +251,38 @@ mod tests {
         let new = "Para one.\n\nPara three.";
         let diff = compute_paragraph_diff(old, new);
         assert_eq!(diff.changes.len(), 1);
-        assert!(matches!(&diff.changes[0], ParagraphChange::Remove { text, .. } if text == "Para two."));
+        assert!(
+            matches!(&diff.changes[0], ParagraphChange::Remove { text, .. } if text == "Para two.")
+        );
     }
 
     #[test]
     fn apply_hunks_replaces_text() {
-        use super::{apply_hunks, Hunk};
+        use super::{Hunk, apply_hunks};
         let body = "Hello world.\n\nSecond paragraph.";
-        let result = apply_hunks(body, &[Hunk {
-            old_text: "world".into(),
-            new_text: "Rust".into(),
-        }]).unwrap();
+        let result = apply_hunks(
+            body,
+            &[Hunk {
+                old_text: "world".into(),
+                new_text: "Rust".into(),
+            }],
+        )
+        .unwrap();
         assert_eq!(result, "Hello Rust.\n\nSecond paragraph.");
     }
 
     #[test]
     fn apply_hunks_errors_on_missing_old_text() {
-        use super::{apply_hunks, Hunk};
+        use super::{Hunk, apply_hunks};
         let body = "Hello world.";
-        let err = apply_hunks(body, &[Hunk {
-            old_text: "not present".into(),
-            new_text: "x".into(),
-        }]).unwrap_err();
+        let err = apply_hunks(
+            body,
+            &[Hunk {
+                old_text: "not present".into(),
+                new_text: "x".into(),
+            }],
+        )
+        .unwrap_err();
         assert!(err.contains("hunk 0"), "{err}");
     }
 

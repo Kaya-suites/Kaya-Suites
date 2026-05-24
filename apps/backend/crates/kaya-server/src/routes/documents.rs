@@ -10,7 +10,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use kaya_core::{SessionStorage, StorageAdapter, model_router::ModelRouter, retrieval::index_document_chunks};
+use kaya_core::{
+    SessionStorage, StorageAdapter, model_router::ModelRouter, retrieval::index_document_chunks,
+};
 
 use crate::error::ApiError;
 use crate::routes::folders::{FolderFilterQuery, parse_folder_filter};
@@ -110,7 +112,9 @@ pub async fn create_document(
         let sessions = sessions.clone();
         let id = doc.id;
         tokio::spawn(async move {
-            if let Err(e) = index_document_chunks(&doc, &storage, &router, Some(sessions.as_ref())).await {
+            if let Err(e) =
+                index_document_chunks(&doc, &storage, &router, Some(sessions.as_ref())).await
+            {
                 tracing::error!(document_id = %id, error = %e, "reindex failed after create");
             }
         });
@@ -189,7 +193,9 @@ pub async fn update_document(
         let storage = storage.clone();
         let sessions = sessions.clone();
         tokio::spawn(async move {
-            if let Err(e) = index_document_chunks(&doc, &storage, &router, Some(sessions.as_ref())).await {
+            if let Err(e) =
+                index_document_chunks(&doc, &storage, &router, Some(sessions.as_ref())).await
+            {
                 tracing::error!(document_id = %id, error = %e, "reindex failed after update");
             }
         });
@@ -247,12 +253,17 @@ fn minimal_pdf(title: &str, body: &str) -> Vec<u8> {
     let safe_body: String = body
         .chars()
         .take(300)
-        .map(|c| if c == '(' || c == ')' || c == '\\' { ' ' } else { c })
+        .map(|c| {
+            if c == '(' || c == ')' || c == '\\' {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect();
 
-    let stream_text = format!(
-        "BT /F1 14 Tf 50 750 Td ({safe_title}) Tj 0 -20 Td /F1 10 Tf ({safe_body}) Tj ET"
-    );
+    let stream_text =
+        format!("BT /F1 14 Tf 50 750 Td ({safe_title}) Tj 0 -20 Td /F1 10 Tf ({safe_body}) Tj ET");
     let header = format!(
         "%PDF-1.4\n\
          1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n\
@@ -276,7 +287,13 @@ fn minimal_pdf(title: &str, body: &str) -> Vec<u8> {
 
 fn sanitize_filename(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect::<String>()
         .to_lowercase()
 }

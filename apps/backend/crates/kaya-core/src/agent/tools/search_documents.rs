@@ -1,9 +1,12 @@
-//! `search_documents` — hybrid semantic + keyword retrieval.
+//! `search_documents` — vector-database semantic search.
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::agent::{AgentContext, tool::{Tool, ToolOutput}};
+use crate::agent::{
+    AgentContext,
+    tool::{Tool, ToolOutput},
+};
 use crate::error::KayaError;
 
 pub struct SearchDocuments;
@@ -15,8 +18,8 @@ impl Tool for SearchDocuments {
     }
 
     fn description(&self) -> &'static str {
-        "Search the knowledge base using semantic similarity. \
-         Returns the most relevant document excerpts with their IDs and titles."
+        "Search the knowledge base using vector similarity. \
+         Returns the most semantically relevant document chunks with their IDs and titles."
     }
 
     fn schema(&self) -> Value {
@@ -44,12 +47,13 @@ impl Tool for SearchDocuments {
             .to_owned();
         let limit = input["limit"].as_u64().unwrap_or(5) as usize;
 
-        // Embed the query and run vector search.
         let emb = ctx.router.embed(query.clone()).await?;
-        let _ = ctx.sessions.save_embedding_call(&emb.usage.model, emb.usage.input_tokens).await;
+        let _ = ctx
+            .sessions
+            .save_embedding_call(&emb.usage.model, emb.usage.input_tokens)
+            .await;
         let hits = ctx.storage.search_embeddings(&emb.embedding, limit).await?;
 
-        // Fetch full documents for each hit, deduplicate by document ID.
         let mut seen = std::collections::HashSet::new();
         let mut results = Vec::new();
         for hit in &hits {
@@ -57,32 +61,12 @@ impl Tool for SearchDocuments {
                 continue;
             }
             if let Ok(doc) = ctx.storage.get_document(hit.document_id).await {
-                let excerpt_end = doc.body.len().min(300);
                 results.push(json!({
                     "id": doc.id,
                     "title": doc.title,
                     "paragraph_id": hit.paragraph_id,
-                    "excerpt": &doc.body[..excerpt_end],
+                    "excerpt": hit.content,
                 }));
-            }
-        }
-
-        // Keyword fallback when the embedding index is empty.
-        if results.is_empty() {
-            let query_lower = query.to_lowercase();
-            let all_docs = ctx.storage.list_documents().await?;
-            for doc in all_docs.into_iter().take(limit) {
-                if doc.title.to_lowercase().contains(&query_lower)
-                    || doc.body.to_lowercase().contains(&query_lower)
-                {
-                    let excerpt_end = doc.body.len().min(300);
-                    results.push(json!({
-                        "id": doc.id,
-                        "title": doc.title,
-                        "chunk_index": 0,
-                        "excerpt": &doc.body[..excerpt_end],
-                    }));
-                }
             }
         }
 

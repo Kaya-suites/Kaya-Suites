@@ -134,12 +134,10 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
         &self,
         user_id: &axum_login::UserId<Self>,
     ) -> Result<Option<Self::User>, Self::Error> {
-        let row = sqlx::query(
-            "SELECT id, email, username, is_superadmin FROM users WHERE id = ?",
-        )
-        .bind(user_id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query("SELECT id, email, username, is_superadmin FROM users WHERE id = ?")
+            .bind(user_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
 
         Ok(row.map(|r| AuthUser {
             id: decode_uuid(&r, "id"),
@@ -167,12 +165,14 @@ impl CloudAuthAdapter {
 #[async_trait]
 impl AuthAdapter for CloudAuthAdapter {
     async fn current_user(&self) -> Result<Option<UserSession>, KayaError> {
-        Ok(self.session.user.as_ref().map(|u| UserSession { user_id: u.id }))
+        Ok(self
+            .session
+            .user
+            .as_ref()
+            .map(|u| UserSession { user_id: u.id }))
     }
 
     async fn require_auth(&self) -> Result<UserSession, KayaError> {
-        self.current_user()
-            .await?
-            .ok_or(KayaError::Unauthenticated)
+        self.current_user().await?.ok_or(KayaError::Unauthenticated)
     }
 }

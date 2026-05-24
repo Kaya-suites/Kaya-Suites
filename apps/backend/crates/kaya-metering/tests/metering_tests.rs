@@ -10,9 +10,9 @@
 //! ```
 
 use kaya_core::{OperationType, TokenUsage};
+use kaya_metering::MeteringError;
 use kaya_metering::pricing::PricingConfig;
 use kaya_metering::service::{MeteringConfig, MeteringService};
-use kaya_metering::MeteringError;
 use sqlx::Row as _;
 use uuid::Uuid;
 
@@ -45,11 +45,11 @@ fn test_pricing() -> PricingConfig {
 
 fn test_config() -> MeteringConfig {
     MeteringConfig {
-        spend_cap_usd: 1.00,         // $1 cap for easy testing
+        spend_cap_usd: 1.00, // $1 cap for easy testing
         alert_threshold: 0.80,
-        included_invocations: 3,     // 3 invocations/period for easy testing
-        hourly_token_limit: 1_000,   // 1K tokens/hour
-        daily_token_limit: 5_000,    // 5K tokens/day
+        included_invocations: 3,   // 3 invocations/period for easy testing
+        hourly_token_limit: 1_000, // 1K tokens/hour
+        daily_token_limit: 5_000,  // 5K tokens/day
         circuit_threshold_usd: 10.00,
         ..Default::default()
     }
@@ -104,8 +104,12 @@ fn unknown_model_uses_fallback() {
 
 #[tokio::test]
 async fn test_record_usage_persists_event() {
-    let Some(pool) = test_pool().await else { return };
-    let Some(any_pool) = test_any_pool().await else { return };
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let Some(any_pool) = test_any_pool().await else {
+        return;
+    };
     let svc = make_svc(any_pool).await;
 
     let email = format!("record_{}@test.kaya.io", Uuid::new_v4().simple());
@@ -114,20 +118,23 @@ async fn test_record_usage_persists_event() {
     let u = usage("test-model", OperationType::EditProposal, 1_000, 500);
     svc.record_usage(user_id, &u).await.unwrap();
 
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM usage_events WHERE user_id = $1")
-            .bind(user_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM usage_events WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
     assert_eq!(count, 1);
 }
 
 #[tokio::test]
 async fn test_spend_cap_blocks_at_limit() {
-    let Some(pool) = test_pool().await else { return };
-    let Some(any_pool) = test_any_pool().await else { return };
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let Some(any_pool) = test_any_pool().await else {
+        return;
+    };
     let svc = make_svc(any_pool).await;
 
     let email = format!("cap_{}@test.kaya.io", Uuid::new_v4().simple());
@@ -135,7 +142,12 @@ async fn test_spend_cap_blocks_at_limit() {
 
     // test-model: $10/M in + $30/M out.
     // 30K input + 20K output = $0.30 + $0.60 = $0.90 → below $1.00 cap.
-    let u = usage("test-model", OperationType::DocumentGeneration, 30_000, 20_000);
+    let u = usage(
+        "test-model",
+        OperationType::DocumentGeneration,
+        30_000,
+        20_000,
+    );
     svc.record_usage(user_id, &u).await.unwrap();
 
     // Invocation 1 still under cap.
@@ -143,7 +155,12 @@ async fn test_spend_cap_blocks_at_limit() {
 
     // Add more spend to exceed cap.
     // 5K input + 5K output = $0.05 + $0.15 = $0.20 → total $1.10 > $1.00.
-    let u2 = usage("test-model", OperationType::DocumentGeneration, 5_000, 5_000);
+    let u2 = usage(
+        "test-model",
+        OperationType::DocumentGeneration,
+        5_000,
+        5_000,
+    );
     svc.record_usage(user_id, &u2).await.unwrap();
 
     let result = svc.pre_invocation_check(user_id).await;
@@ -155,40 +172,64 @@ async fn test_spend_cap_blocks_at_limit() {
 
 #[tokio::test]
 async fn test_rate_limit_hourly() {
-    let Some(pool) = test_pool().await else { return };
-    let Some(any_pool) = test_any_pool().await else { return };
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let Some(any_pool) = test_any_pool().await else {
+        return;
+    };
     let svc = make_svc(any_pool).await;
 
     let email = format!("rl_{}@test.kaya.io", Uuid::new_v4().simple());
     let user_id = insert_user(&pool, &email).await;
 
     // Record 900 tokens (below 1000 hourly limit).
-    let u = usage("cheap-model", OperationType::RetrievalClassification, 600, 300);
+    let u = usage(
+        "cheap-model",
+        OperationType::RetrievalClassification,
+        600,
+        300,
+    );
     svc.record_usage(user_id, &u).await.unwrap();
 
     // Still under limit.
     svc.pre_invocation_check(user_id).await.unwrap();
 
     // Push over the hourly limit.
-    let u2 = usage("cheap-model", OperationType::RetrievalClassification, 600, 300);
+    let u2 = usage(
+        "cheap-model",
+        OperationType::RetrievalClassification,
+        600,
+        300,
+    );
     svc.record_usage(user_id, &u2).await.unwrap(); // total 1800 > 1000
 
     let result = svc.pre_invocation_check(user_id).await;
     assert!(
-        matches!(result, Err(MeteringError::RateLimitExceeded { window: "hourly", .. })),
+        matches!(
+            result,
+            Err(MeteringError::RateLimitExceeded {
+                window: "hourly",
+                ..
+            })
+        ),
         "expected hourly RateLimitExceeded, got {result:?}"
     );
 }
 
 #[tokio::test]
 async fn test_circuit_breaker_trips() {
-    let Some(pool) = test_pool().await else { return };
-    let Some(any_pool) = test_any_pool().await else { return };
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let Some(any_pool) = test_any_pool().await else {
+        return;
+    };
 
     // Low threshold to make it easy to trip.
     let config = MeteringConfig {
         circuit_threshold_usd: 0.001,
-        spend_cap_usd: 100.0,   // high so cap doesn't interfere
+        spend_cap_usd: 100.0, // high so cap doesn't interfere
         hourly_token_limit: 10_000_000,
         daily_token_limit: 100_000_000,
         ..Default::default()
@@ -204,13 +245,17 @@ async fn test_circuit_breaker_trips() {
     svc.record_usage(user_id, &u).await.unwrap();
 
     // Force the circuit to re-evaluate (clear the cached last_check by creating a new service).
-    let svc2 = MeteringService::new(any_pool.clone(), test_pricing(), MeteringConfig {
-        circuit_threshold_usd: 0.001,
-        spend_cap_usd: 100.0,
-        hourly_token_limit: 10_000_000,
-        daily_token_limit: 100_000_000,
-        ..Default::default()
-    });
+    let svc2 = MeteringService::new(
+        any_pool.clone(),
+        test_pricing(),
+        MeteringConfig {
+            circuit_threshold_usd: 0.001,
+            spend_cap_usd: 100.0,
+            hourly_token_limit: 10_000_000,
+            daily_token_limit: 100_000_000,
+            ..Default::default()
+        },
+    );
 
     let email2 = format!("cb2_{}@test.kaya.io", Uuid::new_v4().simple());
     let user_id2 = insert_user(&pool, &email2).await;
@@ -224,28 +269,54 @@ async fn test_circuit_breaker_trips() {
 
 #[tokio::test]
 async fn test_monthly_summary_counts_invocations() {
-    let Some(pool) = test_pool().await else { return };
-    let Some(any_pool) = test_any_pool().await else { return };
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let Some(any_pool) = test_any_pool().await else {
+        return;
+    };
     let svc = make_svc(any_pool).await;
 
     let email = format!("summary_{}@test.kaya.io", Uuid::new_v4().simple());
     let user_id = insert_user(&pool, &email).await;
 
     // 2 EditProposals (count as invocations) + 1 Embedding (does not).
-    svc.record_usage(user_id, &usage("test-model", OperationType::EditProposal, 100, 50)).await.unwrap();
-    svc.record_usage(user_id, &usage("test-model", OperationType::EditProposal, 100, 50)).await.unwrap();
-    svc.record_usage(user_id, &usage("test-model", OperationType::Embedding, 200, 0)).await.unwrap();
+    svc.record_usage(
+        user_id,
+        &usage("test-model", OperationType::EditProposal, 100, 50),
+    )
+    .await
+    .unwrap();
+    svc.record_usage(
+        user_id,
+        &usage("test-model", OperationType::EditProposal, 100, 50),
+    )
+    .await
+    .unwrap();
+    svc.record_usage(
+        user_id,
+        &usage("test-model", OperationType::Embedding, 200, 0),
+    )
+    .await
+    .unwrap();
 
     let summary = svc.monthly_summary(user_id).await.unwrap();
-    assert_eq!(summary.agent_invocations, 2, "only EditProposal ops should count");
+    assert_eq!(
+        summary.agent_invocations, 2,
+        "only EditProposal ops should count"
+    );
     assert_eq!(summary.tokens_in, 400);
     assert_eq!(summary.tokens_out, 100);
 }
 
 #[tokio::test]
 async fn test_overage_calculation() {
-    let Some(pool) = test_pool().await else { return };
-    let Some(any_pool) = test_any_pool().await else { return };
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let Some(any_pool) = test_any_pool().await else {
+        return;
+    };
     let svc = make_svc(any_pool).await; // included_invocations = 3
 
     let email = format!("overage_{}@test.kaya.io", Uuid::new_v4().simple());
@@ -262,12 +333,21 @@ async fn test_overage_calculation() {
     }
 
     let summary = svc.monthly_summary(user_id).await.unwrap();
-    let overage = (summary.agent_invocations - svc.monthly_summary(user_id).await.unwrap().agent_invocations).max(0);
+    let overage = (summary.agent_invocations
+        - svc
+            .monthly_summary(user_id)
+            .await
+            .unwrap()
+            .agent_invocations)
+        .max(0);
 
     // report_period_overage with no price ID should return Ok (log-only mode).
     let result = svc
         .report_period_overage(user_id, summary.period_start)
         .await;
-    assert!(result.is_ok(), "log-only overage reporting must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "log-only overage reporting must succeed: {result:?}"
+    );
     let _ = overage; // silence unused warning
 }

@@ -69,10 +69,7 @@ pub async fn monthly_summary(pool: &AnyPool, user_id: Uuid) -> Result<UsageSumma
         })
         .unwrap_or((0, 0, 0));
 
-    let period_dt = period_start
-        .and_hms_opt(0, 0, 0)
-        .unwrap()
-        .and_utc();
+    let period_dt = period_start.and_hms_opt(0, 0, 0).unwrap().and_utc();
 
     let cost_usd: f64 = sqlx::query_scalar::<_, f64>(
         "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE user_id = ? AND recorded_at >= ?",
@@ -92,7 +89,10 @@ pub async fn monthly_summary(pool: &AnyPool, user_id: Uuid) -> Result<UsageSumma
 }
 
 /// Aggregate stats for the founder admin dashboard.
-pub async fn admin_stats(pool: &AnyPool, circuit_active: bool) -> Result<AdminStats, MeteringError> {
+pub async fn admin_stats(
+    pool: &AnyPool,
+    circuit_active: bool,
+) -> Result<AdminStats, MeteringError> {
     let period_start = current_period_start();
     let period_dt = period_start.and_hms_opt(0, 0, 0).unwrap().and_utc();
     let day_start = chrono::Utc::now()
@@ -119,11 +119,10 @@ pub async fn admin_stats(pool: &AnyPool, circuit_active: bool) -> Result<AdminSt
         .fetch_one(pool)
         .await?;
 
-    let active_subscriptions: i64 = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM subscriptions WHERE status = 'active'",
-    )
-    .fetch_one(pool)
-    .await?;
+    let active_subscriptions: i64 =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM subscriptions WHERE status = 'active'")
+            .fetch_one(pool)
+            .await?;
 
     let top_rows = sqlx::query(
         "SELECT u.id, u.email,

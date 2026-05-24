@@ -104,7 +104,8 @@ impl SessionStorage for MySqlSessionStorage {
         rows.into_iter()
             .map(|row| -> Result<Session, SessionError> {
                 let id_str: String = row.try_get("id").map_err(box_err)?;
-                let id = Uuid::parse_str(&id_str).map_err(|e| SessionError::Backend(Box::new(e)))?;
+                let id =
+                    Uuid::parse_str(&id_str).map_err(|e| SessionError::Backend(Box::new(e)))?;
                 let message_count: i64 = row.try_get("message_count").map_err(box_err)?;
                 let total_input: i32 = row.try_get("total_input_tokens").map_err(box_err)?;
                 let total_output: i32 = row.try_get("total_output_tokens").map_err(box_err)?;
@@ -302,15 +303,13 @@ impl SessionStorage for MySqlSessionStorage {
     }
 
     async fn rename_session(&self, session_id: Uuid, title: String) -> Result<(), SessionError> {
-        sqlx::query(
-            "UPDATE chat_sessions SET title = ? WHERE id = ? AND user_id = ?",
-        )
-        .bind(&title)
-        .bind(session_id.to_string())
-        .bind(self.user_id.to_string())
-        .execute(&self.pool)
-        .await
-        .map_err(box_err)?;
+        sqlx::query("UPDATE chat_sessions SET title = ? WHERE id = ? AND user_id = ?")
+            .bind(&title)
+            .bind(session_id.to_string())
+            .bind(self.user_id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
         Ok(())
     }
 
@@ -333,15 +332,13 @@ impl SessionStorage for MySqlSessionStorage {
     }
 
     async fn pin_session(&self, session_id: Uuid, pinned: bool) -> Result<(), SessionError> {
-        sqlx::query(
-            "UPDATE chat_sessions SET pinned = ? WHERE id = ? AND user_id = ?",
-        )
-        .bind(pinned as i8)
-        .bind(session_id.to_string())
-        .bind(self.user_id.to_string())
-        .execute(&self.pool)
-        .await
-        .map_err(box_err)?;
+        sqlx::query("UPDATE chat_sessions SET pinned = ? WHERE id = ? AND user_id = ?")
+            .bind(pinned as i8)
+            .bind(session_id.to_string())
+            .bind(self.user_id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
         Ok(())
     }
 

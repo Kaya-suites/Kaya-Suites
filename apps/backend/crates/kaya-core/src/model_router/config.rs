@@ -94,6 +94,8 @@ impl RoutingConfig {
             OperationType::EditProposal,
             OperationType::StaleDetection,
             OperationType::Embedding,
+            OperationType::IntentClassification,
+            OperationType::ResearchSynthesis,
         ];
         for op in &required {
             if !self.routing.contains_key(op) {

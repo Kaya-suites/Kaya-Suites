@@ -7,9 +7,7 @@ pub enum MeteringError {
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
 
-    #[error(
-        "monthly spend cap reached: ${spent_usd:.4} of ${cap_usd:.2} used — agent throttled"
-    )]
+    #[error("monthly spend cap reached: ${spent_usd:.4} of ${cap_usd:.2} used — agent throttled")]
     SpendCapReached { spent_usd: f64, cap_usd: f64 },
 
     #[error("{window} token rate limit exceeded: {used} of {limit} tokens used")]
@@ -23,10 +21,7 @@ pub enum MeteringError {
         "global circuit breaker open: aggregate daily spend ${daily_usd:.2} \
          exceeds threshold ${threshold_usd:.2}"
     )]
-    CircuitBreakerOpen {
-        daily_usd: f64,
-        threshold_usd: f64,
-    },
+    CircuitBreakerOpen { daily_usd: f64, threshold_usd: f64 },
 
     #[error("pricing config error: {0}")]
     Config(String),

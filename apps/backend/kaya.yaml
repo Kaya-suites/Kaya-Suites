@@ -8,19 +8,25 @@
 routing:
   retrieval_classification:
     provider: openai
-    model: gpt-4o-mini
+    model: gpt-5.4-mini
   document_generation:
-    provider: anthropic
-    model: claude-sonnet-4-6
+    provider: openai
+    model: gpt-5.4-mini
   edit_proposal:
-    provider: anthropic
-    model: claude-sonnet-4-6
+    provider: openai
+    model: gpt-5.4-mini
   stale_detection:
     provider: openai
-    model: gpt-4o-mini
+    model: gpt-5.4-mini
   embedding:
     provider: openai
     model: text-embedding-3-small
+  intent_classification:
+    provider: openai
+    model: gpt-5.4-mini
+  research_synthesis:
+    provider: openai
+    model: gpt-5.4-mini
 
 providers:
   openai:

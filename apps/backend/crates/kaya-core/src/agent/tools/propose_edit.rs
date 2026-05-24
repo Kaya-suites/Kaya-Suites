@@ -1,11 +1,14 @@
 //! `propose_edit` — apply git-style hunks to produce a paragraph-level [`ProposedEdit::Modify`].
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::agent::{AgentContext, tool::{Tool, ToolOutput}};
-use crate::diff::{apply_hunks, compute_paragraph_diff, Hunk};
+use crate::agent::{
+    AgentContext,
+    tool::{Tool, ToolOutput},
+};
+use crate::diff::{Hunk, apply_hunks, compute_paragraph_diff};
 use crate::edit::{ProposedEdit, ProposedEditKind};
 use crate::error::KayaError;
 
@@ -66,9 +69,9 @@ impl Tool for ProposeEdit {
         let id_str = input["document_id"]
             .as_str()
             .ok_or_else(|| KayaError::Internal("propose_edit: missing 'document_id'".into()))?;
-        let document_id: Uuid = id_str.parse().map_err(|_| {
-            KayaError::Internal(format!("propose_edit: invalid UUID '{id_str}'"))
-        })?;
+        let document_id: Uuid = id_str
+            .parse()
+            .map_err(|_| KayaError::Internal(format!("propose_edit: invalid UUID '{id_str}'")))?;
 
         let raw_hunks = input["hunks"]
             .as_array()

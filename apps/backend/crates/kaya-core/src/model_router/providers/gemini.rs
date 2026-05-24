@@ -1,8 +1,8 @@
 //! Google Gemini provider backed by `rig-core`.
 
 use async_trait::async_trait;
-use futures::stream::BoxStream;
 use futures::StreamExt;
+use futures::stream::BoxStream;
 use rig_core::client::{CompletionClient, EmbeddingsClient};
 use rig_core::completion::{CompletionModel, GetTokenUsage, ToolDefinition as RigToolDefinition};
 use rig_core::embeddings::EmbeddingModel;
@@ -32,8 +32,7 @@ impl GeminiProvider {
     }
 
     fn client(&self) -> Result<gemini::Client, KayaError> {
-        gemini::Client::new(&self.api_key)
-            .map_err(|e| KayaError::Internal(e.to_string()))
+        gemini::Client::new(&self.api_key).map_err(|e| KayaError::Internal(e.to_string()))
     }
 }
 
@@ -127,7 +126,11 @@ impl LlmProvider for GeminiProvider {
             usage: TokenUsage {
                 input_tokens,
                 output_tokens,
-                model: if model_name.is_empty() { request.model } else { model_name },
+                model: if model_name.is_empty() {
+                    request.model
+                } else {
+                    model_name
+                },
                 operation: request.operation,
             },
         })
@@ -177,6 +180,9 @@ impl LlmProvider for GeminiProvider {
     async fn embed(&self, request: EmbeddingRequest) -> Result<EmbeddingResponse, KayaError> {
         let client = self.client()?;
         let model = client.embedding_model(&request.model);
+        // rig's embed_text does not surface usage from the API response,
+        // so we estimate via the standard BPE approximation (~4 chars/token).
+        let estimated_tokens = (request.text.len() as f32 / 4.0).ceil() as u32;
         let embedding = model
             .embed_text(&request.text)
             .await
@@ -185,7 +191,7 @@ impl LlmProvider for GeminiProvider {
         Ok(EmbeddingResponse {
             embedding: embedding.vec.iter().map(|&v| v as f32).collect(),
             usage: TokenUsage {
-                input_tokens: 0,
+                input_tokens: estimated_tokens,
                 output_tokens: 0,
                 model: request.model,
                 operation: OperationType::Embedding,
@@ -193,10 +199,7 @@ impl LlmProvider for GeminiProvider {
         })
     }
 
-    async fn tool_call(
-        &self,
-        request: ToolCallRequest,
-    ) -> Result<ToolCallResponse, KayaError> {
+    async fn tool_call(&self, request: ToolCallRequest) -> Result<ToolCallResponse, KayaError> {
         let client = self.client()?;
         let model = client.completion_model(&request.model);
         let resp = model
@@ -216,7 +219,11 @@ impl LlmProvider for GeminiProvider {
             usage: TokenUsage {
                 input_tokens,
                 output_tokens,
-                model: if model_name.is_empty() { request.model } else { model_name },
+                model: if model_name.is_empty() {
+                    request.model
+                } else {
+                    model_name
+                },
                 operation: request.operation,
             },
         })

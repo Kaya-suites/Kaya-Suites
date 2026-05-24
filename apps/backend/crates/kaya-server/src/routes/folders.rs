@@ -46,7 +46,9 @@ pub async fn list_folders(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    Ok(Json(folders.into_iter().map(FolderResponse::from).collect()))
+    Ok(Json(
+        folders.into_iter().map(FolderResponse::from).collect(),
+    ))
 }
 
 // ── POST /folders ─────────────────────────────────────────────────────────────
@@ -188,9 +190,7 @@ pub struct FolderFilterQuery {
 
 /// Returns `Some(None)` for `?folderId=root`, `Some(Some(uuid))` for a specific
 /// folder, and `None` when the query param is absent (caller should list all).
-pub fn parse_folder_filter(
-    query: &FolderFilterQuery,
-) -> Result<Option<Option<Uuid>>, ApiError> {
+pub fn parse_folder_filter(query: &FolderFilterQuery) -> Result<Option<Option<Uuid>>, ApiError> {
     match query.folder_id.as_deref() {
         None => Ok(None),
         Some("root") => Ok(Some(None)),

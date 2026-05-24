@@ -32,8 +32,9 @@ impl PricingConfig {
     }
 
     pub fn from_yaml_file(path: &Path) -> Result<Self, MeteringError> {
-        let s = std::fs::read_to_string(path)
-            .map_err(|e| MeteringError::Config(format!("could not read {}: {e}", path.display())))?;
+        let s = std::fs::read_to_string(path).map_err(|e| {
+            MeteringError::Config(format!("could not read {}: {e}", path.display()))
+        })?;
         Self::from_yaml_str(&s)
     }
 
@@ -49,8 +50,7 @@ impl PricingConfig {
                 tracing::warn!(model = %model, "unknown model in pricing config — using Opus fallback");
                 (FALLBACK_INPUT_PER_MILLION, FALLBACK_OUTPUT_PER_MILLION)
             });
-        (input_tokens as f64 / 1_000_000.0) * ipm
-            + (output_tokens as f64 / 1_000_000.0) * opm
+        (input_tokens as f64 / 1_000_000.0) * ipm + (output_tokens as f64 / 1_000_000.0) * opm
     }
 }
 

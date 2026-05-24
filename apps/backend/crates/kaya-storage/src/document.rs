@@ -129,7 +129,9 @@ pub fn sha256_hex(data: &[u8]) -> String {
 fn split_frontmatter(raw: &str) -> Option<(&str, &str)> {
     // Strip opening ---
     let raw = raw.strip_prefix("---")?;
-    let raw = raw.strip_prefix('\n').or_else(|| raw.strip_prefix("\r\n"))?;
+    let raw = raw
+        .strip_prefix('\n')
+        .or_else(|| raw.strip_prefix("\r\n"))?;
 
     // Find closing --- on its own line
     // We look for "\n---" followed by \n, \r\n, or end-of-string.
@@ -191,7 +193,10 @@ Body text.
     #[test]
     fn round_trip_parse_serialize() {
         let (doc, generated) = parse_document(SAMPLE).unwrap();
-        assert!(!generated, "id was present in YAML, should not be generated");
+        assert!(
+            !generated,
+            "id was present in YAML, should not be generated"
+        );
         assert_eq!(doc.title, "Test Document");
         assert_eq!(doc.owner.as_deref(), Some("alice"));
         assert_eq!(
@@ -221,8 +226,12 @@ Body text.
 
     #[test]
     fn body_containing_triple_dash_is_not_split() {
-        let raw = "---\nid: 550e8400-e29b-41d4-a716-446655440000\ntitle: T\n---\n\nLine 1\n---\nLine 2\n";
+        let raw =
+            "---\nid: 550e8400-e29b-41d4-a716-446655440000\ntitle: T\n---\n\nLine 1\n---\nLine 2\n";
         let (doc, _) = parse_document(raw).unwrap();
-        assert!(doc.body.contains("---"), "body should preserve inner --- lines");
+        assert!(
+            doc.body.contains("---"),
+            "body should preserve inner --- lines"
+        );
     }
 }

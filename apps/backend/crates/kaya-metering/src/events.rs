@@ -22,6 +22,8 @@ pub fn operation_to_str(op: &OperationType) -> &'static str {
         OperationType::EditProposal => "edit_proposal",
         OperationType::StaleDetection => "stale_detection",
         OperationType::Embedding => "embedding",
+        OperationType::IntentClassification => "intent_classification",
+        OperationType::ResearchSynthesis => "research_synthesis",
     }
 }
 

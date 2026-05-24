@@ -1,8 +1,8 @@
 //! Anthropic provider backed by `rig-core`.
 
 use async_trait::async_trait;
-use futures::stream::BoxStream;
 use futures::StreamExt;
+use futures::stream::BoxStream;
 use rig_core::client::CompletionClient;
 use rig_core::completion::{CompletionModel, GetTokenUsage, ToolDefinition as RigToolDefinition};
 use rig_core::message::AssistantContent;
@@ -31,8 +31,7 @@ impl AnthropicProvider {
     }
 
     fn client(&self) -> Result<anthropic::Client, KayaError> {
-        anthropic::Client::new(&self.api_key)
-            .map_err(|e| KayaError::Internal(e.to_string()))
+        anthropic::Client::new(&self.api_key).map_err(|e| KayaError::Internal(e.to_string()))
     }
 }
 
@@ -181,10 +180,7 @@ impl LlmProvider for AnthropicProvider {
         ))
     }
 
-    async fn tool_call(
-        &self,
-        request: ToolCallRequest,
-    ) -> Result<ToolCallResponse, KayaError> {
+    async fn tool_call(&self, request: ToolCallRequest) -> Result<ToolCallResponse, KayaError> {
         let client = self.client()?;
         let model = client.completion_model(&request.model);
         let resp = model

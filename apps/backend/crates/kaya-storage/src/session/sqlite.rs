@@ -175,9 +175,7 @@ impl SessionStorage for SqliteSessionStorage {
                     citations_json: row.try_get("citations").map_err(box_err)?,
                     created_at: row.try_get("created_at").map_err(box_err)?,
                     input_tokens: row.try_get::<i64, _>("input_tokens").map_err(box_err)? as u32,
-                    output_tokens: row
-                        .try_get::<i64, _>("output_tokens")
-                        .map_err(box_err)? as u32,
+                    output_tokens: row.try_get::<i64, _>("output_tokens").map_err(box_err)? as u32,
                     model: row.try_get("model").map_err(box_err)?,
                 })
             })

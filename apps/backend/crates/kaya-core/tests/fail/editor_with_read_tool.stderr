@@ -1,0 +1,12 @@
+error[E0277]: the trait bound `SearchDocuments: WriteTool` is not satisfied
+ --> tests/fail/editor_with_read_tool.rs:7:9
+  |
+7 |         std::sync::Arc::new(kaya_core::agent::tools::SearchDocuments)
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `WriteTool` is not implemented for `SearchDocuments`
+  |
+  = help: the following other types implement trait `WriteTool`:
+            CreateDocument
+            ProposeEdit
+            UpdateDocument
+            kaya_core::agent::tools::DeleteDocument
+  = note: required for the cast from `Arc<SearchDocuments>` to `Arc<dyn WriteTool>`

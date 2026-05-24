@@ -19,11 +19,17 @@ pub struct ToolOutput {
 
 impl ToolOutput {
     pub fn value(content: Value) -> Self {
-        Self { content, proposed_edit: None }
+        Self {
+            content,
+            proposed_edit: None,
+        }
     }
 
     pub fn with_edit(content: Value, edit: ProposedEdit) -> Self {
-        Self { content, proposed_edit: Some(edit) }
+        Self {
+            content,
+            proposed_edit: Some(edit),
+        }
     }
 }
 
@@ -44,9 +50,21 @@ pub trait Tool: Send + Sync {
     fn schema(&self) -> Value;
 
     /// Execute the tool with `input` (already parsed arguments from the model).
-    async fn invoke(
-        &self,
-        input: Value,
-        ctx: &AgentContext,
-    ) -> Result<ToolOutput, KayaError>;
+    async fn invoke(&self, input: Value, ctx: &AgentContext) -> Result<ToolOutput, KayaError>;
 }
+
+/// Marker trait for tools that only read from the knowledge base.
+/// Implemented by: `SearchDocuments`, `ReadDocument`, `ListDocuments`,
+/// `FindStaleReferences`.
+///
+/// `Researcher` accepts only `Vec<Arc<dyn ReadTool>>` — passing a write tool
+/// is a compile error.
+pub trait ReadTool: Tool {}
+
+/// Marker trait for tools that propose writes to the knowledge base.
+/// Implemented by: `CreateDocument`, `ProposeEdit`, `UpdateDocument`,
+/// `DeleteDocument`.
+///
+/// `Editor` accepts only `Vec<Arc<dyn WriteTool>>` — passing a read tool
+/// is a compile error.
+pub trait WriteTool: Tool {}

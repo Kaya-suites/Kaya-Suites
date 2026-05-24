@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::extract::FromRef;
+use kaya_auth::PasswordAuthService;
 use kaya_core::model_router::ModelRouter;
 use kaya_metering::MeteringService;
 use kaya_server::state::StoredEdit;
-use kaya_auth::PasswordAuthService;
 use sqlx::{AnyPool, MySqlPool, PgPool, SqlitePool};
 use tokio::sync::Mutex;
 use uuid::Uuid;

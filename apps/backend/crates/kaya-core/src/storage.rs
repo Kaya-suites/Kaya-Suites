@@ -129,7 +129,10 @@ pub trait StorageAdapter: Send + Sync {
         folder_id: Option<Uuid>,
     ) -> Result<Vec<Document>, StorageError> {
         let all = self.list_documents().await?;
-        Ok(all.into_iter().filter(|d| d.folder_id == folder_id).collect())
+        Ok(all
+            .into_iter()
+            .filter(|d| d.folder_id == folder_id)
+            .collect())
     }
 
     /// Move a document into a folder (or to root when `folder_id` is `None`).
@@ -217,11 +220,7 @@ pub trait StorageAdapter: Send + Sync {
     ///
     /// `query` is passed directly to FTS5; callers should avoid FTS5 special
     /// characters (`*`, `"`, `^`, `:`) or escape them before calling.
-    async fn search_text(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<ChunkHit>, StorageError>;
+    async fn search_text(&self, query: &str, limit: usize) -> Result<Vec<ChunkHit>, StorageError>;
 
     // ── Embeddings ────────────────────────────────────────────────────────────
 

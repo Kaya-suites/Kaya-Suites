@@ -4,7 +4,10 @@
 //! UUID columns are VARCHAR(36) in the kaya-db schema; bind/decode as strings.
 
 use async_trait::async_trait;
-use kaya_core::session::{EmbeddingModelUsage, MessageRecord, ModelUsage, Session, SessionError, SessionStorage, SessionTokenUsage, UsageSummary};
+use kaya_core::session::{
+    EmbeddingModelUsage, MessageRecord, ModelUsage, Session, SessionError, SessionStorage,
+    SessionTokenUsage, UsageSummary,
+};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -62,8 +65,7 @@ impl SessionStorage for PostgresSessionStorage {
                 let updated_at: chrono::DateTime<chrono::Utc> =
                     row.try_get("updated_at").map_err(box_err)?;
                 let message_count: i32 = row.try_get("message_count").map_err(box_err)?;
-                let total_input_tokens: i32 =
-                    row.try_get("total_input_tokens").map_err(box_err)?;
+                let total_input_tokens: i32 = row.try_get("total_input_tokens").map_err(box_err)?;
                 let total_output_tokens: i32 =
                     row.try_get("total_output_tokens").map_err(box_err)?;
                 let pinned: bool = row.try_get("pinned").map_err(box_err)?;
@@ -128,8 +130,7 @@ impl SessionStorage for PostgresSessionStorage {
                 let id: String = row.try_get("id").map_err(box_err)?;
                 let role: String = row.try_get("role").map_err(box_err)?;
                 let content: String = row.try_get("content").map_err(box_err)?;
-                let citations: serde_json::Value =
-                    row.try_get("citations").map_err(box_err)?;
+                let citations: serde_json::Value = row.try_get("citations").map_err(box_err)?;
                 let created_at: chrono::DateTime<chrono::Utc> =
                     row.try_get("created_at").map_err(box_err)?;
                 let input_tokens: i32 = row.try_get("input_tokens").map_err(box_err)?;
@@ -250,28 +251,24 @@ impl SessionStorage for PostgresSessionStorage {
 
     async fn touch_session(&self, session_id: Uuid) -> Result<(), SessionError> {
         let now = chrono::Utc::now();
-        sqlx::query(
-            "UPDATE chat_sessions SET updated_at = $1 WHERE id = $2 AND user_id = $3",
-        )
-        .bind(now)
-        .bind(session_id.to_string())
-        .bind(self.user_id.to_string())
-        .execute(&self.pool)
-        .await
-        .map_err(box_err)?;
+        sqlx::query("UPDATE chat_sessions SET updated_at = $1 WHERE id = $2 AND user_id = $3")
+            .bind(now)
+            .bind(session_id.to_string())
+            .bind(self.user_id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
         Ok(())
     }
 
     async fn rename_session(&self, session_id: Uuid, title: String) -> Result<(), SessionError> {
-        sqlx::query(
-            "UPDATE chat_sessions SET title = $1 WHERE id = $2 AND user_id = $3",
-        )
-        .bind(&title)
-        .bind(session_id.to_string())
-        .bind(self.user_id.to_string())
-        .execute(&self.pool)
-        .await
-        .map_err(box_err)?;
+        sqlx::query("UPDATE chat_sessions SET title = $1 WHERE id = $2 AND user_id = $3")
+            .bind(&title)
+            .bind(session_id.to_string())
+            .bind(self.user_id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
         Ok(())
     }
 
@@ -294,15 +291,13 @@ impl SessionStorage for PostgresSessionStorage {
     }
 
     async fn pin_session(&self, session_id: Uuid, pinned: bool) -> Result<(), SessionError> {
-        sqlx::query(
-            "UPDATE chat_sessions SET pinned = $1 WHERE id = $2 AND user_id = $3",
-        )
-        .bind(pinned)
-        .bind(session_id.to_string())
-        .bind(self.user_id.to_string())
-        .execute(&self.pool)
-        .await
-        .map_err(box_err)?;
+        sqlx::query("UPDATE chat_sessions SET pinned = $1 WHERE id = $2 AND user_id = $3")
+            .bind(pinned)
+            .bind(session_id.to_string())
+            .bind(self.user_id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
         Ok(())
     }
 
