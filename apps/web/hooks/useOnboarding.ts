@@ -6,7 +6,6 @@ export type OnboardingStep =
   | "add_document"
   | "send_first_message"
   | "approve_first_diff"
-  | "subscribe"
   | "set_api_key";
 
 export type OnboardingTrack = "cloud" | "oss";
@@ -24,7 +23,6 @@ const CLOUD_STEPS: { id: OnboardingStep; label: string }[] = [
   { id: "add_document", label: "Add your first document" },
   { id: "send_first_message", label: "Ask Kaya a question" },
   { id: "approve_first_diff", label: "Approve an AI-proposed edit" },
-  { id: "subscribe", label: "Subscribe to keep going" },
 ];
 
 const OSS_STEPS: { id: OnboardingStep; label: string }[] = [
@@ -58,25 +56,6 @@ export function useOnboarding() {
   useEffect(() => {
     setState(loadState());
   }, []);
-
-  // Cloud: auto-complete subscribe if billing already active
-  useEffect(() => {
-    if (!state || state.track !== "cloud" || state.completed.subscribe) return;
-    fetch("/api/billing/status")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { status?: string } | null) => {
-        if (data?.status === "active") {
-          setState((prev) => {
-            if (!prev) return prev;
-            const next = { ...prev, completed: { ...prev.completed, subscribe: true as const } };
-            persist(next);
-            return next;
-          });
-        }
-      })
-      .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.track]);
 
   const markStepComplete = useCallback((step: OnboardingStep) => {
     setState((prev) => {

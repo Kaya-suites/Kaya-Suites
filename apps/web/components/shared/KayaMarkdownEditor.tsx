@@ -126,6 +126,44 @@ function getTextBlockHtml(block: MarkdownBlock) {
   return "";
 }
 
+function canFocusBlock(block: MarkdownBlock) {
+  return block.type === "paragraph" || block.type === "blockquote" || block.type === "heading";
+}
+
+function isEmptyBlock(block: MarkdownBlock) {
+  switch (block.type) {
+    case "paragraph":
+    case "blockquote":
+    case "heading":
+      return inlineHtmlToMarkdown(block.html).trim() === "";
+    case "list":
+      return block.items.length === 1 && inlineHtmlToMarkdown(block.items[0].html).trim() === "";
+    case "code":
+      return block.code.trim() === "";
+    case "html":
+      return block.source.trim() === "";
+    case "image":
+      return !block.src.trim() && !block.alt.trim() && !block.title.trim();
+    case "table":
+      return block.header.every((cell) => cell.trim() === "") && block.rows.every((row) => row.every((cell) => cell.trim() === ""));
+    case "hr":
+      return false;
+  }
+}
+
+function shouldSplitPasteIntoBlocks(text: string, parsedBlocks: MarkdownBlock[]) {
+  const normalized = text.replace(/\r\n/g, "\n");
+  if (!normalized.trim()) return false;
+
+  if (parsedBlocks.length > 1) return true;
+
+  const [firstBlock] = parsedBlocks;
+  if (!firstBlock) return false;
+  if (firstBlock.type !== "paragraph") return true;
+
+  return /\n\s*\n/.test(normalized) || /^(#{1,6}\s+|>\s?|[-*_]{3,}\s*$|```|(\s*)([-+*]|\d+\.)\s+|!\[[^\]]*]\([^)]+\)|<([a-zA-Z][\w-]*)(\s[^>]*)?>)/m.test(normalized);
+}
+
 async function uploadImageFile(file: File) {
   // TODO: Replace this with the real upload pipeline when storage is finalized.
   return new Promise<string>((resolve, reject) => {
@@ -447,9 +485,45 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
 
   function handlePaste(event: React.ClipboardEvent<HTMLDivElement>) {
     const file = Array.from(event.clipboardData.files).find((item) => item.type.startsWith("image/"));
-    if (!file) return;
+    if (file) {
+      event.preventDefault();
+      void insertImageFromFile(file);
+      return;
+    }
+
+    const text = event.clipboardData.getData("text/plain");
+    if (!text.trim()) return;
+
+    const parsedBlocks = parseMarkdownToBlocks(text).map((block) => normalizeBlockHtml(block));
+    if (!shouldSplitPasteIntoBlocks(text, parsedBlocks)) return;
+
     event.preventDefault();
-    void insertImageFromFile(file);
+
+    const nextActiveBlock = parsedBlocks[0];
+
+    setBlocks((current) => {
+      pushHistory(current);
+      if (current.length === 0) return parsedBlocks;
+
+      const activeIndex = activeBlockId ? current.findIndex((block) => block.id === activeBlockId) : current.length - 1;
+      if (activeIndex === -1) return [...current, ...parsedBlocks];
+
+      const next = [...current];
+      const activeBlock = next[activeIndex];
+
+      if (activeBlock && isEmptyBlock(activeBlock)) {
+        next.splice(activeIndex, 1, ...parsedBlocks);
+        return next;
+      }
+
+      next.splice(activeIndex + 1, 0, ...parsedBlocks);
+      return next;
+    });
+
+    setActiveBlockId(nextActiveBlock.id);
+    if (canFocusBlock(nextActiveBlock)) {
+      focusEditable(nextActiveBlock.id);
+    }
   }
 
   const filteredCommands = slashState

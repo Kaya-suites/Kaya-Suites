@@ -1,0 +1,161 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ChatSession, CitationRef, KayaDocument } from "@/types/chat";
+import { ChatPanel } from "./ChatPanel";
+
+type Props = {
+  document: KayaDocument;
+  onDocumentUpdated: (docId: string) => void | Promise<void>;
+};
+
+async function fetchSessions(): Promise<ChatSession[]> {
+  try {
+    const res = await fetch("/api/sessions");
+    return (await res.json()) as ChatSession[];
+  } catch {
+    return [];
+  }
+}
+
+async function createSession(title = "Document copilot"): Promise<ChatSession | null> {
+  try {
+    const res = await fetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    return (await res.json()) as ChatSession;
+  } catch {
+    return null;
+  }
+}
+
+export function DocumentChatSidebar({ document, onDocumentUpdated }: Props) {
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [loadingSessions, setLoadingSessions] = useState(true);
+  const requestContext = useMemo(
+    () => [
+      "Current document context:",
+      `Document ID: ${document.id}`,
+      `Title: ${document.title}`,
+      `Tags: ${document.tags.length > 0 ? document.tags.join(", ") : "(none)"}`,
+      "Full document body:",
+      document.body,
+    ].join("\n"),
+    [document.body, document.id, document.tags, document.title],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSessions() {
+      const existing = await fetchSessions();
+      if (cancelled) return;
+
+      if (existing.length > 0) {
+        setSessions(existing);
+        setSessionId((current) => current ?? existing[0].id);
+        setLoadingSessions(false);
+        return;
+      }
+
+      const created = await createSession(`Editing ${document.title}`);
+      if (cancelled) return;
+
+      if (created) {
+        setSessions([created]);
+        setSessionId(created.id);
+      }
+      setLoadingSessions(false);
+    }
+
+    void loadSessions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [document.title]);
+
+  const handleNewSession = useCallback(async () => {
+    const created = await createSession(`Editing ${document.title}`);
+    if (!created) return;
+    setSessions((prev) => [created, ...prev]);
+    setSessionId(created.id);
+  }, [document.title]);
+
+  const handleSessionRenamed = useCallback((renamedId: string, title: string) => {
+    setSessions((prev) => prev.map((session) => (
+      session.id === renamedId ? { ...session, title } : session
+    )));
+  }, []);
+
+  const handleCitationClick = useCallback((ref: CitationRef) => {
+    if (ref.docId === document.id) return;
+    window.open(`/documents/${ref.docId}`, "_blank", "noopener,noreferrer");
+  }, [document.id]);
+
+  return (
+    <aside className="flex h-[42vh] min-h-[320px] w-full flex-col border-t-2 border-black bg-[var(--color-surface)] lg:h-full lg:min-h-0 lg:w-[420px] lg:border-l-2 lg:border-t-0">
+      <div className="border-b-2 border-black bg-[var(--color-background)] px-5 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--color-muted)] font-mono">
+              AI Sidepanel
+            </p>
+            <h2 className="mt-1 truncate text-sm font-bold uppercase tracking-wide text-black font-mono">
+              Chat While Editing
+            </h2>
+          </div>
+          <button
+            onClick={handleNewSession}
+            className="shrink-0 border-2 border-black bg-[var(--color-accent)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white font-mono"
+            style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
+          >
+            New Chat
+          </button>
+        </div>
+
+        <p className="mt-3 text-xs leading-relaxed text-black font-mono">
+          Working in <span className="font-bold">{document.title}</span>. Ask Kaya to rewrite sections, answer questions, or propose document edits without leaving this page.
+        </p>
+
+        <p className="mt-2 text-[10px] uppercase tracking-wider text-[var(--color-muted)] font-mono break-all">
+          Document ID: <span className="font-bold text-black">{document.id}</span>
+        </p>
+
+        <div className="mt-3">
+          <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)] font-mono">
+            Conversation
+          </label>
+          <select
+            value={sessionId ?? ""}
+            onChange={(e) => setSessionId(e.target.value)}
+            disabled={loadingSessions || sessions.length === 0}
+            className="w-full border-2 border-black bg-white px-3 py-2 text-xs font-mono text-black outline-none"
+            style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
+          >
+            {sessions.length === 0 && <option value="">Loading conversations…</option>}
+            {sessions.map((session) => (
+              <option key={session.id} value={session.id}>
+                {session.title}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1">
+        <ChatPanel
+          key={sessionId ?? "empty-session"}
+          sessionId={sessionId}
+          onCitationClick={handleCitationClick}
+          onDocumentUpdated={onDocumentUpdated}
+          onSessionRenamed={handleSessionRenamed}
+          requestContext={requestContext}
+        />
+      </div>
+    </aside>
+  );
+}
