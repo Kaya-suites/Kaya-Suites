@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
@@ -44,6 +45,14 @@ async function logout() {
 
 export function AppNav() {
   const pathname = usePathname();
+  const [isSuperadmin, setIsSuperadmin] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_URL}/auth/me`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((u) => { if (u?.is_superadmin) setIsSuperadmin(true); })
+      .catch(() => {});
+  }, []);
 
   return (
     <aside
@@ -78,6 +87,29 @@ export function AppNav() {
             </Link>
           );
         })}
+
+        {isSuperadmin && (
+          <>
+            <div className="mx-2 my-2 border-t border-black/20" />
+            <Link
+              href="/admin"
+              className={`flex items-center gap-2.5 px-2 py-2 text-xs font-bold uppercase tracking-wider transition-all border-2 ${
+                pathname === "/admin" || pathname.startsWith("/admin/")
+                  ? "bg-[var(--color-accent)] text-white border-black"
+                  : "border-transparent text-black hover:border-black hover:bg-[var(--color-muted-bg)]"
+              }`}
+              style={pathname.startsWith("/admin") ? { boxShadow: "var(--shadow-button)" } : {}}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+              </svg>
+              Admin
+            </Link>
+          </>
+        )}
       </nav>
 
       <div className="border-t-2 border-black p-2">

@@ -41,6 +41,7 @@ struct UserResponse {
     user_id: String,
     email: String,
     username: Option<String>,
+    is_superadmin: bool,
 }
 
 async fn register(
@@ -57,6 +58,7 @@ async fn register(
                 user_id: user.id.to_string(),
                 email: user.email.clone(),
                 username: user.username.clone(),
+                is_superadmin: user.is_superadmin,
             };
             if let Err(e) = auth.login(&user).await {
                 tracing::error!(error = %e, "session login failed after register");
@@ -87,13 +89,13 @@ struct LoginBody {
     password: String,
 }
 
-async fn login(
-    mut auth: AuthSession<KayaAuthBackend>,
-    Json(body): Json<LoginBody>,
-) -> Response {
+async fn login(mut auth: AuthSession<KayaAuthBackend>, Json(body): Json<LoginBody>) -> Response {
     use kaya_auth::PasswordCredentials;
 
-    let creds = PasswordCredentials { email: body.email, password: body.password };
+    let creds = PasswordCredentials {
+        email: body.email,
+        password: body.password,
+    };
 
     match auth.authenticate(creds).await {
         Ok(Some(user)) => {
@@ -101,6 +103,7 @@ async fn login(
                 user_id: user.id.to_string(),
                 email: user.email.clone(),
                 username: user.username.clone(),
+                is_superadmin: user.is_superadmin,
             };
             if let Err(e) = auth.login(&user).await {
                 tracing::error!(error = %e, "session login failed");
@@ -126,6 +129,7 @@ async fn me(auth: AuthSession<KayaAuthBackend>) -> Response {
             user_id: user.id.to_string(),
             email: user.email,
             username: user.username,
+            is_superadmin: user.is_superadmin,
         })
         .into_response(),
         None => StatusCode::UNAUTHORIZED.into_response(),
