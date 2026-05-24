@@ -7,14 +7,18 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use sqlx::{
-    Row,
-    SqlitePool,
+    Row, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
 };
 use std::path::Path;
 use uuid::Uuid;
 
-use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, Folder, StorageAdapter, StorageError};
+use kaya_core::storage::{
+    Chunk, ChunkHit, Document, Embedding, Folder, StorageAdapter, StorageError,
+};
+
+pub static SQLITE_MIGRATOR: sqlx::migrate::Migrator =
+    sqlx::migrate!("./migrations/sqlite");
 
 use crate::document::sha256_hex;
 
@@ -49,7 +53,9 @@ impl SqliteAdapter {
 
         run_migrations(&pool).await?;
 
-        Ok(Self { inner: Arc::new(Inner { pool }) })
+        Ok(Self {
+            inner: Arc::new(Inner { pool }),
+        })
     }
 
     /// Construct from an existing `SqlitePool`.
@@ -57,7 +63,9 @@ impl SqliteAdapter {
     /// Migrations are run immediately (idempotent).
     pub async fn from_pool(pool: SqlitePool) -> Result<Self, StorageError> {
         run_migrations(&pool).await?;
-        Ok(Self { inner: Arc::new(Inner { pool }) })
+        Ok(Self {
+            inner: Arc::new(Inner { pool }),
+        })
     }
 
     /// Run SQLite storage migrations on an existing pool.
@@ -112,13 +120,11 @@ impl StorageAdapter for SqliteAdapter {
 
     async fn delete_document(&self, id: Uuid) -> Result<(), StorageError> {
         let id_str = id.to_string();
-        let exists = sqlx::query(
-            "SELECT 1 FROM documents WHERE id = ? AND deleted_at IS NULL",
-        )
-        .bind(&id_str)
-        .fetch_optional(&self.inner.pool)
-        .await
-        .map_err(box_err)?;
+        let exists = sqlx::query("SELECT 1 FROM documents WHERE id = ? AND deleted_at IS NULL")
+            .bind(&id_str)
+            .fetch_optional(&self.inner.pool)
+            .await
+            .map_err(box_err)?;
 
         if exists.is_some() {
             let now = chrono::Utc::now().to_rfc3339();
@@ -171,16 +177,14 @@ impl StorageAdapter for SqliteAdapter {
         folder_id: Option<Uuid>,
     ) -> Result<Vec<Document>, StorageError> {
         let rows = match folder_id {
-            None => {
-                sqlx::query(
-                    "SELECT frontmatter_json, body, folder_id \
+            None => sqlx::query(
+                "SELECT frontmatter_json, body, folder_id \
                      FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL \
                      ORDER BY updated_at DESC",
-                )
-                .fetch_all(&self.inner.pool)
-                .await
-                .map_err(box_err)?
-            }
+            )
+            .fetch_all(&self.inner.pool)
+            .await
+            .map_err(box_err)?,
             Some(fid) => {
                 let fid_str = fid.to_string();
                 sqlx::query(
@@ -258,7 +262,13 @@ impl StorageAdapter for SqliteAdapter {
         .await
         .map_err(box_err)?;
 
-        Ok(Folder { id, name: name.to_owned(), parent_id, created_at: now.clone(), updated_at: now })
+        Ok(Folder {
+            id,
+            name: name.to_owned(),
+            parent_id,
+            created_at: now.clone(),
+            updated_at: now,
+        })
     }
 
     async fn get_folder(&self, id: Uuid) -> Result<Folder, StorageError> {
@@ -283,23 +293,23 @@ impl StorageAdapter for SqliteAdapter {
         .await
         .map_err(box_err)?;
 
-        rows.iter().map(|r| row_to_folder(r).map_err(box_err)).collect()
+        rows.iter()
+            .map(|r| row_to_folder(r).map_err(box_err))
+            .collect()
     }
 
     async fn rename_folder(&self, id: Uuid, name: &str) -> Result<Folder, StorageError> {
         let id_str = id.to_string();
         let now = chrono::Utc::now().to_rfc3339();
 
-        let affected = sqlx::query(
-            "UPDATE folders SET name = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(name)
-        .bind(&now)
-        .bind(&id_str)
-        .execute(&self.inner.pool)
-        .await
-        .map_err(box_err)?
-        .rows_affected();
+        let affected = sqlx::query("UPDATE folders SET name = ?, updated_at = ? WHERE id = ?")
+            .bind(name)
+            .bind(&now)
+            .bind(&id_str)
+            .execute(&self.inner.pool)
+            .await
+            .map_err(box_err)?
+            .rows_affected();
 
         if affected == 0 {
             return Err(StorageError::FolderNotFound(id));
@@ -317,16 +327,14 @@ impl StorageAdapter for SqliteAdapter {
         let parent_str = new_parent_id.map(|p| p.to_string());
         let now = chrono::Utc::now().to_rfc3339();
 
-        let affected = sqlx::query(
-            "UPDATE folders SET parent_id = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(&parent_str)
-        .bind(&now)
-        .bind(&id_str)
-        .execute(&self.inner.pool)
-        .await
-        .map_err(box_err)?
-        .rows_affected();
+        let affected = sqlx::query("UPDATE folders SET parent_id = ?, updated_at = ? WHERE id = ?")
+            .bind(&parent_str)
+            .bind(&now)
+            .bind(&id_str)
+            .execute(&self.inner.pool)
+            .await
+            .map_err(box_err)?
+            .rows_affected();
 
         if affected == 0 {
             return Err(StorageError::FolderNotFound(id));
@@ -340,14 +348,12 @@ impl StorageAdapter for SqliteAdapter {
         let now = chrono::Utc::now().to_rfc3339();
 
         // Move all documents in this folder to root.
-        sqlx::query(
-            "UPDATE documents SET folder_id = NULL, updated_at = ? WHERE folder_id = ?",
-        )
-        .bind(&now)
-        .bind(&id_str)
-        .execute(&self.inner.pool)
-        .await
-        .map_err(box_err)?;
+        sqlx::query("UPDATE documents SET folder_id = NULL, updated_at = ? WHERE folder_id = ?")
+            .bind(&now)
+            .bind(&id_str)
+            .execute(&self.inner.pool)
+            .await
+            .map_err(box_err)?;
 
         // Re-parent any direct child folders to this folder's parent.
         sqlx::query(
@@ -436,13 +442,12 @@ impl StorageAdapter for SqliteAdapter {
         document_id: Uuid,
     ) -> Result<Vec<(String, String)>, StorageError> {
         let doc_id = document_id.to_string();
-        let rows = sqlx::query(
-            "SELECT paragraph_id, content_hash FROM chunks WHERE document_id = ?",
-        )
-        .bind(&doc_id)
-        .fetch_all(&self.inner.pool)
-        .await
-        .map_err(box_err)?;
+        let rows =
+            sqlx::query("SELECT paragraph_id, content_hash FROM chunks WHERE document_id = ?")
+                .bind(&doc_id)
+                .fetch_all(&self.inner.pool)
+                .await
+                .map_err(box_err)?;
 
         rows.into_iter()
             .map(|row| {
@@ -453,11 +458,7 @@ impl StorageAdapter for SqliteAdapter {
             .collect()
     }
 
-    async fn search_text(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<ChunkHit>, StorageError> {
+    async fn search_text(&self, query: &str, limit: usize) -> Result<Vec<ChunkHit>, StorageError> {
         if query.trim().is_empty() {
             return Ok(vec![]);
         }
@@ -522,14 +523,12 @@ impl StorageAdapter for SqliteAdapter {
         }
         let doc_id = document_id.to_string();
         for para_id in paragraph_ids {
-            sqlx::query(
-                "DELETE FROM chunk_embeddings WHERE document_id = ? AND paragraph_id = ?",
-            )
-            .bind(&doc_id)
-            .bind(para_id)
-            .execute(&self.inner.pool)
-            .await
-            .map_err(box_err)?;
+            sqlx::query("DELETE FROM chunk_embeddings WHERE document_id = ? AND paragraph_id = ?")
+                .bind(&doc_id)
+                .bind(para_id)
+                .execute(&self.inner.pool)
+                .await
+                .map_err(box_err)?;
         }
         Ok(())
     }
@@ -580,9 +579,7 @@ impl StorageAdapter for SqliteAdapter {
             })
             .collect();
 
-        scored.sort_unstable_by(|a, b| {
-            b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        scored.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
         Ok(scored.into_iter().take(limit).map(|(_, hit)| hit).collect())
     }
@@ -777,7 +774,11 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
     let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if na == 0.0 || nb == 0.0 { 0.0 } else { dot / (na * nb) }
+    if na == 0.0 || nb == 0.0 {
+        0.0
+    } else {
+        dot / (na * nb)
+    }
 }
 
 // ── Row helpers ───────────────────────────────────────────────────────────────

@@ -105,8 +105,11 @@ pub async fn index_document_chunks(
     let new_chunks = chunk_document(doc);
 
     // Existing paragraph_id → content_hash map for this document.
-    let stored: HashMap<String, String> =
-        storage.get_chunk_hashes(doc.id).await?.into_iter().collect();
+    let stored: HashMap<String, String> = storage
+        .get_chunk_hashes(doc.id)
+        .await?
+        .into_iter()
+        .collect();
 
     // Paragraph IDs that will exist after this re-index.
     let new_ids: std::collections::HashSet<String> =
@@ -137,7 +140,9 @@ pub async fn index_document_chunks(
     for chunk in &to_embed {
         let resp = router.embed(&chunk.content).await?;
         if let Some(s) = sessions {
-            let _ = s.save_embedding_call(&resp.usage.model, resp.usage.input_tokens).await;
+            let _ = s
+                .save_embedding_call(&resp.usage.model, resp.usage.input_tokens)
+                .await;
         }
         new_embeddings.push(Embedding {
             document_id: chunk.document_id,
@@ -182,12 +187,19 @@ pub async fn retrieve(
     k: usize,
     storage: &Arc<dyn StorageAdapter>,
     router: &ModelRouter,
+    sessions: Option<&dyn SessionStorage>,
 ) -> Result<Vec<RetrievalResult>, KayaError> {
     if query.trim().is_empty() || k == 0 {
         return Ok(vec![]);
     }
 
-    let query_vec = router.embed(query).await?.embedding;
+    let emb_resp = router.embed(query).await?;
+    if let Some(s) = sessions {
+        let _ = s
+            .save_embedding_call(&emb_resp.usage.model, emb_resp.usage.input_tokens)
+            .await;
+    }
+    let query_vec = emb_resp.embedding;
 
     // Over-fetch so RRF has enough candidates from both lists.
     let search_limit = (k * 3).max(20);
@@ -281,6 +293,7 @@ mod tests {
             tags: vec![],
             related_docs: vec![],
             body: body.to_string(),
+            folder_id: None,
         }
     }
 
@@ -348,7 +361,10 @@ mod tests {
         let bm25_hits = vec![shared.clone(), only_bm25.clone()];
 
         let results = reciprocal_rank_fusion(&vector_hits, &bm25_hits, 60.0, 3);
-        assert_eq!(results[0].paragraph_id, "shared", "shared item must rank first");
+        assert_eq!(
+            results[0].paragraph_id, "shared",
+            "shared item must rank first"
+        );
         assert!(results[0].score > results[1].score);
     }
 }

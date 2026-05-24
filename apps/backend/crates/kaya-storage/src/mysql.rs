@@ -14,8 +14,13 @@ use async_trait::async_trait;
 use sqlx::{MySqlPool, Row};
 use uuid::Uuid;
 
-use kaya_core::storage::{Chunk, ChunkHit, Document, Embedding, Folder, StorageAdapter, StorageError};
 use kaya_core::UserContext;
+use kaya_core::storage::{
+    Chunk, ChunkHit, Document, Embedding, Folder, StorageAdapter, StorageError,
+};
+
+pub static MYSQL_MIGRATOR: sqlx::migrate::Migrator =
+    sqlx::migrate!("./migrations/mysql");
 
 use crate::document::sha256_hex;
 
@@ -69,11 +74,9 @@ impl MySqlAdapter {
             .await;
 
         // Add folder_id column (no-op if already present).
-        let _ = sqlx::query(
-            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS folder_id VARCHAR(36)",
-        )
-        .execute(pool)
-        .await;
+        let _ = sqlx::query("ALTER TABLE documents ADD COLUMN IF NOT EXISTS folder_id VARCHAR(36)")
+            .execute(pool)
+            .await;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS chunks (
@@ -209,25 +212,21 @@ impl StorageAdapter for MySqlAdapter {
 
         if exists.is_some() {
             let now = chrono::Utc::now().to_rfc3339();
-            sqlx::query(
-                "UPDATE documents SET deleted_at = ? WHERE id = ? AND user_id = ?",
-            )
-            .bind(&now)
-            .bind(&id_str)
-            .bind(self.user_id().to_string())
-            .execute(&self.inner.pool)
-            .await
-            .map_err(box_err)?;
+            sqlx::query("UPDATE documents SET deleted_at = ? WHERE id = ? AND user_id = ?")
+                .bind(&now)
+                .bind(&id_str)
+                .bind(self.user_id().to_string())
+                .execute(&self.inner.pool)
+                .await
+                .map_err(box_err)?;
 
             self.delete_chunks_for_document(id).await?;
-            sqlx::query(
-                "DELETE FROM chunk_embeddings WHERE document_id = ? AND user_id = ?",
-            )
-            .bind(&id_str)
-            .bind(self.user_id().to_string())
-            .execute(&self.inner.pool)
-            .await
-            .map_err(box_err)?;
+            sqlx::query("DELETE FROM chunk_embeddings WHERE document_id = ? AND user_id = ?")
+                .bind(&id_str)
+                .bind(self.user_id().to_string())
+                .execute(&self.inner.pool)
+                .await
+                .map_err(box_err)?;
         }
 
         Ok(())
@@ -266,29 +265,25 @@ impl StorageAdapter for MySqlAdapter {
         folder_id: Option<Uuid>,
     ) -> Result<Vec<Document>, StorageError> {
         let rows = match folder_id {
-            None => {
-                sqlx::query(
-                    "SELECT frontmatter_json, body, folder_id FROM documents
+            None => sqlx::query(
+                "SELECT frontmatter_json, body, folder_id FROM documents
                      WHERE user_id = ? AND deleted_at IS NULL AND folder_id IS NULL
                      ORDER BY updated_at DESC",
-                )
-                .bind(self.user_id().to_string())
-                .fetch_all(&self.inner.pool)
-                .await
-                .map_err(box_err)?
-            }
-            Some(fid) => {
-                sqlx::query(
-                    "SELECT frontmatter_json, body, folder_id FROM documents
+            )
+            .bind(self.user_id().to_string())
+            .fetch_all(&self.inner.pool)
+            .await
+            .map_err(box_err)?,
+            Some(fid) => sqlx::query(
+                "SELECT frontmatter_json, body, folder_id FROM documents
                      WHERE user_id = ? AND deleted_at IS NULL AND folder_id = ?
                      ORDER BY updated_at DESC",
-                )
-                .bind(self.user_id().to_string())
-                .bind(fid.to_string())
-                .fetch_all(&self.inner.pool)
-                .await
-                .map_err(box_err)?
-            }
+            )
+            .bind(self.user_id().to_string())
+            .bind(fid.to_string())
+            .fetch_all(&self.inner.pool)
+            .await
+            .map_err(box_err)?,
         };
 
         let mut docs = Vec::with_capacity(rows.len());
@@ -389,22 +384,23 @@ impl StorageAdapter for MySqlAdapter {
         .await
         .map_err(box_err)?;
 
-        rows.iter().map(|r| mysql_row_to_folder(r).map_err(box_err)).collect()
+        rows.iter()
+            .map(|r| mysql_row_to_folder(r).map_err(box_err))
+            .collect()
     }
 
     async fn rename_folder(&self, id: Uuid, name: &str) -> Result<Folder, StorageError> {
         let now = chrono::Utc::now().to_rfc3339();
-        let affected = sqlx::query(
-            "UPDATE folders SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-        )
-        .bind(name)
-        .bind(&now)
-        .bind(id.to_string())
-        .bind(self.user_id().to_string())
-        .execute(&self.inner.pool)
-        .await
-        .map_err(box_err)?
-        .rows_affected();
+        let affected =
+            sqlx::query("UPDATE folders SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?")
+                .bind(name)
+                .bind(&now)
+                .bind(id.to_string())
+                .bind(self.user_id().to_string())
+                .execute(&self.inner.pool)
+                .await
+                .map_err(box_err)?
+                .rows_affected();
 
         if affected == 0 {
             return Err(StorageError::FolderNotFound(id));
@@ -469,15 +465,13 @@ impl StorageAdapter for MySqlAdapter {
         .await
         .map_err(box_err)?;
 
-        let affected = sqlx::query(
-            "DELETE FROM folders WHERE id = ? AND user_id = ?",
-        )
-        .bind(&id_str)
-        .bind(&uid_str)
-        .execute(&self.inner.pool)
-        .await
-        .map_err(box_err)?
-        .rows_affected();
+        let affected = sqlx::query("DELETE FROM folders WHERE id = ? AND user_id = ?")
+            .bind(&id_str)
+            .bind(&uid_str)
+            .execute(&self.inner.pool)
+            .await
+            .map_err(box_err)?
+            .rows_affected();
 
         if affected == 0 {
             return Err(StorageError::FolderNotFound(id));
@@ -511,14 +505,12 @@ impl StorageAdapter for MySqlAdapter {
     }
 
     async fn delete_chunks_for_document(&self, document_id: Uuid) -> Result<(), StorageError> {
-        sqlx::query(
-            "DELETE FROM chunks WHERE user_id = ? AND document_id = ?",
-        )
-        .bind(self.user_id().to_string())
-        .bind(document_id.to_string())
-        .execute(&self.inner.pool)
-        .await
-        .map_err(box_err)?;
+        sqlx::query("DELETE FROM chunks WHERE user_id = ? AND document_id = ?")
+            .bind(self.user_id().to_string())
+            .bind(document_id.to_string())
+            .execute(&self.inner.pool)
+            .await
+            .map_err(box_err)?;
         Ok(())
     }
 
@@ -546,11 +538,7 @@ impl StorageAdapter for MySqlAdapter {
     }
 
     /// Full-text search via LIKE (V1 — no FTS index required).
-    async fn search_text(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<ChunkHit>, StorageError> {
+    async fn search_text(&self, query: &str, limit: usize) -> Result<Vec<ChunkHit>, StorageError> {
         if query.trim().is_empty() {
             return Ok(vec![]);
         }
@@ -679,9 +667,7 @@ impl StorageAdapter for MySqlAdapter {
             })
             .collect();
 
-        scored.sort_unstable_by(|a, b| {
-            b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        scored.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
         Ok(scored.into_iter().take(limit).map(|(_, hit)| hit).collect())
     }
@@ -726,7 +712,11 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
     let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if na == 0.0 || nb == 0.0 { 0.0 } else { dot / (na * nb) }
+    if na == 0.0 || nb == 0.0 {
+        0.0
+    } else {
+        dot / (na * nb)
+    }
 }
 
 // ── Error helpers ─────────────────────────────────────────────────────────────

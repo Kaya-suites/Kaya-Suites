@@ -25,6 +25,8 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+
 // ── Adapter ───────────────────────────────────────────────────────────────────
 
 /// Postgres-backed [`StorageAdapter`] implementation.

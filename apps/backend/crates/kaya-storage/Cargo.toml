@@ -18,7 +18,7 @@ serde_json  = { workspace = true }
 chrono      = { workspace = true }
 tokio       = { workspace = true }
 anyhow      = { workspace = true }
-sqlx        = { version = "0.8", features = ["sqlite", "mysql", "runtime-tokio", "uuid", "chrono", "migrate", "json"] }
+sqlx        = { version = "0.8", features = ["sqlite", "mysql", "runtime-tokio", "uuid", "chrono", "migrate", "json", "macros"] }
 serde_yaml  = "0.9"
 sha2        = "0.10"
 pgvector    = { version = "0.4", features = ["sqlx"], optional = true }

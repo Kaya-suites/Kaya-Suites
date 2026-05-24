@@ -1,32 +1,21 @@
-// Integration tests for PostgresAdapter.
+// Integration tests for MySqlAdapter.
 //
-// These tests require a Postgres instance with pgvector installed.
+// These tests require a MySQL (or MariaDB) instance.
 // Set DATABASE_URL before running:
 //
-//   export DATABASE_URL=postgres://user:pass@host/db
-//   cargo test -p kaya-storage --features postgres
+//   export DATABASE_URL=mysql://user:pass@host/db
+//   cargo test -p kaya-storage mysql_
 //
 // sqlx::test creates a temporary database per test, applies all migrations via
-// POSTGRES_MIGRATOR, and drops the database when the test completes.
-
-#![cfg(feature = "postgres")]
+// MYSQL_MIGRATOR, and drops the database when the test completes.
 
 use kaya_core::UserContext;
 use kaya_core::storage::{Chunk, Document, Embedding, StorageAdapter, StorageError};
-use kaya_storage::{POSTGRES_MIGRATOR, PostgresAdapter};
-use sqlx::PgPool;
+use kaya_storage::{MySqlAdapter, MYSQL_MIGRATOR};
+use sqlx::MySqlPool;
 use uuid::Uuid;
 
-// ── Test helpers ──────────────────────────────────────────────────────────────
-
-async fn create_test_user(pool: &PgPool, user_id: Uuid) {
-    sqlx::query("INSERT INTO users (id, email) VALUES ($1, $2)")
-        .bind(user_id)
-        .bind(format!("{user_id}@test.example"))
-        .execute(pool)
-        .await
-        .expect("insert test user");
-}
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn make_doc() -> Document {
     Document {
@@ -37,6 +26,7 @@ fn make_doc() -> Document {
         tags: vec!["rust".to_string(), "test".to_string()],
         related_docs: vec![],
         body: "First paragraph.\n\nSecond paragraph.".to_string(),
+        folder_id: None,
     }
 }
 
@@ -50,16 +40,14 @@ fn make_user_ctx(user_id: Uuid) -> UserContext {
 // ── Document isolation ────────────────────────────────────────────────────────
 
 /// FR-4 / NFR §6.3: User A writes a document; User B's adapter cannot see it.
-#[ignore = "requires DATABASE_URL pointing to a Postgres instance with pgvector"]
-#[sqlx::test(migrator = "POSTGRES_MIGRATOR")]
-async fn user_b_cannot_read_user_a_document(pool: PgPool) {
+#[ignore = "requires DATABASE_URL pointing to a MySQL instance"]
+#[sqlx::test(migrator = "MYSQL_MIGRATOR")]
+async fn user_b_cannot_read_user_a_document(pool: MySqlPool) {
     let uid_a = Uuid::new_v4();
     let uid_b = Uuid::new_v4();
-    create_test_user(&pool, uid_a).await;
-    create_test_user(&pool, uid_b).await;
 
-    let adapter_a = PostgresAdapter::new(pool.clone(), make_user_ctx(uid_a));
-    let adapter_b = PostgresAdapter::new(pool.clone(), make_user_ctx(uid_b));
+    let adapter_a = MySqlAdapter::new(pool.clone(), make_user_ctx(uid_a));
+    let adapter_b = MySqlAdapter::new(pool.clone(), make_user_ctx(uid_b));
 
     let doc = make_doc();
     adapter_a.save_document(&doc).await.expect("save by user A");
@@ -72,16 +60,14 @@ async fn user_b_cannot_read_user_a_document(pool: PgPool) {
 }
 
 /// User B's list_documents must not contain any of User A's documents.
-#[ignore = "requires DATABASE_URL pointing to a Postgres instance with pgvector"]
-#[sqlx::test(migrator = "POSTGRES_MIGRATOR")]
-async fn list_documents_is_scoped_to_user(pool: PgPool) {
+#[ignore = "requires DATABASE_URL pointing to a MySQL instance"]
+#[sqlx::test(migrator = "MYSQL_MIGRATOR")]
+async fn list_documents_is_scoped_to_user(pool: MySqlPool) {
     let uid_a = Uuid::new_v4();
     let uid_b = Uuid::new_v4();
-    create_test_user(&pool, uid_a).await;
-    create_test_user(&pool, uid_b).await;
 
-    let adapter_a = PostgresAdapter::new(pool.clone(), make_user_ctx(uid_a));
-    let adapter_b = PostgresAdapter::new(pool.clone(), make_user_ctx(uid_b));
+    let adapter_a = MySqlAdapter::new(pool.clone(), make_user_ctx(uid_a));
+    let adapter_b = MySqlAdapter::new(pool.clone(), make_user_ctx(uid_b));
 
     let doc_a1 = make_doc();
     let doc_a2 = make_doc();
@@ -96,12 +82,11 @@ async fn list_documents_is_scoped_to_user(pool: PgPool) {
 }
 
 /// delete_document soft-deletes and makes the document invisible to list/get.
-#[ignore = "requires DATABASE_URL pointing to a Postgres instance with pgvector"]
-#[sqlx::test(migrator = "POSTGRES_MIGRATOR")]
-async fn delete_document_hides_from_owner(pool: PgPool) {
+#[ignore = "requires DATABASE_URL pointing to a MySQL instance"]
+#[sqlx::test(migrator = "MYSQL_MIGRATOR")]
+async fn delete_document_hides_from_owner(pool: MySqlPool) {
     let uid = Uuid::new_v4();
-    create_test_user(&pool, uid).await;
-    let adapter = PostgresAdapter::new(pool, make_user_ctx(uid));
+    let adapter = MySqlAdapter::new(pool, make_user_ctx(uid));
 
     let doc = make_doc();
     adapter.save_document(&doc).await.unwrap();
@@ -119,17 +104,15 @@ async fn delete_document_hides_from_owner(pool: PgPool) {
 
 // ── Chunk and FTS isolation ───────────────────────────────────────────────────
 
-/// save_chunk / search_text results are isolated per user.
-#[ignore = "requires DATABASE_URL pointing to a Postgres instance with pgvector"]
-#[sqlx::test(migrator = "POSTGRES_MIGRATOR")]
-async fn fts_search_is_scoped_to_user(pool: PgPool) {
+/// search_text (LIKE) results are isolated per user.
+#[ignore = "requires DATABASE_URL pointing to a MySQL instance"]
+#[sqlx::test(migrator = "MYSQL_MIGRATOR")]
+async fn fts_search_is_scoped_to_user(pool: MySqlPool) {
     let uid_a = Uuid::new_v4();
     let uid_b = Uuid::new_v4();
-    create_test_user(&pool, uid_a).await;
-    create_test_user(&pool, uid_b).await;
 
-    let adapter_a = PostgresAdapter::new(pool.clone(), make_user_ctx(uid_a));
-    let adapter_b = PostgresAdapter::new(pool.clone(), make_user_ctx(uid_b));
+    let adapter_a = MySqlAdapter::new(pool.clone(), make_user_ctx(uid_a));
+    let adapter_b = MySqlAdapter::new(pool.clone(), make_user_ctx(uid_b));
 
     let doc = make_doc();
     adapter_a.save_document(&doc).await.unwrap();
@@ -137,19 +120,19 @@ async fn fts_search_is_scoped_to_user(pool: PgPool) {
     let chunk = Chunk {
         document_id: doc.id,
         paragraph_id: "para0".to_string(),
-        content: "xyzzy_unique_keyword for testing".to_string(),
+        content: "xyzzy_unique_mysql_keyword for testing".to_string(),
         ordinal: 0,
     };
     adapter_a.save_chunk(&chunk).await.unwrap();
 
     let hits_b = adapter_b
-        .search_text("xyzzy_unique_keyword", 10)
+        .search_text("xyzzy_unique_mysql_keyword", 10)
         .await
         .unwrap();
     assert!(hits_b.is_empty(), "user B must not see user A's chunks");
 
     let hits_a = adapter_a
-        .search_text("xyzzy_unique_keyword", 10)
+        .search_text("xyzzy_unique_mysql_keyword", 10)
         .await
         .unwrap();
     assert_eq!(hits_a.len(), 1);
@@ -159,38 +142,39 @@ async fn fts_search_is_scoped_to_user(pool: PgPool) {
 // ── Embedding isolation ───────────────────────────────────────────────────────
 
 /// User A's embeddings must not appear in User B's vector search results.
-#[ignore = "requires DATABASE_URL pointing to a Postgres instance with pgvector"]
-#[sqlx::test(migrator = "POSTGRES_MIGRATOR")]
-async fn vector_search_is_scoped_to_user(pool: PgPool) {
+#[ignore = "requires DATABASE_URL pointing to a MySQL instance"]
+#[sqlx::test(migrator = "MYSQL_MIGRATOR")]
+async fn vector_search_is_scoped_to_user(pool: MySqlPool) {
     let uid_a = Uuid::new_v4();
     let uid_b = Uuid::new_v4();
-    create_test_user(&pool, uid_a).await;
-    create_test_user(&pool, uid_b).await;
 
-    let adapter_a = PostgresAdapter::new(pool.clone(), make_user_ctx(uid_a));
-    let adapter_b = PostgresAdapter::new(pool.clone(), make_user_ctx(uid_b));
+    let adapter_a = MySqlAdapter::new(pool.clone(), make_user_ctx(uid_a));
+    let adapter_b = MySqlAdapter::new(pool.clone(), make_user_ctx(uid_b));
 
     let doc = make_doc();
     adapter_a.save_document(&doc).await.unwrap();
 
-    let chunk = Chunk {
-        document_id: doc.id,
-        paragraph_id: "para0".to_string(),
-        content: "semantic search test paragraph".to_string(),
-        ordinal: 0,
-    };
-    adapter_a.save_chunk(&chunk).await.unwrap();
+    adapter_a
+        .save_chunk(&Chunk {
+            document_id: doc.id,
+            paragraph_id: "para0".to_string(),
+            content: "semantic search test paragraph".to_string(),
+            ordinal: 0,
+        })
+        .await
+        .unwrap();
 
-    let dim = 1536_usize;
-    let norm = (dim as f32).sqrt();
-    let unit_vec: Vec<f32> = vec![1.0 / norm; dim];
+    // 3-dimensional unit vector (MySQL stores BLOB, so dimension is flexible).
+    let unit_vec: Vec<f32> = vec![1.0, 0.0, 0.0];
 
-    let emb = Embedding {
-        document_id: doc.id,
-        paragraph_id: "para0".to_string(),
-        vector: unit_vec.clone(),
-    };
-    adapter_a.save_embeddings(&emb).await.unwrap();
+    adapter_a
+        .save_embeddings(&Embedding {
+            document_id: doc.id,
+            paragraph_id: "para0".to_string(),
+            vector: unit_vec.clone(),
+        })
+        .await
+        .unwrap();
 
     let hits_b = adapter_b.search_embeddings(&unit_vec, 5).await.unwrap();
     assert!(hits_b.is_empty(), "user B must not see user A's embeddings");
@@ -200,40 +184,42 @@ async fn vector_search_is_scoped_to_user(pool: PgPool) {
     assert_eq!(hits_a[0].paragraph_id, "para0");
 }
 
-// ── Chunk hash round-trip ─────────────────────────────────────────────────────
+// ── Chunk hash isolation ──────────────────────────────────────────────────────
 
 /// get_chunk_hashes returns only this user's hashes for the given document.
-#[ignore = "requires DATABASE_URL pointing to a Postgres instance with pgvector"]
-#[sqlx::test(migrator = "POSTGRES_MIGRATOR")]
-async fn chunk_hashes_are_scoped(pool: PgPool) {
+#[ignore = "requires DATABASE_URL pointing to a MySQL instance"]
+#[sqlx::test(migrator = "MYSQL_MIGRATOR")]
+async fn chunk_hashes_are_scoped(pool: MySqlPool) {
     let uid_a = Uuid::new_v4();
     let uid_b = Uuid::new_v4();
-    create_test_user(&pool, uid_a).await;
-    create_test_user(&pool, uid_b).await;
 
     let doc_a = make_doc();
     let doc_b = make_doc();
 
-    let adapter_a = PostgresAdapter::new(pool.clone(), make_user_ctx(uid_a));
-    let adapter_b = PostgresAdapter::new(pool.clone(), make_user_ctx(uid_b));
+    let adapter_a = MySqlAdapter::new(pool.clone(), make_user_ctx(uid_a));
+    let adapter_b = MySqlAdapter::new(pool.clone(), make_user_ctx(uid_b));
 
     adapter_a.save_document(&doc_a).await.unwrap();
     adapter_b.save_document(&doc_b).await.unwrap();
 
-    let chunk_a = Chunk {
-        document_id: doc_a.id,
-        paragraph_id: "p0".to_string(),
-        content: "user A content".to_string(),
-        ordinal: 0,
-    };
-    let chunk_b = Chunk {
-        document_id: doc_b.id,
-        paragraph_id: "p0".to_string(),
-        content: "user B content".to_string(),
-        ordinal: 0,
-    };
-    adapter_a.save_chunk(&chunk_a).await.unwrap();
-    adapter_b.save_chunk(&chunk_b).await.unwrap();
+    adapter_a
+        .save_chunk(&Chunk {
+            document_id: doc_a.id,
+            paragraph_id: "p0".to_string(),
+            content: "user A content".to_string(),
+            ordinal: 0,
+        })
+        .await
+        .unwrap();
+    adapter_b
+        .save_chunk(&Chunk {
+            document_id: doc_b.id,
+            paragraph_id: "p0".to_string(),
+            content: "user B content".to_string(),
+            ordinal: 0,
+        })
+        .await
+        .unwrap();
 
     let hashes_a = adapter_a.get_chunk_hashes(doc_a.id).await.unwrap();
     assert_eq!(hashes_a.len(), 1);
@@ -248,10 +234,10 @@ async fn chunk_hashes_are_scoped(pool: PgPool) {
 // ── Migration idempotency ─────────────────────────────────────────────────────
 
 /// Running the migrator twice against the same database must succeed.
-#[ignore = "requires DATABASE_URL pointing to a Postgres instance with pgvector"]
-#[sqlx::test(migrator = "POSTGRES_MIGRATOR")]
-async fn migration_is_idempotent(pool: PgPool) {
-    POSTGRES_MIGRATOR
+#[ignore = "requires DATABASE_URL pointing to a MySQL instance"]
+#[sqlx::test(migrator = "MYSQL_MIGRATOR")]
+async fn migration_is_idempotent(pool: MySqlPool) {
+    MYSQL_MIGRATOR
         .run(&pool)
         .await
         .expect("second migration run must be idempotent");

@@ -20,8 +20,7 @@ use kaya_core::{
     KayaError, OperationType,
     model_router::{
         CompletionRequest, CompletionResponse, EmbeddingRequest, EmbeddingResponse, LlmProvider,
-        ModelRouter, StreamItem, ToolCallRequest, ToolCallResponse,
-        meter::TokenUsage,
+        ModelRouter, StreamItem, ToolCallRequest, ToolCallResponse, meter::TokenUsage,
     },
     retrieval::{chunk_document, index_document_chunks, retrieve},
     storage::{Document, StorageAdapter},
@@ -45,6 +44,7 @@ fn make_doc() -> Document {
         tags: vec!["rust".to_string(), "sqlite".to_string()],
         related_docs: vec![],
         body: "# Hello\n\nThis is the body.\n".to_string(),
+        folder_id: None,
     }
 }
 
@@ -57,6 +57,7 @@ fn blank_doc() -> Document {
         tags: vec![],
         related_docs: vec![],
         body: String::new(),
+        folder_id: None,
     }
 }
 
@@ -69,7 +70,12 @@ struct TopicEmbedder {
 impl TopicEmbedder {
     fn new() -> (Arc<Self>, Arc<AtomicUsize>) {
         let count = Arc::new(AtomicUsize::new(0));
-        (Arc::new(Self { call_count: Arc::clone(&count) }), count)
+        (
+            Arc::new(Self {
+                call_count: Arc::clone(&count),
+            }),
+            count,
+        )
     }
 }
 
@@ -120,7 +126,10 @@ impl LlmProvider for TopicEmbedder {
 
 fn make_router(embedder: Arc<dyn LlmProvider>) -> ModelRouter {
     let mut routes: HashMap<OperationType, (Arc<dyn LlmProvider>, String)> = HashMap::new();
-    routes.insert(OperationType::Embedding, (embedder, "test-model".to_string()));
+    routes.insert(
+        OperationType::Embedding,
+        (embedder, "test-model".to_string()),
+    );
     ModelRouter::from_routes(routes)
 }
 
@@ -156,7 +165,10 @@ async fn test_delete_document() {
     adapter.delete_document(doc.id).await.unwrap();
 
     let result = adapter.get_document(doc.id).await;
-    assert!(result.is_err(), "deleted document should not be retrievable");
+    assert!(
+        result.is_err(),
+        "deleted document should not be retrievable"
+    );
 
     let all = adapter.list_documents().await.unwrap();
     assert!(!all.iter().any(|d| d.id == doc.id));
@@ -194,17 +206,19 @@ async fn test_retrieval_seed_corpus() {
     let storage: Arc<dyn StorageAdapter> = adapter;
     for doc in [&doc_a, &doc_b, &doc_c] {
         storage.save_document(doc).await.unwrap();
-        index_document_chunks(doc, &storage, &router, None).await.unwrap();
+        index_document_chunks(doc, &storage, &router, None)
+            .await
+            .unwrap();
     }
 
-    let results = retrieve("alpha", 3, &storage, &router).await.unwrap();
+    let results = retrieve("alpha", 3, &storage, &router, None).await.unwrap();
     assert!(!results.is_empty());
     assert_eq!(results[0].document_id, doc_a.id, "alpha query → alpha doc");
 
-    let results = retrieve("beta", 3, &storage, &router).await.unwrap();
+    let results = retrieve("beta", 3, &storage, &router, None).await.unwrap();
     assert_eq!(results[0].document_id, doc_b.id, "beta query → beta doc");
 
-    let results = retrieve("gamma", 3, &storage, &router).await.unwrap();
+    let results = retrieve("gamma", 3, &storage, &router, None).await.unwrap();
     assert_eq!(results[0].document_id, doc_c.id, "gamma query → gamma doc");
 }
 
@@ -225,13 +239,18 @@ async fn test_citation_round_trip() {
 
     let storage: Arc<dyn StorageAdapter> = adapter;
     storage.save_document(&doc).await.unwrap();
-    index_document_chunks(&doc, &storage, &router, None).await.unwrap();
+    index_document_chunks(&doc, &storage, &router, None)
+        .await
+        .unwrap();
 
-    let results = retrieve("alpha", 1, &storage, &router).await.unwrap();
+    let results = retrieve("alpha", 1, &storage, &router, None).await.unwrap();
     assert!(!results.is_empty(), "retrieve must return a result");
 
     let hit = &results[0];
-    assert_eq!(hit.document_id, doc.id, "citation points to correct document");
+    assert_eq!(
+        hit.document_id, doc.id,
+        "citation points to correct document"
+    );
 
     let all_chunks = chunk_document(&doc);
     let source_chunk = all_chunks
@@ -239,7 +258,10 @@ async fn test_citation_round_trip() {
         .find(|c| c.paragraph_id == hit.paragraph_id)
         .expect("cited paragraph_id must exist in the source document");
 
-    assert_eq!(source_chunk.content, hit.content, "chunk content must match");
+    assert_eq!(
+        source_chunk.content, hit.content,
+        "chunk content must match"
+    );
 }
 
 #[tokio::test]
@@ -272,13 +294,22 @@ async fn test_reembedding_efficiency() {
 
     let storage: Arc<dyn StorageAdapter> = adapter;
     storage.save_document(&doc).await.unwrap();
-    let first_embed_calls = index_document_chunks(&doc, &storage, &router, None).await.unwrap();
-    assert_eq!(first_embed_calls, 10, "first index: all 10 paragraphs embedded");
+    let first_embed_calls = index_document_chunks(&doc, &storage, &router, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        first_embed_calls, 10,
+        "first index: all 10 paragraphs embedded"
+    );
     assert_eq!(call_count.load(Ordering::SeqCst), 10);
 
-    let edited_doc = Document { body: make_body(true), ..doc.clone() };
-    let second_embed_calls =
-        index_document_chunks(&edited_doc, &storage, &router, None).await.unwrap();
+    let edited_doc = Document {
+        body: make_body(true),
+        ..doc.clone()
+    };
+    let second_embed_calls = index_document_chunks(&edited_doc, &storage, &router, None)
+        .await
+        .unwrap();
 
     assert_eq!(
         second_embed_calls, 1,
@@ -300,9 +331,7 @@ async fn test_performance_smoke() {
     for i in 0..100_usize {
         let topic = topics[i % 3];
         let body = (0..5)
-            .map(|p| {
-                format!("Document {i} paragraph {p}: discusses {topic} concepts in depth.")
-            })
+            .map(|p| format!("Document {i} paragraph {p}: discusses {topic} concepts in depth."))
             .collect::<Vec<_>>()
             .join("\n\n");
 
@@ -314,11 +343,15 @@ async fn test_performance_smoke() {
         };
 
         storage.save_document(&doc).await.unwrap();
-        index_document_chunks(&doc, &storage, &router, None).await.unwrap();
+        index_document_chunks(&doc, &storage, &router, None)
+            .await
+            .unwrap();
     }
 
     let start = Instant::now();
-    let results = retrieve("alpha concepts", 5, &storage, &router).await.unwrap();
+    let results = retrieve("alpha concepts", 5, &storage, &router, None)
+        .await
+        .unwrap();
     let elapsed = start.elapsed();
 
     assert!(!results.is_empty(), "retrieval must return results");
