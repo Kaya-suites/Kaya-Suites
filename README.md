@@ -65,6 +65,18 @@ pnpm dev              # runs all workspace dev scripts in parallel
 
 Open <http://localhost:3000>. The web app proxies API calls to `NEXT_PUBLIC_API_URL` (default `http://localhost:3001`).
 
+### Default login
+
+On first boot the backend seeds a superadmin account so you can sign in immediately:
+
+| Field | Value |
+|---|---|
+| Email | `admin@kaya.local` (override with `SUPERADMIN_EMAIL`) |
+| Username | `KayaSuperAdmin` |
+| Password | `KayaPassword` |
+
+Change the password from the account settings page after your first login — these credentials are intended for local development only.
+
 ### Regenerate the API client
 
 After changing a backend route or schema:
