@@ -43,6 +43,10 @@ where
             put(folders::move_document_to_folder),
         )
         .route(
+            "/documents/{id}/order",
+            put(documents::reorder_document),
+        )
+        .route(
             "/folders",
             get(folders::list_folders).post(folders::create_folder),
         )

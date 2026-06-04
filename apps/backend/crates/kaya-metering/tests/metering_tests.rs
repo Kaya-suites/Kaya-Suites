@@ -2,8 +2,8 @@
 //!
 //! Metering integration tests.
 //!
-//! Set `PG_TEST_DATABASE_URL` to run against a Postgres instance that has all
-//! kaya-postgres-storage migrations applied.  Tests skip when the var is absent.
+//! Set `PG_TEST_DATABASE_URL` to run against a Postgres instance that has the
+//! metering migrations applied.  Tests skip when the var is absent.
 //!
 //! ```bash
 //! PG_TEST_DATABASE_URL=postgres://... cargo test -p kaya-metering

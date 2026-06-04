@@ -9,8 +9,6 @@ edition = "2024"
 license = "Apache-2.0"
 description = "Unified self-hosted binary for Kaya Suites (Apache 2.0)"
 
-# IMPORTANT: only Apache-licensed crates may appear here.
-# BSL crates (anything under crates/ee/) must never be listed as dependencies.
 [dependencies]
 kaya-core     = { path = "../../crates/kaya-core" }
 kaya-storage  = { path = "../../crates/kaya-storage", features = ["postgres"] }

@@ -6,7 +6,7 @@ import type { HealthError, HealthResponse } from './types.gen';
 export const client = createClient(createConfig());
 
 export const health = <ThrowOnError extends boolean = false>(options?: OptionsLegacyParser<unknown, ThrowOnError>) => {
-    return (options?.client ?? client).get<HealthResponse, HealthError, ThrowOnError>({
+    return client.get<HealthResponse, HealthError, ThrowOnError>({
         ...options,
         url: '/health'
     });

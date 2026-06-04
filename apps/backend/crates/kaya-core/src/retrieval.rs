@@ -378,6 +378,7 @@ mod tests {
             related_docs: vec![],
             body: body.to_string(),
             folder_id: None,
+            sort_order: 0,
         }
     }
 

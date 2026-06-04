@@ -226,7 +226,7 @@ fn edit_summary(stored: &StoredEdit, proposed_text: &str) -> String {
                 truncate_text(proposed_text, 120)
             )
         }
-        ProposedEditKind::Create { title, body } => format!(
+        ProposedEditKind::Create { title, body, .. } => format!(
             "Created document \"{}\" with draft content: {}",
             truncate_text(title, 80),
             truncate_text(body, 120)

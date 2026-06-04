@@ -18,7 +18,7 @@
 //! model in kaya.yaml.
 //!
 //! Only SQLite databases are supported by this tool. For Postgres/MySQL
-//! deployments use the kaya-cloud binary or a direct DB client.
+//! deployments use a direct DB client.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

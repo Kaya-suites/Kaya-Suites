@@ -29,6 +29,7 @@ pub(crate) struct DocumentSummary {
     tags: Vec<String>,
     last_reviewed: Option<String>,
     folder_id: Option<Uuid>,
+    sort_order: i64,
 }
 
 pub async fn list_documents(
@@ -51,6 +52,7 @@ pub async fn list_documents(
                 tags: d.tags,
                 last_reviewed: d.last_reviewed.map(|dt| dt.to_string()),
                 folder_id: d.folder_id,
+                sort_order: d.sort_order,
             })
             .collect(),
     ))
@@ -93,6 +95,7 @@ pub async fn create_document(
         last_reviewed: None,
         related_docs: vec![],
         folder_id: body.folder_id,
+        sort_order: 0,
     };
 
     storage
@@ -275,6 +278,32 @@ pub async fn delete_document(
             tracing::error!(document_id = %id, error = %err, "background document cleanup failed");
         }
     });
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── PUT /documents/:id/order ──────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderDocumentBody {
+    pub order_index: usize,
+}
+
+pub async fn reorder_document(
+    Extension(storage): Extension<Arc<dyn StorageAdapter>>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<ReorderDocumentBody>,
+) -> Result<StatusCode, ApiError> {
+    storage
+        .get_document(id)
+        .await
+        .map_err(|_| ApiError::not_found(format!("document {id}")))?;
+
+    storage
+        .reorder_document(id, body.order_index)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(StatusCode::NO_CONTENT)
 }

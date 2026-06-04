@@ -19,7 +19,10 @@ use uuid::Uuid;
 
 use kaya_core::{
     ParagraphChange, ProposedEdit, ProposedEditKind, SessionStorage, StorageAdapter,
-    agent::{AgentEvent, ConversationSummarizer, OrchestratorContext, SourcedEvent, orchestrate},
+    agent::{
+        AgentEvent, ChatContext, ConversationSummarizer, DocumentFocus, OrchestratorContext,
+        SourcedEvent, TurnContext, orchestrate,
+    },
     auth::UserSession,
     diff::compute_paragraph_diff,
     model_router::ModelRouter,
@@ -31,7 +34,48 @@ use crate::state::StoredEdit;
 #[derive(Deserialize)]
 pub struct ChatBody {
     pub message: String,
-    pub context: Option<String>,
+    pub context: Option<ChatContextPayload>,
+}
+
+/// Frontend doc-focus payload. Accepts either the new structured shape or a
+/// plain string (legacy — treated as a raw document body with empty id/title).
+/// The legacy branch is kept for one release; remove after the web client is
+/// confirmed on the structured shape.
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum ChatContextPayload {
+    Structured(DocumentFocusPayload),
+    Legacy(String),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentFocusPayload {
+    pub doc_id: Uuid,
+    pub title: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub body: String,
+}
+
+impl ChatContextPayload {
+    fn into_document_focus(self) -> Option<DocumentFocus> {
+        match self {
+            ChatContextPayload::Structured(p) => Some(DocumentFocus {
+                doc_id: p.doc_id,
+                title: p.title,
+                tags: p.tags,
+                body: p.body,
+            }),
+            ChatContextPayload::Legacy(body) if !body.trim().is_empty() => Some(DocumentFocus {
+                doc_id: Uuid::nil(),
+                title: String::new(),
+                tags: Vec::new(),
+                body,
+            }),
+            ChatContextPayload::Legacy(_) => None,
+        }
+    }
 }
 
 pub async fn chat_stream(
@@ -79,11 +123,11 @@ pub async fn chat_stream(
         .into_iter()
         .rev()
         .collect::<Vec<_>>();
-    let conversation_context = build_conversation_context(
-        body.context.as_deref(),
-        chat_summary.as_ref(),
-        &recent_messages,
-        &recent_edits,
+    let turn_context = build_turn_context(
+        body.context,
+        chat_summary,
+        recent_messages,
+        recent_edits,
     );
 
     tokio::spawn(async move {
@@ -94,7 +138,7 @@ pub async fn chat_stream(
             router,
             session_id,
             message,
-            conversation_context,
+            turn_context,
             is_first_turn,
             tx,
         )
@@ -119,7 +163,7 @@ async fn run_agent_stream(
     router: Arc<ModelRouter>,
     session_id: Uuid,
     original_message: String,
-    conversation_context: Option<String>,
+    turn_context: TurnContext,
     is_first_turn: bool,
     tx: tokio::sync::mpsc::Sender<Bytes>,
 ) {
@@ -131,7 +175,7 @@ async fn run_agent_stream(
         sessions: sessions.clone(),
         router: router.clone(),
         session,
-        conversation_context: conversation_context.clone(),
+        turn: turn_context,
     };
     let mut events = orchestrate(&original_message, orch_ctx);
 
@@ -292,14 +336,16 @@ async fn run_agent_stream(
         });
 
         if is_first_turn {
-            let naming_prompt = format!(
-                "Generate a short title (3–6 words, no quotes, no trailing punctuation) \
-                 for a conversation that starts with this user message:\n\n{original_message}\n\nTitle:"
-            );
+            let naming_messages = vec![
+                kaya_core::model_router::ChatMessage::user(format!(
+                    "Generate a short title (3–6 words, no quotes, no trailing punctuation) \
+                     for a conversation that starts with this user message:\n\n{original_message}\n\nTitle:"
+                )),
+            ];
             if let Ok(resp) = router
                 .complete(
                     kaya_core::model_router::OperationType::RetrievalClassification,
-                    naming_prompt,
+                    naming_messages,
                 )
                 .await
             {
@@ -412,7 +458,7 @@ async fn build_edit_sse(
                 new_parts.join("\n\n"),
             )
         }
-        ProposedEditKind::Create { title: _, body } => {
+        ProposedEditKind::Create { body, .. } => {
             (None, "p0".to_string(), String::new(), body.clone())
         }
         ProposedEditKind::UpdateContent {
@@ -545,50 +591,26 @@ async fn build_edit_sse(
     }))
 }
 
-fn build_conversation_context(
-    request_context: Option<&str>,
-    summary: Option<&ChatHistorySummary>,
-    recent_messages: &[(String, String)],
-    recent_edits: &[EditHistoryEntry],
-) -> Option<String> {
-    let mut sections: Vec<String> = Vec::new();
-
-    if let Some(summary) = summary.filter(|s| !s.summary.trim().is_empty()) {
-        sections.push(format!(
-            "Chat summary (covers {} older messages):\n{}",
-            summary.covered_message_count, summary.summary
-        ));
-    }
-
-    if !recent_messages.is_empty() {
-        let rendered = recent_messages
-            .iter()
-            .map(|(role, content)| format!("{role}: {content}"))
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        sections.push(format!("Recent messages (last {}):\n{rendered}", recent_messages.len()));
-    }
-
-    if !recent_edits.is_empty() {
-        let rendered = recent_edits
-            .iter()
-            .map(|entry| format!("- [{}] {}", entry.status, entry.summary))
-            .collect::<Vec<_>>()
-            .join("\n");
-        sections.push(format!("Recent edits (last {}):\n{rendered}", recent_edits.len()));
-    }
-
-    if let Some(context) = request_context.filter(|c| !c.trim().is_empty()) {
-        sections.push(format!(
-            "In-focus document for this turn:\n{context}"
-        ));
-    }
-
-    if sections.is_empty() {
+fn build_turn_context(
+    request_context: Option<ChatContextPayload>,
+    summary: Option<ChatHistorySummary>,
+    recent_messages: Vec<(String, String)>,
+    recent_edits: Vec<EditHistoryEntry>,
+) -> TurnContext {
+    let summary = summary.filter(|s| !s.summary.trim().is_empty()).map(|s| s.summary);
+    let chat = if summary.is_none() && recent_messages.is_empty() && recent_edits.is_empty() {
         None
     } else {
-        Some(sections.join("\n\n"))
-    }
+        Some(ChatContext {
+            summary,
+            recent_messages,
+            recent_edits,
+        })
+    };
+
+    let document = request_context.and_then(ChatContextPayload::into_document_focus);
+
+    TurnContext { chat, document }
 }
 
 fn build_edit_history_entry(
@@ -639,7 +661,7 @@ fn format_edit_history_summary(
                 truncate_text(proposed, 120)
             )
         }
-        ProposedEditKind::Create { title, body } => format!(
+        ProposedEditKind::Create { title, body, .. } => format!(
             "Created document \"{}\" with draft content: {}",
             truncate_text(title, 80),
             truncate_text(body, 120)
@@ -746,7 +768,7 @@ fn log_agent_event(source: &str, event: &AgentEvent) {
 
 fn describe_edit(edit: &ProposedEdit) -> String {
     match &edit.kind {
-        ProposedEditKind::Create { title, body } => format!(
+        ProposedEditKind::Create { title, body, .. } => format!(
             "id={} kind=create title={} body_preview={}",
             edit.id,
             truncate_text(title, 120),

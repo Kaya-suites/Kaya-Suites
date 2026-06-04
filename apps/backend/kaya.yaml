@@ -8,25 +8,25 @@
 routing:
   retrieval_classification:
     provider: openai
-    model: gpt-5.4-mini
+    model: gpt-5.4
   document_generation:
     provider: openai
-    model: gpt-5.4-mini
+    model: gpt-5.4
   edit_proposal:
     provider: openai
-    model: gpt-5.4-mini
+    model: gpt-5.4
   stale_detection:
     provider: openai
-    model: gpt-5.4-mini
+    model: gpt-5.4
   embedding:
     provider: openai
     model: text-embedding-3-small
   intent_classification:
     provider: openai
-    model: gpt-5.4-mini
+    model: gpt-5.4
   research_synthesis:
     provider: openai
-    model: gpt-5.4-mini
+    model: gpt-5.4
 
 providers:
   openai:

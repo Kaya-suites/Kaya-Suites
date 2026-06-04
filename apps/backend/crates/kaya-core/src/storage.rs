@@ -47,6 +47,10 @@ pub struct Document {
     /// Folder this document belongs to (`None` = root / unfoldered).
     #[serde(default)]
     pub folder_id: Option<Uuid>,
+    /// Position within the folder (or root). Only meaningful when returned from storage;
+    /// not stored in frontmatter. Use `reorder_document` to change it.
+    #[serde(skip, default)]
+    pub sort_order: i64,
 }
 
 /// A paragraph chunk extracted from a document body.
@@ -145,7 +149,27 @@ pub trait StorageAdapter: Send + Sync {
             .collect())
     }
 
+    /// Return the next available `sort_order` for a new document in the given
+    /// folder (or root when `folder_id` is `None`). Equivalent to
+    /// `MAX(sort_order) + 1`, returning `0` for an empty folder.
+    ///
+    /// The default implementation fetches all sibling documents and iterates —
+    /// backends should override this with a single `SELECT MAX(sort_order)` query.
+    async fn next_document_sort_order(
+        &self,
+        folder_id: Option<Uuid>,
+    ) -> Result<i64, StorageError> {
+        let siblings = self.list_documents_in_folder(folder_id).await?;
+        Ok(siblings
+            .iter()
+            .map(|d| d.sort_order)
+            .max()
+            .map(|m| m + 1)
+            .unwrap_or(0))
+    }
+
     /// Move a document into a folder (or to root when `folder_id` is `None`).
+    /// The document is appended at the end of the destination folder's order.
     async fn move_document_to_folder(
         &self,
         _doc_id: Uuid,
@@ -153,6 +177,18 @@ pub trait StorageAdapter: Send + Sync {
     ) -> Result<(), StorageError> {
         Err(StorageError::Backend(Box::new(std::io::Error::other(
             "move_document_to_folder not implemented for this adapter",
+        ))))
+    }
+
+    /// Move a document to a specific position within its current folder.
+    /// `new_index` is 0-based; all siblings are renumbered atomically.
+    async fn reorder_document(
+        &self,
+        _doc_id: Uuid,
+        _new_index: usize,
+    ) -> Result<(), StorageError> {
+        Err(StorageError::Backend(Box::new(std::io::Error::other(
+            "reorder_document not implemented for this adapter",
         ))))
     }
 
