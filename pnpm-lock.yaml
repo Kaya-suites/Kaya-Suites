@@ -6,7 +6,7 @@ settings:
 
 overrides:
   handlebars: '>=4.7.9'
-  postcss: '>=8.5.10'
+  postcss: '>=8.5.14'
   tar: '>=7.5.8'
 
 importers:
