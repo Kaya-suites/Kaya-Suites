@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source "../../../packages/markdown-editor/src/**/*.{ts,tsx}";
 @import "./theme.generated.css";
 
 * {
@@ -92,6 +93,20 @@ body {
   color: var(--color-muted);
 }
 
+[contenteditable="true"] code {
+  background: var(--color-muted-bg);
+  border: 1px solid black;
+  padding: 0 0.25rem;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+}
+
+[contenteditable="true"] a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  cursor: text;
+}
+
 .token.comment,
 .token.prolog,
 .token.doctype,
@@ -140,3 +155,15 @@ body {
 .token.class-name {
   color: #ea580c;
 }
+
+@keyframes kaya-block-enter {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.kaya-block-enter { animation: kaya-block-enter 120ms ease-out; }
+
+@keyframes kaya-popover-enter {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+.kaya-popover-enter { animation: kaya-popover-enter 90ms ease-out; transform-origin: top left; }

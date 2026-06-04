@@ -5,7 +5,7 @@ import type { ChatMessageData, CitationRef } from "@/types/chat";
 import { DiffReview } from "./DiffReview";
 import { DeleteReview } from "./DeleteReview";
 import { FolderCreateReview } from "./FolderCreateReview";
-import { MarkdownContent } from "./markdown/MarkdownContent";
+import { MarkdownContent } from "@kaya/markdown-editor";
 
 type Props = {
   message: ChatMessageData;

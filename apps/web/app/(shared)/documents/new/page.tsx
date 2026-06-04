@@ -4,9 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { ChevronLeft, Tag } from "lucide-react";
 
 const KayaMarkdownEditor = dynamic(
-  () => import("@/components/shared/KayaMarkdownEditor").then((m) => m.KayaMarkdownEditor),
+  () => import("@kaya/markdown-editor").then((m) => m.KayaMarkdownEditor),
   { ssr: false },
 );
 
@@ -44,7 +45,7 @@ export default function NewDocumentPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-[var(--color-surface)]">
+    <div className="flex flex-col h-full bg-[var(--color-surface)]">
       {/* Header */}
       <div className="flex items-center gap-3 px-6 py-3 border-b-2 border-black bg-[var(--color-background)] shrink-0">
         <Link
@@ -52,9 +53,7 @@ export default function NewDocumentPage() {
           className="flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-[var(--color-muted)] hover:text-black transition-colors font-mono border-2 border-transparent hover:border-black px-2 py-1"
           style={{ borderRadius: "var(--border-radius)" }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
+          <ChevronLeft size={14} />
           Docs
         </Link>
 
@@ -87,10 +86,7 @@ export default function NewDocumentPage() {
 
       {/* Tags */}
       <div className="flex items-center gap-2 px-6 py-2 border-b-2 border-black bg-[var(--color-background)] shrink-0">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--color-muted)] shrink-0">
-          <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
-          <line x1="7" y1="7" x2="7.01" y2="7" />
-        </svg>
+        <Tag size={12} className="text-[var(--color-muted)] shrink-0" />
         <input
           type="text"
           value={tagsInput}

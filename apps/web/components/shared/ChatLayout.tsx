@@ -7,6 +7,7 @@ import { ChatPanel } from "./ChatPanel";
 import { DocumentPanel } from "./DocumentPanel";
 import { OnboardingChecklist } from "./OnboardingChecklist";
 import { useOnboarding } from "@/hooks/useOnboarding";
+import { Plus } from "lucide-react";
 
 async function fetchSessions(): Promise<ChatSession[]> {
   try {
@@ -17,18 +18,6 @@ async function fetchSessions(): Promise<ChatSession[]> {
   }
 }
 
-async function createSession(title = "New conversation"): Promise<ChatSession | null> {
-  try {
-    const res = await fetch("/api/sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
-    });
-    return (await res.json()) as ChatSession;
-  } catch {
-    return null;
-  }
-}
 
 export function ChatLayout() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -39,19 +28,7 @@ export function ChatLayout() {
   const onboarding = useOnboarding();
 
   useEffect(() => {
-    (async () => {
-      const existing = await fetchSessions();
-      if (existing.length > 0) {
-        setSessions(existing);
-        setSessionId(existing[0].id);
-      } else {
-        const created = await createSession();
-        if (created) {
-          setSessions([created]);
-          setSessionId(created.id);
-        }
-      }
-    })();
+    fetchSessions().then(setSessions).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -74,14 +51,15 @@ export function ChatLayout() {
     setDocRefreshKey((k) => k + 1);
   }
 
-  async function handleNewSession() {
-    const created = await createSession();
-    if (created) {
-      setSessions((prev) => [created, ...prev]);
-      setSessionId(created.id);
-      setOpenDocId(null);
-    }
+  function handleNewSession() {
+    setSessionId(null);
+    setOpenDocId(null);
   }
+
+  const handleSessionCreated = useCallback((session: ChatSession) => {
+    setSessions((prev) => [session, ...prev]);
+    setSessionId(session.id);
+  }, []);
 
   const handleSessionSelect = useCallback((id: string) => {
     setSessionId(id);
@@ -105,16 +83,7 @@ export function ChatLayout() {
     setSessions((prev) => prev.filter((s) => s.id !== id));
     if (sessionId === id) {
       const remaining = sessions.filter((s) => s.id !== id);
-      if (remaining.length > 0) {
-        setSessionId(remaining[0].id);
-      } else {
-        const created = await createSession();
-        if (created) {
-          setSessions([created]);
-          setSessionId(created.id);
-          return;
-        }
-      }
+      setSessionId(remaining.length > 0 ? remaining[0].id : null);
     }
     await fetch(`/api/sessions/${id}`, { method: "DELETE" }).catch(() => {});
   }, [sessionId, sessions]);
@@ -170,19 +139,18 @@ export function ChatLayout() {
             style={{ borderRadius: "var(--border-radius)" }}
             title="New conversation"
           >
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-              <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
+            <Plus size={15} strokeWidth={1.5} />
           </button>
         </div>
 
         <ChatPanel
-          key={sessionId ?? "empty-session"}
+          key={sessionId ?? "pending"}
           sessionId={sessionId}
           onCitationClick={handleCitationClick}
           onDocumentUpdated={handleDocumentUpdated}
           onStepComplete={onboarding.markStepComplete}
           onSessionRenamed={handleSessionRenamed}
+          onSessionCreated={handleSessionCreated}
         />
       </div>
 

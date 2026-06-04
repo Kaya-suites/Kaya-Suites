@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   ChatMessageData,
+  ChatSession,
   CitationRef,
   Folder,
   Role,
@@ -12,6 +13,19 @@ import type {
   ProposedFolderCreate,
 } from "@/types/chat";
 import type { OnboardingStep } from "@/hooks/useOnboarding";
+
+async function createSession(title = "New conversation"): Promise<ChatSession | null> {
+  try {
+    const res = await fetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    return (await res.json()) as ChatSession;
+  } catch {
+    return null;
+  }
+}
 import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
 
@@ -22,7 +36,8 @@ type Props = {
   onFolderCreated?: (folder: Folder) => void;
   onStepComplete?: (step: OnboardingStep) => void;
   onSessionRenamed?: (sessionId: string, title: string) => void;
-  requestContext?: string;
+  onSessionCreated?: (session: ChatSession) => void;
+  requestContext?: import("@/types/chat").DocumentContext;
 };
 
 function randomId(): string {
@@ -47,7 +62,7 @@ const WELCOME: ChatMessageData = {
   timestamp: Date.now(),
 };
 
-export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFolderCreated, onStepComplete, onSessionRenamed, requestContext }: Props) {
+export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFolderCreated, onStepComplete, onSessionRenamed, onSessionCreated, requestContext }: Props) {
   const [messages, setMessages] = useState<ChatMessageData[]>([WELCOME]);
   const [streamingId, setStreamingId] = useState<string | null>(null);
   // Tracks current text for each pending edit card so "Approve All" reads the right value
@@ -104,8 +119,15 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
   }, [sessionId]);
 
   async function sendMessage(content: string) {
-    if (streamingId || sessionId === null) return;
-    const sid: string = sessionId;
+    if (streamingId) return;
+
+    let sid = sessionId;
+    if (sid === null) {
+      const created = await createSession();
+      if (!created) return;
+      sid = created.id;
+      onSessionCreated?.(created);
+    }
 
     const userMsg: ChatMessageData = {
       id: randomId(),
@@ -482,7 +504,7 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
       </div>
 
       {/* Input */}
-      <ChatInput onSend={sendMessage} disabled={streamingId !== null || sessionId === null} />
+      <ChatInput onSend={sendMessage} disabled={streamingId !== null} />
     </div>
   );
 }

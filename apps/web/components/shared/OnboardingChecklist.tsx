@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { OnboardingStep } from "@/hooks/useOnboarding";
+import { X, Check } from "lucide-react";
 
 type Step = { id: OnboardingStep; label: string; done: boolean };
 
@@ -105,9 +106,7 @@ export function OnboardingChecklist({
             style={{ borderRadius: "var(--border-radius)" }}
             title="Dismiss"
           >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
+            <X size={12} strokeWidth={1.5} />
           </button>
         </div>
 
@@ -130,11 +129,7 @@ export function OnboardingChecklist({
                     borderRadius: "var(--border-radius)",
                   }}
                 >
-                  {step.done && (
-                    <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
-                      <path d="M1 3l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  )}
+                  {step.done && <Check size={10} strokeWidth={2.5} className="text-white" />}
                 </div>
                 <span
                   className={`text-xs leading-tight font-mono ${

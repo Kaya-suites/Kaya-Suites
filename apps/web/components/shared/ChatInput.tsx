@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import { Send } from "lucide-react";
 
 type Props = {
   onSend: (message: string) => void;
@@ -54,15 +55,7 @@ export function ChatInput({ onSend, disabled }: Props) {
           style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
           title="Send"
         >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path
-              d="M2 8l12-6-5 6 5 6-12-6z"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinejoin="round"
-              fill="none"
-            />
-          </svg>
+          <Send size={14} strokeWidth={1.5} />
         </button>
       </div>
       <p className="mt-1.5 text-center text-[10px] text-[var(--color-muted)] font-mono">

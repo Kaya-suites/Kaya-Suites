@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChatSession } from "@/types/chat";
+import { MoreVertical, Pencil, Pin, Trash2, ChevronLeft, ChevronRight, Plus, AlignJustify, Rows3 } from "lucide-react";
 
 type ViewMode = "comfortable" | "compact";
 
@@ -99,11 +100,7 @@ function KebabMenu({ session, isActive, onDelete, onPin, onStartEdit }: KebabMen
         title="Options"
         aria-label="Session options"
       >
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-          <circle cx="8" cy="2.5" r="1.5" />
-          <circle cx="8" cy="8" r="1.5" />
-          <circle cx="8" cy="13.5" r="1.5" />
-        </svg>
+        <MoreVertical size={12} />
       </button>
 
       {open && (
@@ -112,15 +109,11 @@ function KebabMenu({ session, isActive, onDelete, onPin, onStartEdit }: KebabMen
           style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
         >
           <button className={menuItem} onClick={handleRename}>
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-              <path d="M11 2l3 3-9 9H2v-3l9-9z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            <Pencil size={11} />
             Rename
           </button>
           <button className={menuItem} onClick={handlePin}>
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-              <path d="M9 2l5 5-2 2-2-1-3 3v3H6v-3L3 8l2-2-1-2 5-2z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            <Pin size={11} />
             {session.pinned ? "Unpin" : "Pin"}
           </button>
           <div className="border-t border-black/10 my-0.5" />
@@ -128,9 +121,7 @@ function KebabMenu({ session, isActive, onDelete, onPin, onStartEdit }: KebabMen
             className={`${menuItem} text-red-600 hover:bg-red-50`}
             onClick={handleDelete}
           >
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-              <path d="M2 4h12M5 4V2h6v2M6 7v5M10 7v5M3 4l1 10h8l1-10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            <Trash2 size={11} />
             Delete
           </button>
         </div>
@@ -174,15 +165,16 @@ export function SessionRail({ sessions, currentSessionId, onSelect, onNew, onRen
         className="flex flex-col items-center w-10 min-h-0 border-r-2 border-black py-3 gap-3 shrink-0"
         style={{ background: "var(--color-background)" }}
       >
-        <button onClick={() => setCollapsed(false)} className={iconBtn} title="Expand sessions">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+        <button
+          onClick={() => setCollapsed(false)}
+          title="Expand sessions"
+          className="w-8 h-8 flex items-center justify-center border-2 border-black bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity"
+          style={{ boxShadow: "var(--shadow-button)" }}
+        >
+          <ChevronRight size={14} />
         </button>
         <button onClick={onNew} className={iconBtn} title="New conversation">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-          </svg>
+          <Plus size={16} />
         </button>
       </aside>
     );
@@ -201,29 +193,18 @@ export function SessionRail({ sessions, currentSessionId, onSelect, onNew, onRen
             className={iconBtn}
             title={viewMode === "comfortable" ? "Compact view" : "Comfortable view"}
           >
-            {viewMode === "comfortable" ? (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <rect x="2" y="3" width="12" height="2" rx="1" fill="currentColor" />
-                <rect x="2" y="7" width="12" height="2" rx="1" fill="currentColor" />
-                <rect x="2" y="11" width="12" height="2" rx="1" fill="currentColor" />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <rect x="2" y="2" width="12" height="3" rx="1" fill="currentColor" />
-                <rect x="2" y="7" width="12" height="3" rx="1" fill="currentColor" />
-                <rect x="2" y="12" width="8" height="2" rx="1" fill="currentColor" />
-              </svg>
-            )}
+            {viewMode === "comfortable" ? <AlignJustify size={14} /> : <Rows3 size={14} />}
           </button>
           <button onClick={onNew} className={iconBtn} title="New conversation">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-            </svg>
+            <Plus size={14} />
           </button>
-          <button onClick={() => setCollapsed(true)} className={iconBtn} title="Collapse">
-            <svg width="14" height="14" viewBox="0 0 16 16">
-              <path d="M10 3l-5 5 5 5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+          <button
+            onClick={() => setCollapsed(true)}
+            title="Collapse sessions"
+            className="w-8 h-8 flex items-center justify-center border-2 border-black bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity"
+            style={{ boxShadow: "var(--shadow-button)" }}
+          >
+            <ChevronLeft size={14} />
           </button>
         </div>
       </div>
@@ -261,11 +242,7 @@ export function SessionRail({ sessions, currentSessionId, onSelect, onNew, onRen
                     onClick={() => onSelect(s.id)}
                     className="flex-1 text-left px-3 py-1.5 text-xs truncate leading-5 font-mono font-bold"
                   >
-                    {s.pinned && (
-                      <svg className="inline mr-1 mb-0.5 opacity-60" width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M9 2l5 5-2 2-2-1-3 3v3H6v-3L3 8l2-2-1-2 5-2z" />
-                      </svg>
-                    )}
+                    {s.pinned && <Pin className="inline mr-1 mb-0.5 opacity-60" size={9} fill="currentColor" />}
                     {s.title}
                   </button>
                 )}
@@ -308,11 +285,7 @@ export function SessionRail({ sessions, currentSessionId, onSelect, onNew, onRen
                   className="flex-1 text-left px-3 py-2 min-w-0"
                 >
                   <div className="truncate leading-5 text-xs font-bold font-mono">
-                    {s.pinned && (
-                      <svg className="inline mr-1 mb-0.5 opacity-60" width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M9 2l5 5-2 2-2-1-3 3v3H6v-3L3 8l2-2-1-2 5-2z" />
-                      </svg>
-                    )}
+                    {s.pinned && <Pin className="inline mr-1 mb-0.5 opacity-60" size={9} fill="currentColor" />}
                     {s.title}
                   </div>
                   <div className={`text-xs mt-0.5 font-mono ${isActive ? "text-white/70" : "text-[var(--color-muted)]"}`}>

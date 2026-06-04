@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# @kaya/web
 
-## Getting Started
+The Kaya Suites Next.js 16 frontend. Provides the chat UI, document browser, Notion-style editor, admin pages, and settings.
 
-First, run the development server:
+This package is part of the pnpm workspace at the repo root. It is **not** part of the Cargo workspace — the Rust backend in `apps/backend/` builds independently.
+
+## Develop
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# From the repo root
+pnpm install
+pnpm dev           # runs the Next.js dev server on :3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The dev server expects the Rust backend to be running on `NEXT_PUBLIC_API_URL` (default `http://localhost:3001`). Start it with:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cd apps/backend
+cargo run --bin kaya-oss
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Build
 
-## Learn More
+```bash
+# Standard build (talks to a separate backend at runtime)
+pnpm --filter web build
 
-To learn more about Next.js, take a look at the following resources:
+# OSS build — static export, embeds into the kaya-oss binary
+NEXT_PUBLIC_KAYA_BUILD=oss pnpm --filter web build
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The OSS build emits `apps/web/out/`; copy it into `apps/backend/bin/kaya-oss/frontend/` before running `cargo build --release --bin kaya-oss`. See [docs/building.md](../../docs/building.md).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Test and lint
 
-## Deploy on Vercel
+```bash
+pnpm --filter web lint
+pnpm --filter web test
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Layout
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+app/
+  (shared)/        App routes — chat, documents, admin, settings, auth, billing
+  api/             Next.js route handlers that proxy / wrap backend calls
+components/        Page-level and shared UI components
+hooks/             Custom React hooks
+lib/               Pure helpers, shared with packages where possible
+types/             TS types — including SSE / chat contracts mirrored from the backend
+```
+
+## Conventions
+
+- App Router only — no pages router.
+- React 19, Next.js 16. **Read `AGENTS.md`** before changing anything Next.js-specific: this version of Next.js has breaking changes from earlier releases.
+- Document editing goes through `@kaya/markdown-editor`; do not introduce a second editor.
+- All backend calls go through `@kaya/api-client` (generated). Do not call the Rust backend with hand-rolled `fetch` if a generated client method already exists.

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { ProposedDelete } from "@/types/chat";
+import { Check, Trash2 } from "lucide-react";
 
 type Props = {
   deletion: ProposedDelete;
@@ -18,9 +19,7 @@ export function DeleteReview({ deletion, onApprove, onReject }: Props) {
         className="mt-3 border-2 border-[var(--color-danger)] bg-[var(--color-surface)] px-4 py-3 text-sm text-[var(--color-danger)] flex items-center gap-2 font-mono"
         style={{ borderRadius: "var(--border-radius)", boxShadow: "3px 3px 0px var(--color-danger)" }}
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="shrink-0">
-          <path d="M3 8l4 4 6-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Check size={14} strokeWidth={1.8} className="shrink-0" />
         DOCUMENT DELETED.
       </div>
     );
@@ -52,9 +51,7 @@ export function DeleteReview({ deletion, onApprove, onReject }: Props) {
       style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)", borderLeftColor: "var(--color-danger)", borderLeftWidth: "4px" }}
     >
       <div className="px-4 py-2.5 border-b-2 border-black bg-[#FFD6CC] flex items-center gap-2">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="text-[var(--color-danger)] shrink-0">
-          <path d="M2 4h12M6 4V2h4v2M5 4v9a1 1 0 001 1h4a1 1 0 001-1V4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Trash2 size={14} strokeWidth={1.4} className="text-[var(--color-danger)] shrink-0" />
         <span className="text-xs font-bold text-[var(--color-danger)] uppercase tracking-wider font-mono">Proposed Deletion</span>
       </div>
 

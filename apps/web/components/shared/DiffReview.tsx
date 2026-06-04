@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { wordDiff } from "@/lib/diff";
 import type { ProposedEdit } from "@/types/chat";
+import { Check, FileEdit } from "lucide-react";
 
 type Props = {
   edit: ProposedEdit;
@@ -21,9 +22,7 @@ export function DiffReview({ edit, editedText, onTextChange, onApprove, onReject
         className="mt-3 border-2 border-[var(--color-success)] bg-[var(--color-surface)] px-4 py-3 text-sm text-[var(--color-success)] flex items-center gap-2 font-mono"
         style={{ borderRadius: "var(--border-radius)", boxShadow: "3px 3px 0px var(--color-success)" }}
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="shrink-0">
-          <path d="M3 8l4 4 6-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Check size={14} strokeWidth={1.8} className="shrink-0" />
         EDIT APPROVED AND COMMITTED.
       </div>
     );
@@ -57,10 +56,7 @@ export function DiffReview({ edit, editedText, onTextChange, onApprove, onReject
       style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
     >
       <div className="px-4 py-2.5 border-b-2 border-black bg-[var(--color-muted-bg)] flex items-center gap-2">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="text-[var(--color-accent)] shrink-0">
-          <rect x="1" y="3" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.4" />
-          <path d="M5 7h6M5 9.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-        </svg>
+        <FileEdit size={14} strokeWidth={1.4} className="text-[var(--color-accent)] shrink-0" />
         <span className="text-xs font-bold text-black uppercase tracking-wider font-mono">Proposed Edit</span>
       </div>
 

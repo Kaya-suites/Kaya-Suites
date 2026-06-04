@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { KayaDocument } from "@/types/chat";
-import { MarkdownContent } from "./markdown/MarkdownContent";
+import { MarkdownContent } from "@kaya/markdown-editor";
+import { FileText, Download, X } from "lucide-react";
 
 type Props = {
   docId: string | null;
@@ -66,10 +67,7 @@ export function DocumentPanel({ docId, scrollToParagraphId, refreshKey, onClose 
   if (!docId) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-[var(--color-muted)] gap-3 p-8 font-mono">
-        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" className="opacity-40">
-          <rect x="8" y="5" width="24" height="30" rx="3" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M14 14h12M14 19h12M14 24h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
+        <FileText size={40} strokeWidth={1.5} className="opacity-40" />
         <p className="text-xs text-center leading-relaxed uppercase tracking-wider font-bold">
           Documents appear here when the agent cites one.
         </p>
@@ -91,10 +89,7 @@ export function DocumentPanel({ docId, scrollToParagraphId, refreshKey, onClose 
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black text-black hover:bg-[var(--color-muted-bg)] transition-all disabled:opacity-50 font-mono"
               style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
             >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                <path d="M8 2v9M4 8l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M2 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
+              <Download size={12} strokeWidth={1.5} />
               {downloading ? "Exporting…" : "Export PDF"}
             </button>
           )}
@@ -104,9 +99,7 @@ export function DocumentPanel({ docId, scrollToParagraphId, refreshKey, onClose 
             style={{ borderRadius: "var(--border-radius)" }}
             title="Close document"
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
+            <X size={14} strokeWidth={1.5} />
           </button>
         </div>
       </div>

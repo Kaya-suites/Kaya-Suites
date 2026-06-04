@@ -7,6 +7,7 @@ import {
   useDraggable,
   useDroppable,
 } from "@dnd-kit/core";
+import { MoreVertical, ChevronRight, Folder, FileText, Home, FilePlus, ChevronLeft, Plus } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,7 @@ export type DocumentSummary = {
   tags: string[];
   lastReviewed?: string;
   folderId?: string | null;
+  sortOrder?: number;
 };
 
 type Props = {
@@ -32,12 +34,14 @@ type Props = {
   documents: DocumentSummary[];
   selectedFolderId: string | null | "root";
   overDropTarget?: FolderDropTarget;
+  activeId?: string | null;
   onSelectFolder: (id: string | null) => void;
   onFolderCreated: (folder: Folder) => void;
   onFolderRenamed: (folder: Folder) => void;
   onFolderDeleted: (id: string) => void;
   onDocumentCreated: (doc: DocumentSummary) => void;
   onDocumentDeleted: (id: string) => void;
+  onCollapse?: () => void;
 };
 
 export type FolderDropTarget =
@@ -73,16 +77,28 @@ type FolderSidebarState = {
 
 const EXPANDED_FOLDERS_STORAGE_KEY = "kaya_folder_sidebar_expanded_v1";
 
+function sortFoldersForTree(folders: Folder[]): Folder[] {
+  return [...folders].sort((a, b) => {
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    const name = a.name.localeCompare(b.name);
+    if (name !== 0) return name;
+    return a.createdAt.localeCompare(b.createdAt);
+  });
+}
+
+function sortDocumentsForTree(documents: DocumentSummary[]): DocumentSummary[] {
+  return [...documents].sort((a, b) => {
+    if ((a.sortOrder ?? 0) !== (b.sortOrder ?? 0)) return (a.sortOrder ?? 0) - (b.sortOrder ?? 0);
+    const title = a.title.localeCompare(b.title);
+    if (title !== 0) return title;
+    return a.id.localeCompare(b.id);
+  });
+}
+
 // ── Kebab icon ────────────────────────────────────────────────────────────────
 
 function KebabIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-      <circle cx="12" cy="5" r="2" />
-      <circle cx="12" cy="12" r="2" />
-      <circle cx="12" cy="19" r="2" />
-    </svg>
-  );
+  return <MoreVertical size={12} />;
 }
 
 // ── Draggable folder node ─────────────────────────────────────────────────────
@@ -99,6 +115,7 @@ function DraggableFolderNode({
   onToggleExpand,
   onContextMenu,
   onDocKebab,
+  isDraggingDoc,
 }: {
   folder: Folder;
   depth: number;
@@ -111,9 +128,10 @@ function DraggableFolderNode({
   onToggleExpand: (id: string) => void;
   onContextMenu: (e: React.MouseEvent, folderId: string) => void;
   onDocKebab: (e: React.MouseEvent, docId: string) => void;
+  isDraggingDoc: boolean;
 }) {
-  const childFolders = folders.filter((f) => f.parentId === folder.id);
-  const folderDocs = documents.filter((d) => d.folderId === folder.id);
+  const childFolders = sortFoldersForTree(folders.filter((f) => f.parentId === folder.id));
+  const folderDocs = sortDocumentsForTree(documents.filter((d) => d.folderId === folder.id));
   const hasChildren = childFolders.length > 0 || folderDocs.length > 0;
   const isExpanded = expandedIds.has(folder.id);
   const isSelected = selectedFolderId === folder.id;
@@ -190,20 +208,13 @@ function DraggableFolderNode({
           onClick={(e) => { e.stopPropagation(); onToggleExpand(folder.id); }}
         >
           {hasChildren && (
-            <svg
-              width="8"
-              height="8"
-              viewBox="0 0 8 8"
-              fill="currentColor"
+            <ChevronRight
+              size={10}
               style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}
-            >
-              <path d="M2 1l4 3-4 3z" />
-            </svg>
+            />
           )}
         </button>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-          <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-        </svg>
+        <Folder size={12} className="shrink-0" />
         <span className="truncate flex-1">{folder.name}</span>
         {/* Kebab menu button */}
         <button
@@ -234,12 +245,21 @@ function DraggableFolderNode({
               onToggleExpand={onToggleExpand}
               onContextMenu={onContextMenu}
               onDocKebab={onDocKebab}
+              isDraggingDoc={isDraggingDoc}
             />
           ))}
 
-          {/* Documents inside this folder — draggable so they can be moved out */}
-          {folderDocs.map((doc) => (
-            <DraggableFolderDoc key={doc.id} doc={doc} depth={depth} onKebabDoc={onDocKebab} />
+          {/* Documents inside this folder — draggable and reorderable */}
+          {folderDocs.map((doc, idx) => (
+            <div key={doc.id}>
+              {isDraggingDoc && idx === 0 && (
+                <SidebarDocReorderLine id={`doc-before:${doc.id}`} depth={depth + 1} />
+              )}
+              <DraggableFolderDoc doc={doc} depth={depth} onKebabDoc={onDocKebab} />
+              {isDraggingDoc && (
+                <SidebarDocReorderLine id={`doc-after:${doc.id}`} depth={depth + 1} />
+              )}
+            </div>
           ))}
         </>
       )}
@@ -259,6 +279,31 @@ function DraggableFolderNode({
   );
 }
 
+// ── Sidebar document reorder target ──────────────────────────────────────────
+
+function SidebarDocReorderLine({
+  id,
+  depth,
+}: {
+  id: string;
+  depth: number;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id,
+    data: { type: "doc-reorder", dropId: id },
+  });
+
+  return (
+    <div ref={setNodeRef} className="px-2" style={{ paddingLeft: `${depth * 12 + 20}px` }}>
+      <div
+        className={`h-0.5 rounded-full transition-colors ${
+          isOver ? "bg-[var(--color-accent)]" : "bg-transparent"
+        }`}
+      />
+    </div>
+  );
+}
+
 // ── Draggable doc inside an expanded folder ───────────────────────────────────
 
 function DraggableFolderDoc({
@@ -271,7 +316,7 @@ function DraggableFolderDoc({
   onKebabDoc: (e: React.MouseEvent, docId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `doc:${doc.id}`,
+    id: `sidebar-doc:${doc.id}`,
     data: { type: "document", docId: doc.id },
   });
 
@@ -284,10 +329,7 @@ function DraggableFolderDoc({
       style={{ paddingLeft: `${(depth + 1) * 12 + 8}px`, opacity: isDragging ? 0.4 : 1 }}
     >
       <span className="w-3 h-3 shrink-0" />
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--color-muted)]">
-        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-        <polyline points="14 2 14 8 20 8" />
-      </svg>
+      <FileText size={11} className="shrink-0 text-[var(--color-muted)]" />
       <Link
         href={`/documents/${doc.id}`}
         className="flex-1 truncate text-xs font-mono text-[var(--color-muted)] hover:text-black transition-colors"
@@ -338,10 +380,7 @@ function RootDropZone({
       onClick={() => onSelectFolder(null)}
     >
       <span className="w-3 h-3 shrink-0" />
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-        <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-        <polyline points="9 22 9 12 15 12 15 22" />
-      </svg>
+      <Home size={12} className="shrink-0" />
       <span>All documents</span>
     </div>
   );
@@ -357,7 +396,7 @@ function UnfiledDocRow({
   onKebabDoc: (e: React.MouseEvent, docId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `doc:${doc.id}`,
+    id: `sidebar-doc:${doc.id}`,
     data: { type: "document", docId: doc.id },
   });
 
@@ -369,10 +408,7 @@ function UnfiledDocRow({
       className="group flex items-center gap-1.5 py-1 cursor-grab select-none border-2 border-transparent hover:bg-[var(--color-muted-bg)] transition-colors"
       style={{ paddingLeft: "20px", opacity: isDragging ? 0.4 : 1 }}
     >
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--color-muted)]">
-        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-        <polyline points="14 2 14 8 20 8" />
-      </svg>
+      <FileText size={11} className="shrink-0 text-[var(--color-muted)]" />
       <Link
         href={`/documents/${doc.id}`}
         className="flex-1 truncate text-xs font-mono text-[var(--color-muted)] hover:text-black transition-colors"
@@ -399,12 +435,14 @@ export function FolderTree({
   documents,
   selectedFolderId,
   overDropTarget,
+  activeId,
   onSelectFolder,
   onFolderCreated,
   onFolderRenamed,
   onFolderDeleted,
   onDocumentCreated,
   onDocumentDeleted,
+  onCollapse,
 }: Props) {
   const router = useRouter();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -420,6 +458,11 @@ export function FolderTree({
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const docKebabMenuRef = useRef<HTMLDivElement>(null);
   const savePreferencesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverExpandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isDraggingDoc = activeId?.startsWith("doc:") || activeId?.startsWith("sidebar-doc:") || false;
+  const activeFolderId = activeId?.startsWith("folder")
+    ? (activeId.startsWith("folder-main:") ? activeId.slice(12) : activeId.slice(7))
+    : null;
 
   useEffect(() => {
     if (renaming) renameRef.current?.focus();
@@ -465,6 +508,7 @@ export function FolderTree({
     return () => {
       cancelled = true;
       if (savePreferencesTimerRef.current) clearTimeout(savePreferencesTimerRef.current);
+      if (hoverExpandTimerRef.current) clearTimeout(hoverExpandTimerRef.current);
     };
   }, []);
 
@@ -493,6 +537,35 @@ export function FolderTree({
       if (savePreferencesTimerRef.current) clearTimeout(savePreferencesTimerRef.current);
     };
   }, [expandedIds, preferencesReady]);
+
+  useEffect(() => {
+    const hoveredFolderId = overDropTarget?.kind === "inside" ? overDropTarget.folderId : null;
+    const isDraggingFolder = activeFolderId !== null;
+
+    if (hoverExpandTimerRef.current) {
+      clearTimeout(hoverExpandTimerRef.current);
+      hoverExpandTimerRef.current = null;
+    }
+
+    if (!hoveredFolderId || expandedIds.has(hoveredFolderId)) return;
+    if (!isDraggingDoc && !isDraggingFolder) return;
+    if (hoveredFolderId === activeFolderId) return;
+
+    hoverExpandTimerRef.current = setTimeout(() => {
+      setExpandedIds((prev) => {
+        if (prev.has(hoveredFolderId)) return prev;
+        return new Set([...prev, hoveredFolderId]);
+      });
+      hoverExpandTimerRef.current = null;
+    }, 500);
+
+    return () => {
+      if (hoverExpandTimerRef.current) {
+        clearTimeout(hoverExpandTimerRef.current);
+        hoverExpandTimerRef.current = null;
+      }
+    };
+  }, [activeFolderId, expandedIds, isDraggingDoc, overDropTarget]);
 
   useEffect(() => {
     if (!contextMenu && !docKebabMenu) return;
@@ -633,7 +706,7 @@ export function FolderTree({
           title: "Untitled",
           content: "",
           tags: [],
-          folderId,
+          folder_id: folderId,
         }),
       });
       if (!res.ok) return;
@@ -675,8 +748,8 @@ export function FolderTree({
     setNewFolderName("");
   }
 
-  const rootFolders = folders.filter((f) => f.parentId === null);
-  const unfiledDocs = documents.filter((d) => !d.folderId);
+  const rootFolders = sortFoldersForTree(folders.filter((f) => f.parentId === null));
+  const unfiledDocs = sortDocumentsForTree(documents.filter((d) => !d.folderId));
 
   return (
     <div className="relative" onClick={closeAll}>
@@ -694,23 +767,25 @@ export function FolderTree({
               className="text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"
               title="New file"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="12" y1="11" x2="12" y2="17" />
-                <line x1="9" y1="14" x2="15" y2="14" />
-              </svg>
+              <FilePlus size={12} />
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); startCreate(null); }}
               className="text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"
               title="New folder"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
+              <Plus size={12} strokeWidth={2.5} />
             </button>
+            {onCollapse && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onCollapse(); }}
+                title="Hide folder sidebar"
+                className="w-7 h-7 flex items-center justify-center border-2 border-black bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity"
+                style={{ boxShadow: "var(--shadow-button)" }}
+              >
+                <ChevronLeft size={12} strokeWidth={2.5} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -734,15 +809,14 @@ export function FolderTree({
             onToggleExpand={toggleExpand}
             onContextMenu={handleContextMenu}
             onDocKebab={openDocKebab}
+            isDraggingDoc={isDraggingDoc}
           />
         ))}
 
         {creating && (
           <div className="flex items-center gap-1.5 px-2 py-1" style={{ paddingLeft: creating.parentId ? "24px" : "8px" }}>
             <span className="w-3 h-3 shrink-0" />
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--color-accent)]">
-              <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-            </svg>
+            <Folder size={12} className="shrink-0 text-[var(--color-accent)]" />
             <input
               ref={createRef}
               value={newFolderName}
@@ -759,8 +833,16 @@ export function FolderTree({
           </div>
         )}
 
-        {unfiledDocs.map((doc) => (
-          <UnfiledDocRow key={doc.id} doc={doc} onKebabDoc={openDocKebab} />
+        {unfiledDocs.map((doc, idx) => (
+          <div key={doc.id}>
+            {isDraggingDoc && idx === 0 && (
+              <SidebarDocReorderLine id={`doc-before:${doc.id}`} depth={1} />
+            )}
+            <UnfiledDocRow doc={doc} onKebabDoc={openDocKebab} />
+            {isDraggingDoc && (
+              <SidebarDocReorderLine id={`doc-after:${doc.id}`} depth={1} />
+            )}
+          </div>
         ))}
       </div>
 

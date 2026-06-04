@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ChatSession, CitationRef, KayaDocument } from "@/types/chat";
+import type { ChatSession, CitationRef, DocumentContext, KayaDocument } from "@/types/chat";
 import { ChatPanel } from "./ChatPanel";
 
 type Props = {
@@ -18,72 +18,44 @@ async function fetchSessions(): Promise<ChatSession[]> {
   }
 }
 
-async function createSession(title = "Document copilot"): Promise<ChatSession | null> {
-  try {
-    const res = await fetch("/api/sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
-    });
-    return (await res.json()) as ChatSession;
-  } catch {
-    return null;
-  }
-}
-
 export function DocumentChatSidebar({ document, onDocumentUpdated }: Props) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loadingSessions, setLoadingSessions] = useState(true);
-  const requestContext = useMemo(
-    () => [
-      "Current document context:",
-      `Document ID: ${document.id}`,
-      `Title: ${document.title}`,
-      `Tags: ${document.tags.length > 0 ? document.tags.join(", ") : "(none)"}`,
-      "Full document body:",
-      document.body,
-    ].join("\n"),
+  const requestContext = useMemo<DocumentContext>(
+    () => ({
+      docId: document.id,
+      title: document.title,
+      tags: document.tags,
+      body: document.body,
+    }),
     [document.body, document.id, document.tags, document.title],
   );
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadSessions() {
-      const existing = await fetchSessions();
+    fetchSessions().then((existing) => {
       if (cancelled) return;
-
-      if (existing.length > 0) {
-        setSessions(existing);
-        setSessionId((current) => current ?? existing[0].id);
-        setLoadingSessions(false);
-        return;
-      }
-
-      const created = await createSession(`Editing ${document.title}`);
-      if (cancelled) return;
-
-      if (created) {
-        setSessions([created]);
-        setSessionId(created.id);
-      }
+      setSessions(existing);
       setLoadingSessions(false);
-    }
-
-    void loadSessions();
+    }).catch(() => {
+      if (!cancelled) setLoadingSessions(false);
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [document.title]);
+  }, []);
 
-  const handleNewSession = useCallback(async () => {
-    const created = await createSession(`Editing ${document.title}`);
-    if (!created) return;
-    setSessions((prev) => [created, ...prev]);
-    setSessionId(created.id);
-  }, [document.title]);
+  const handleNewSession = useCallback(() => {
+    setSessionId(null);
+  }, []);
+
+  const handleSessionCreated = useCallback((session: ChatSession) => {
+    setSessions((prev) => [session, ...prev]);
+    setSessionId(session.id);
+  }, []);
 
   const handleSessionRenamed = useCallback((renamedId: string, title: string) => {
     setSessions((prev) => prev.map((session) => (
@@ -131,12 +103,12 @@ export function DocumentChatSidebar({ document, onDocumentUpdated }: Props) {
           </label>
           <select
             value={sessionId ?? ""}
-            onChange={(e) => setSessionId(e.target.value)}
-            disabled={loadingSessions || sessions.length === 0}
+            onChange={(e) => setSessionId(e.target.value || null)}
+            disabled={loadingSessions}
             className="w-full border-2 border-black bg-white px-3 py-2 text-xs font-mono text-black outline-none"
             style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
           >
-            {sessions.length === 0 && <option value="">Loading conversations…</option>}
+            <option value="">New conversation</option>
             {sessions.map((session) => (
               <option key={session.id} value={session.id}>
                 {session.title}
@@ -148,11 +120,12 @@ export function DocumentChatSidebar({ document, onDocumentUpdated }: Props) {
 
       <div className="min-h-0 flex-1">
         <ChatPanel
-          key={sessionId ?? "empty-session"}
+          key={sessionId ?? "pending"}
           sessionId={sessionId}
           onCitationClick={handleCitationClick}
           onDocumentUpdated={onDocumentUpdated}
           onSessionRenamed={handleSessionRenamed}
+          onSessionCreated={handleSessionCreated}
           requestContext={requestContext}
         />
       </div>

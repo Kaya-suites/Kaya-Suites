@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { useDroppable } from "@dnd-kit/core";
+import { Home, Folder, FileText, ChevronRight, FolderInput } from "lucide-react";
 
 type DocumentSummary = {
   id: string;
@@ -9,6 +11,7 @@ type DocumentSummary = {
   tags: string[];
   lastReviewed?: string;
   folderId?: string | null;
+  sortOrder?: number;
 };
 
 type FolderOption = {
@@ -26,7 +29,37 @@ type Props = {
   onMoveToFolder?: (docId: string, folderId: string | null) => void;
   renderWrapper?: (doc: DocumentSummary, node: React.ReactNode) => React.ReactNode;
   renderFolderWrapper?: (folder: FolderOption, node: React.ReactNode) => React.ReactNode;
+  activeId?: string | null;
 };
+
+// ── Reorder drop zone ─────────────────────────────────────────────────────────
+
+function ReorderLine({
+  id,
+  isDoc,
+}: {
+  id: string;
+  isDoc: boolean;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id,
+    data: { type: isDoc ? "doc-reorder" : "folder-reorder", dropId: id },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className="h-1 relative -my-0.5"
+      style={{ zIndex: isOver ? 10 : undefined }}
+    >
+      <div
+        className={`absolute inset-x-4 top-0 h-0.5 rounded-full transition-all ${
+          isOver ? "bg-[var(--color-accent)] opacity-100" : "bg-transparent"
+        }`}
+      />
+    </div>
+  );
+}
 
 // ── Folder picker popover ─────────────────────────────────────────────────────
 
@@ -81,10 +114,7 @@ function FolderPicker({
         }`}
         onClick={() => { onMove(docId, null); onClose(); }}
       >
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-          <polyline points="9 22 9 12 15 12 15 22" />
-        </svg>
+        <Home size={11} />
         No folder
       </button>
 
@@ -99,9 +129,7 @@ function FolderPicker({
           style={{ paddingLeft: `${depth * 12 + 12}px` }}
           onClick={() => { onMove(docId, folder.id); onClose(); }}
         >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-          </svg>
+          <Folder size={11} className="shrink-0" />
           {folder.name}
         </button>
       ))}
@@ -115,8 +143,11 @@ function FolderPicker({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function DocumentList({ documents, loading, folders, subfolders, onSelectFolder, onMoveToFolder, renderWrapper, renderFolderWrapper }: Props) {
+export function DocumentList({ documents, loading, folders, subfolders, onSelectFolder, onMoveToFolder, renderWrapper, renderFolderWrapper, activeId }: Props) {
   const [openPickerId, setOpenPickerId] = useState<string | null>(null);
+
+  const isDraggingDoc = activeId?.startsWith("doc:") || activeId?.startsWith("sidebar-doc:");
+  const isDraggingFolder = activeId?.startsWith("folder") ?? false;
 
   if (loading) {
     return (
@@ -133,10 +164,7 @@ export function DocumentList({ documents, loading, folders, subfolders, onSelect
   if (!hasContent) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-[var(--color-muted)] text-sm gap-3 font-mono">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-          <polyline points="14 2 14 8 20 8" />
-        </svg>
+        <FileText size={32} />
         <p className="uppercase tracking-wider text-xs font-bold">No documents yet. Ask Kaya to create one.</p>
       </div>
     );
@@ -144,7 +172,7 @@ export function DocumentList({ documents, loading, folders, subfolders, onSelect
 
   return (
     <div className="divide-y-2 divide-black">
-      {subfolders?.map((folder) => {
+      {subfolders?.map((folder, idx) => {
         const folderRow = (
           <div key={folder.id} className="group relative flex items-stretch">
             <button
@@ -152,9 +180,7 @@ export function DocumentList({ documents, loading, folders, subfolders, onSelect
               className="flex-1 flex items-start gap-4 px-6 py-4 hover:bg-[var(--color-muted-bg)] transition-colors min-w-0 text-left"
             >
               <div className="shrink-0 mt-0.5 text-[var(--color-muted)] group-hover:text-[var(--color-accent)] transition-colors">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                </svg>
+                <Folder size={16} />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold uppercase tracking-wider text-black group-hover:text-[var(--color-accent)] truncate transition-colors font-mono">
@@ -162,27 +188,32 @@ export function DocumentList({ documents, loading, folders, subfolders, onSelect
                 </p>
               </div>
               <div className="shrink-0 text-[var(--color-muted)] group-hover:text-black mt-0.5 transition-colors">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
+                <ChevronRight size={14} />
               </div>
             </button>
           </div>
         );
-        return renderFolderWrapper ? renderFolderWrapper(folder, folderRow) : folderRow;
+        return (
+          <div key={folder.id}>
+            {isDraggingFolder && idx === 0 && (
+              <ReorderLine id={`folder-list-before:${folder.id}`} isDoc={false} />
+            )}
+            {renderFolderWrapper ? renderFolderWrapper(folder, folderRow) : folderRow}
+            {isDraggingFolder && (
+              <ReorderLine id={`folder-list-after:${folder.id}`} isDoc={false} />
+            )}
+          </div>
+        );
       })}
-      {documents.map((doc) => {
+      {documents.map((doc, idx) => {
         const row = (
-          <div key={doc.id} className="group relative flex items-stretch">
+          <div className="group relative flex items-stretch">
             <Link
               href={`/documents/${doc.id}`}
               className="flex-1 flex items-start gap-4 px-6 py-4 hover:bg-[var(--color-muted-bg)] transition-colors min-w-0"
             >
               <div className="shrink-0 mt-0.5 text-[var(--color-muted)] group-hover:text-[var(--color-accent)] transition-colors">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
+                <FileText size={16} />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold uppercase tracking-wider text-black group-hover:text-[var(--color-accent)] truncate transition-colors font-mono">
@@ -206,9 +237,7 @@ export function DocumentList({ documents, loading, folders, subfolders, onSelect
                 </div>
               </div>
               <div className="shrink-0 text-[var(--color-muted)] group-hover:text-black mt-0.5 transition-colors">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
+                <ChevronRight size={14} />
               </div>
             </Link>
 
@@ -221,11 +250,7 @@ export function DocumentList({ documents, loading, folders, subfolders, onSelect
                   style={{ borderRadius: "var(--border-radius)" }}
                   onClick={() => setOpenPickerId(openPickerId === doc.id ? null : doc.id)}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                    <line x1="12" y1="11" x2="12" y2="17" />
-                    <line x1="9" y1="14" x2="15" y2="14" />
-                  </svg>
+                  <FolderInput size={14} />
                 </button>
 
                 {openPickerId === doc.id && (
@@ -242,7 +267,17 @@ export function DocumentList({ documents, loading, folders, subfolders, onSelect
           </div>
         );
 
-        return renderWrapper ? renderWrapper(doc, row) : row;
+        return (
+          <div key={doc.id}>
+            {isDraggingDoc && idx === 0 && (
+              <ReorderLine id={`doc-before:${doc.id}`} isDoc={true} />
+            )}
+            {renderWrapper ? renderWrapper(doc, row) : row}
+            {isDraggingDoc && (
+              <ReorderLine id={`doc-after:${doc.id}`} isDoc={true} />
+            )}
+          </div>
+        );
       })}
     </div>
   );

@@ -5,11 +5,10 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { KayaDocument } from "@/types/chat";
 import { DocumentChatSidebar } from "./DocumentChatSidebar";
-import { useResizable } from "@/hooks/useResizable";
-import { FolderTree, type Folder, type DocumentSummary } from "./FolderTree";
+import { ChevronLeft, MessageSquare, Copy, Check, Tag } from "lucide-react";
 
 const KayaMarkdownEditor = dynamic(
-  () => import("./KayaMarkdownEditor").then((m) => m.KayaMarkdownEditor),
+  () => import("@kaya/markdown-editor").then((m) => m.KayaMarkdownEditor),
   { ssr: false },
 );
 
@@ -24,11 +23,11 @@ export function DocumentEditor({ doc }: Props) {
   const [title, setTitle] = useState(doc.title);
   const [body, setBody] = useState(doc.body);
   const [tagsInput, setTagsInput] = useState(doc.tags.join(", "));
+  const [chatOpen, setChatOpen] = useState(false);
   const [status, setStatus] = useState<SaveStatus>("idle");
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied">("idle");
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pendingRemoteDoc, setPendingRemoteDoc] = useState<KayaDocument | null>(null);
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [documents, setDocuments] = useState<DocumentSummary[]>([]);
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(doc.folderId ?? null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSavingRef = useRef(false);
@@ -41,7 +40,6 @@ export function DocumentEditor({ doc }: Props) {
     body: doc.body,
     tagsInput: doc.tags.join(", "),
   });
-  const { width: sidebarWidth, onMouseDown: onResizeStart } = useResizable("document-detail-sidebar-width", 220);
 
   const isDirty =
     title !== serverDoc.title || body !== serverDoc.body || tagsInput !== serverDoc.tags.join(", ");
@@ -52,7 +50,6 @@ export function DocumentEditor({ doc }: Props) {
     setTitle(nextDoc.title);
     setBody(nextDoc.body);
     setTagsInput(nextDoc.tags.join(", "));
-    setSelectedFolderId(nextDoc.folderId ?? null);
     setPendingRemoteDoc(null);
   }, []);
 
@@ -196,52 +193,20 @@ export function DocumentEditor({ doc }: Props) {
   }, []);
 
   useEffect(() => {
+    return () => { if (copyTimer.current) clearTimeout(copyTimer.current); };
+  }, []);
+
+  async function handleCopyMarkdown() {
+    await navigator.clipboard.writeText(body);
+    setCopyStatus("copied");
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopyStatus("idle"), 2000);
+  }
+
+  useEffect(() => {
     return () => {
       if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
     };
-  }, []);
-
-  useEffect(() => {
-    Promise.all([
-      fetch("/api/folders").then((r) => (r.ok ? r.json() : [])),
-      fetch("/api/documents").then((r) => (r.ok ? r.json() : [])),
-    ])
-      .then(([foldersData, docsData]: [Folder[], DocumentSummary[]]) => {
-        setFolders(foldersData);
-        setDocuments(docsData);
-      })
-      .catch(() => {});
-  }, [doc.id]);
-
-  const handleFolderCreated = useCallback((folder: Folder) => {
-    setFolders((prev) => [...prev, folder]);
-  }, []);
-
-  const handleFolderRenamed = useCallback((folder: Folder) => {
-    setFolders((prev) => prev.map((item) => (item.id === folder.id ? folder : item)));
-  }, []);
-
-  const handleFolderDeleted = useCallback((id: string) => {
-    setFolders((prev) => {
-      const toDelete = new Set<string>();
-      const queue = [id];
-      while (queue.length) {
-        const current = queue.pop()!;
-        toDelete.add(current);
-        prev.filter((folder) => folder.parentId === current).forEach((folder) => queue.push(folder.id));
-      }
-      setDocuments((docs) => docs.filter((item) => !item.folderId || !toDelete.has(item.folderId)));
-      return prev.filter((folder) => !toDelete.has(folder.id));
-    });
-    if (selectedFolderId === id) setSelectedFolderId(null);
-  }, [selectedFolderId]);
-
-  const handleDocumentCreated = useCallback((newDoc: DocumentSummary) => {
-    setDocuments((prev) => [newDoc, ...prev.filter((item) => item.id !== newDoc.id)]);
-  }, []);
-
-  const handleDocumentDeleted = useCallback((id: string) => {
-    setDocuments((prev) => prev.filter((item) => item.id !== id));
   }, []);
 
   function handleTitleChange(value: string) {
@@ -263,30 +228,14 @@ export function DocumentEditor({ doc }: Props) {
     void handleSaveRef.current();
   }
 
+  function handleClearAll() {
+    if (!window.confirm("Clear all content? This cannot be undone.")) return;
+    if (status === "saved") setStatus("idle");
+    setBody("");
+  }
+
   return (
     <div className="flex h-full min-h-0 bg-[var(--color-surface)]">
-      <div
-        className="shrink-0 overflow-y-auto border-r-2 border-black bg-[var(--color-background)]"
-        style={{ width: `${sidebarWidth}px` }}
-      >
-        <FolderTree
-          folders={folders}
-          documents={documents}
-          selectedFolderId={selectedFolderId}
-          onSelectFolder={setSelectedFolderId}
-          onFolderCreated={handleFolderCreated}
-          onFolderRenamed={handleFolderRenamed}
-          onFolderDeleted={handleFolderDeleted}
-          onDocumentCreated={handleDocumentCreated}
-          onDocumentDeleted={handleDocumentDeleted}
-        />
-      </div>
-
-      <div
-        className="shrink-0 w-0.5 border-r-2 border-black cursor-col-resize hover:border-[var(--color-accent)] transition-colors"
-        onMouseDown={onResizeStart}
-      />
-
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center gap-3 px-6 py-3 border-b-2 border-black bg-[var(--color-background)] shrink-0">
           <Link
@@ -294,9 +243,7 @@ export function DocumentEditor({ doc }: Props) {
             className="flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-[var(--color-muted)] hover:text-black transition-colors font-mono border-2 border-transparent hover:border-black px-2 py-1"
             style={{ borderRadius: "var(--border-radius)" }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
+            <ChevronLeft size={14} />
             Docs
           </Link>
 
@@ -311,11 +258,44 @@ export function DocumentEditor({ doc }: Props) {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setChatOpen((v) => !v)}
+              title={chatOpen ? "Hide chat" : "Show chat"}
+              className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black font-mono transition-colors hover:bg-[var(--color-muted-bg)]"
+              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)", background: chatOpen ? "var(--color-muted-bg)" : "var(--color-surface)" }}
+            >
+              <MessageSquare size={13} />
+              {chatOpen ? "Hide chat" : "Show chat"}
+            </button>
+            <button
+              onClick={() => void handleCopyMarkdown()}
+              title="Copy document as Markdown"
+              className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black font-mono transition-colors hover:bg-[var(--color-muted-bg)]"
+              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
+            >
+              {copyStatus === "copied" ? (
+                <>
+                  <Check size={12} strokeWidth={1.8} />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy size={13} />
+                  Copy MD
+                </>
+              )}
+            </button>
+            <button
+              onClick={handleClearAll}
+              title="Clear all content"
+              className="px-2 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black font-mono transition-colors hover:bg-[var(--color-danger)] hover:text-white hover:border-[var(--color-danger)]"
+              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
+            >
+              Clear
+            </button>
             {status === "saved" && (
               <span className="text-xs text-[var(--color-success)] flex items-center gap-1 font-mono font-bold uppercase">
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                  <path d="M3 8l4 4 6-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+                <Check size={12} strokeWidth={1.8} />
                 Saved
               </span>
             )}
@@ -334,10 +314,7 @@ export function DocumentEditor({ doc }: Props) {
         </div>
 
         <div className="flex items-center gap-2 px-6 py-2 border-b-2 border-black bg-[var(--color-background)] shrink-0">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--color-muted)] shrink-0">
-            <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
-            <line x1="7" y1="7" x2="7.01" y2="7" />
-          </svg>
+          <Tag size={12} className="text-[var(--color-muted)] shrink-0" />
           <input
             type="text"
             value={tagsInput}
@@ -367,10 +344,12 @@ export function DocumentEditor({ doc }: Props) {
         </div>
       </div>
 
-      <DocumentChatSidebar
-        document={serverDoc}
-        onDocumentUpdated={handleDocumentUpdated}
-      />
+      {chatOpen && (
+        <DocumentChatSidebar
+          document={serverDoc}
+          onDocumentUpdated={handleDocumentUpdated}
+        />
+      )}
     </div>
   );
 }

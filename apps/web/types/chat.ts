@@ -68,6 +68,15 @@ export type KayaDocument = {
   folderId?: string | null;
 };
 
+/// Structured per-turn document focus sent to the chat backend.
+/// Maps to `DocumentFocusPayload` in `crates/kaya-server/src/routes/chat.rs`.
+export type DocumentContext = {
+  docId: string;
+  title: string;
+  tags: string[];
+  body: string;
+};
+
 export type SSEEvent =
   | { type: "TextChunk"; content: string }
   | { type: "CitationFound"; docId: string; paragraphId: string; label: number; title: string }
