@@ -84,7 +84,7 @@ impl StorageAdapter for SqliteAdapter {
     async fn get_document(&self, id: Uuid) -> Result<Document, StorageError> {
         let id_str = id.to_string();
         let row = sqlx::query(
-            "SELECT frontmatter_json, body, deleted_at, folder_id FROM documents WHERE id = ?",
+            "SELECT frontmatter_json, body, deleted_at, folder_id, sort_order FROM documents WHERE id = ?",
         )
         .bind(&id_str)
         .fetch_optional(&self.inner.pool)
@@ -109,6 +109,7 @@ impl StorageAdapter for SqliteAdapter {
             .map(Uuid::parse_str)
             .transpose()
             .map_err(box_err)?;
+        doc.sort_order = row.try_get("sort_order").map_err(box_err)?;
         Ok(doc)
     }
 
@@ -119,20 +120,34 @@ impl StorageAdapter for SqliteAdapter {
 
     async fn delete_document(&self, id: Uuid) -> Result<(), StorageError> {
         let id_str = id.to_string();
-        let exists = sqlx::query("SELECT 1 FROM documents WHERE id = ? AND deleted_at IS NULL")
-            .bind(&id_str)
-            .fetch_optional(&self.inner.pool)
-            .await
-            .map_err(box_err)?;
+        let row = sqlx::query(
+            "SELECT folder_id FROM documents WHERE id = ? AND deleted_at IS NULL",
+        )
+        .bind(&id_str)
+        .fetch_optional(&self.inner.pool)
+        .await
+        .map_err(box_err)?;
 
-        if exists.is_some() {
+        if let Some(row) = row {
             let now = chrono::Utc::now().to_rfc3339();
+            let folder_id_str: Option<String> = row.try_get("folder_id").map_err(box_err)?;
+            let folder_id = folder_id_str
+                .as_deref()
+                .map(Uuid::parse_str)
+                .transpose()
+                .map_err(box_err)?;
+
+            let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
             sqlx::query("UPDATE documents SET deleted_at = ? WHERE id = ?")
                 .bind(&now)
                 .bind(&id_str)
-                .execute(&self.inner.pool)
+                .execute(&mut *tx)
                 .await
                 .map_err(box_err)?;
+            // Compact remaining siblings so no gaps accumulate.
+            let sibling_ids = list_doc_ids_sqlite(&mut *tx, folder_id, None).await?;
+            write_doc_positions_sqlite(&mut *tx, &sibling_ids, &now).await?;
+            tx.commit().await.map_err(box_err)?;
         }
 
         Ok(())
@@ -150,8 +165,9 @@ impl StorageAdapter for SqliteAdapter {
 
     async fn list_documents(&self) -> Result<Vec<Document>, StorageError> {
         let rows = sqlx::query(
-            "SELECT frontmatter_json, body, folder_id \
-             FROM documents WHERE deleted_at IS NULL ORDER BY updated_at DESC",
+            "SELECT frontmatter_json, body, folder_id, sort_order \
+             FROM documents WHERE deleted_at IS NULL \
+             ORDER BY sort_order ASC, updated_at DESC",
         )
         .fetch_all(&self.inner.pool)
         .await
@@ -169,6 +185,7 @@ impl StorageAdapter for SqliteAdapter {
                 .map(Uuid::parse_str)
                 .transpose()
                 .map_err(box_err)?;
+            doc.sort_order = row.try_get("sort_order").map_err(box_err)?;
             docs.push(doc);
         }
         Ok(docs)
@@ -180,9 +197,9 @@ impl StorageAdapter for SqliteAdapter {
     ) -> Result<Vec<Document>, StorageError> {
         let rows = match folder_id {
             None => sqlx::query(
-                "SELECT frontmatter_json, body, folder_id \
+                "SELECT frontmatter_json, body, folder_id, sort_order \
                      FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL \
-                     ORDER BY updated_at DESC",
+                     ORDER BY sort_order ASC, updated_at DESC",
             )
             .fetch_all(&self.inner.pool)
             .await
@@ -190,9 +207,9 @@ impl StorageAdapter for SqliteAdapter {
             Some(fid) => {
                 let fid_str = fid.to_string();
                 sqlx::query(
-                    "SELECT frontmatter_json, body, folder_id \
+                    "SELECT frontmatter_json, body, folder_id, sort_order \
                      FROM documents WHERE deleted_at IS NULL AND folder_id = ? \
-                     ORDER BY updated_at DESC",
+                     ORDER BY sort_order ASC, updated_at DESC",
                 )
                 .bind(&fid_str)
                 .fetch_all(&self.inner.pool)
@@ -213,9 +230,17 @@ impl StorageAdapter for SqliteAdapter {
                 .map(Uuid::parse_str)
                 .transpose()
                 .map_err(box_err)?;
+            doc.sort_order = row.try_get("sort_order").map_err(box_err)?;
             docs.push(doc);
         }
         Ok(docs)
+    }
+
+    async fn next_document_sort_order(
+        &self,
+        folder_id: Option<Uuid>,
+    ) -> Result<i64, StorageError> {
+        next_doc_sort_order_sqlite(&self.inner.pool, folder_id).await
     }
 
     async fn move_document_to_folder(
@@ -224,19 +249,89 @@ impl StorageAdapter for SqliteAdapter {
         folder_id: Option<Uuid>,
     ) -> Result<(), StorageError> {
         let doc_id_str = doc_id.to_string();
-        let folder_id_str = folder_id.map(|id| id.to_string());
         let now = chrono::Utc::now().to_rfc3339();
 
+        // Read source folder before the transaction.
+        let row = sqlx::query(
+            "SELECT folder_id FROM documents WHERE id = ? AND deleted_at IS NULL",
+        )
+        .bind(&doc_id_str)
+        .fetch_optional(&self.inner.pool)
+        .await
+        .map_err(box_err)?
+        .ok_or(StorageError::NotFound(doc_id))?;
+        let src_folder_id_str: Option<String> = row.try_get("folder_id").map_err(box_err)?;
+        let src_folder_id = src_folder_id_str
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(box_err)?;
+
+        if src_folder_id == folder_id {
+            return Ok(());
+        }
+
+        // Place doc at the end of the destination (safe under SQLite's serialized writes).
+        let dest_sort_order = next_doc_sort_order_sqlite(&self.inner.pool, folder_id).await?;
+        let folder_id_str = folder_id.map(|id| id.to_string());
+
+        let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
+
         sqlx::query(
-            "UPDATE documents SET folder_id = ?, updated_at = ? \
+            "UPDATE documents SET folder_id = ?, sort_order = ?, updated_at = ? \
              WHERE id = ? AND deleted_at IS NULL",
         )
         .bind(&folder_id_str)
+        .bind(dest_sort_order)
         .bind(&now)
         .bind(&doc_id_str)
-        .execute(&self.inner.pool)
+        .execute(&mut *tx)
         .await
         .map_err(box_err)?;
+
+        // Compact the source folder (close the gap left by the removed document).
+        let src_ids = list_doc_ids_sqlite(&mut *tx, src_folder_id, None).await?;
+        write_doc_positions_sqlite(&mut *tx, &src_ids, &now).await?;
+
+        // Compact the destination folder (ensures 0, 1, 2, … with no collisions).
+        let dest_ids = list_doc_ids_sqlite(&mut *tx, folder_id, None).await?;
+        write_doc_positions_sqlite(&mut *tx, &dest_ids, &now).await?;
+
+        tx.commit().await.map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn reorder_document(
+        &self,
+        doc_id: Uuid,
+        new_index: usize,
+    ) -> Result<(), StorageError> {
+        let doc_id_str = doc_id.to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let folder_id_str: Option<String> = sqlx::query(
+            "SELECT folder_id FROM documents WHERE id = ? AND deleted_at IS NULL",
+        )
+        .bind(&doc_id_str)
+        .fetch_optional(&self.inner.pool)
+        .await
+        .map_err(box_err)?
+        .ok_or(StorageError::NotFound(doc_id))?
+        .try_get("folder_id")
+        .map_err(box_err)?;
+
+        let folder_id = folder_id_str
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(box_err)?;
+
+        let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
+        let mut sibling_ids = list_doc_ids_sqlite(&mut *tx, folder_id, Some(doc_id)).await?;
+        let insert_at = new_index.min(sibling_ids.len());
+        sibling_ids.insert(insert_at, doc_id_str);
+        write_doc_positions_sqlite(&mut *tx, &sibling_ids, &now).await?;
+        tx.commit().await.map_err(box_err)?;
 
         Ok(())
     }
@@ -365,13 +460,32 @@ impl StorageAdapter for SqliteAdapter {
         let folder = self.get_folder(id).await?;
         let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
 
-        // Move all documents in this folder to root.
-        sqlx::query("UPDATE documents SET folder_id = NULL, updated_at = ? WHERE folder_id = ?")
-            .bind(&now)
-            .bind(&id_str)
-            .execute(&mut *tx)
-            .await
-            .map_err(box_err)?;
+        // Move docs to root, placing them AFTER existing root docs to avoid
+        // sort_order collisions. Offset by (current root max + 1) so they sort
+        // to the end before the compaction step re-sequences everything.
+        let root_max: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(sort_order), -1) \
+             FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL",
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(box_err)?;
+
+        sqlx::query(
+            "UPDATE documents \
+             SET folder_id = NULL, sort_order = sort_order + ?, updated_at = ? \
+             WHERE folder_id = ? AND deleted_at IS NULL",
+        )
+        .bind(root_max + 1)
+        .bind(&now)
+        .bind(&id_str)
+        .execute(&mut *tx)
+        .await
+        .map_err(box_err)?;
+
+        // Compact root documents to 0, 1, 2, … (no gaps or duplicate values).
+        let root_ids = list_doc_ids_sqlite(&mut *tx, None, None).await?;
+        write_doc_positions_sqlite(&mut *tx, &root_ids, &now).await?;
 
         let mut parent_children =
             list_folder_ids_sqlite(&mut *tx, folder.parent_id, Some(id)).await?;
@@ -723,6 +837,43 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), StorageError> {
     .await
     .map_err(box_err)?;
 
+    // ── Documents: sort_order column ──────────────────────────────────────────
+
+    // Add column if this DB pre-dates the sort_order feature (no-op if exists).
+    let _ = sqlx::query("ALTER TABLE documents ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS documents_folder_sort_idx
+         ON documents (folder_id, sort_order)",
+    )
+    .execute(pool)
+    .await
+    .map_err(box_err)?;
+
+    // Normalize document sort_orders on every startup. This is idempotent when
+    // orders are already sequential; it repairs gaps and collisions caused by
+    // pre-migration data or the old move_document_to_folder that didn't compact.
+    sqlx::query(
+        "WITH ranked AS (
+            SELECT
+                id,
+                ROW_NUMBER() OVER (
+                    PARTITION BY COALESCE(folder_id, '__root__')
+                    ORDER BY sort_order ASC, updated_at DESC, id ASC
+                ) - 1 AS rn
+            FROM documents
+            WHERE deleted_at IS NULL
+        )
+        UPDATE documents
+        SET sort_order = (SELECT ranked.rn FROM ranked WHERE ranked.id = documents.id)
+        WHERE deleted_at IS NULL",
+    )
+    .execute(pool)
+    .await
+    .map_err(box_err)?;
+
     // Chunk metadata + content hashes (FR-6)
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS chunks (
@@ -765,6 +916,92 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), StorageError> {
     .await
     .map_err(box_err)?;
 
+    Ok(())
+}
+
+async fn next_doc_sort_order_sqlite(
+    pool: &SqlitePool,
+    folder_id: Option<Uuid>,
+) -> Result<i64, StorageError> {
+    let row = match folder_id {
+        None => sqlx::query(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort \
+             FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL",
+        )
+        .fetch_one(pool)
+        .await
+        .map_err(box_err)?,
+        Some(fid) => sqlx::query(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort \
+             FROM documents WHERE deleted_at IS NULL AND folder_id = ?",
+        )
+        .bind(fid.to_string())
+        .fetch_one(pool)
+        .await
+        .map_err(box_err)?,
+    };
+    row.try_get("next_sort").map_err(box_err)
+}
+
+async fn list_doc_ids_sqlite(
+    executor: &mut sqlx::SqliteConnection,
+    folder_id: Option<Uuid>,
+    exclude_id: Option<Uuid>,
+) -> Result<Vec<String>, StorageError> {
+    let rows = match (folder_id, exclude_id) {
+        (Some(fid), Some(excl)) => sqlx::query(
+            "SELECT id FROM documents WHERE deleted_at IS NULL AND folder_id = ? AND id != ? \
+             ORDER BY sort_order ASC, updated_at DESC",
+        )
+        .bind(fid.to_string())
+        .bind(excl.to_string())
+        .fetch_all(&mut *executor)
+        .await
+        .map_err(box_err)?,
+        (Some(fid), None) => sqlx::query(
+            "SELECT id FROM documents WHERE deleted_at IS NULL AND folder_id = ? \
+             ORDER BY sort_order ASC, updated_at DESC",
+        )
+        .bind(fid.to_string())
+        .fetch_all(&mut *executor)
+        .await
+        .map_err(box_err)?,
+        (None, Some(excl)) => sqlx::query(
+            "SELECT id FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL AND id != ? \
+             ORDER BY sort_order ASC, updated_at DESC",
+        )
+        .bind(excl.to_string())
+        .fetch_all(&mut *executor)
+        .await
+        .map_err(box_err)?,
+        (None, None) => sqlx::query(
+            "SELECT id FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL \
+             ORDER BY sort_order ASC, updated_at DESC",
+        )
+        .fetch_all(&mut *executor)
+        .await
+        .map_err(box_err)?,
+    };
+
+    rows.into_iter()
+        .map(|row| row.try_get("id").map_err(box_err))
+        .collect()
+}
+
+async fn write_doc_positions_sqlite(
+    executor: &mut sqlx::SqliteConnection,
+    doc_ids: &[String],
+    now: &str,
+) -> Result<(), StorageError> {
+    for (index, doc_id) in doc_ids.iter().enumerate() {
+        sqlx::query("UPDATE documents SET sort_order = ?, updated_at = ? WHERE id = ?")
+            .bind(index as i64)
+            .bind(now)
+            .bind(doc_id)
+            .execute(&mut *executor)
+            .await
+            .map_err(box_err)?;
+    }
     Ok(())
 }
 
@@ -885,10 +1122,11 @@ async fn upsert_document(
     let fm_json = serde_json::to_string(&doc).map_err(box_err)?;
     let now = chrono::Utc::now().to_rfc3339();
     let folder_id_str = doc.folder_id.map(|id| id.to_string());
+    let sort_order = next_doc_sort_order_sqlite(pool, doc.folder_id).await?;
 
     sqlx::query(
-        "INSERT INTO documents (id, title, frontmatter_json, content_hash, updated_at, deleted_at, body, folder_id)
-         VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+        "INSERT INTO documents (id, title, frontmatter_json, content_hash, updated_at, deleted_at, body, folder_id, sort_order)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            title            = excluded.title,
            frontmatter_json = excluded.frontmatter_json,
@@ -905,6 +1143,7 @@ async fn upsert_document(
     .bind(&now)
     .bind(&doc.body)
     .bind(&folder_id_str)
+    .bind(sort_order)
     .execute(pool)
     .await
     .map_err(box_err)?;

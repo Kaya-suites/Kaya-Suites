@@ -54,7 +54,7 @@ impl StorageAdapter for PostgresAdapter {
 
     async fn get_document(&self, id: Uuid) -> Result<Document, StorageError> {
         let row = sqlx::query(
-            "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id
+            "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id, sort_order
              FROM documents
              WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL",
         )
@@ -73,12 +73,13 @@ impl StorageAdapter for PostgresAdapter {
         let now = chrono::Utc::now();
         let related: Vec<String> = doc.related_docs.iter().map(|u| u.to_string()).collect();
         let folder_id_str = doc.folder_id.map(|id| id.to_string());
+        let sort_order = next_doc_sort_order_postgres(&self.pool, self.user_id(), doc.folder_id).await?;
 
         sqlx::query(
             "INSERT INTO documents
                  (id, user_id, title, owner, last_reviewed, tags, related_docs,
-                  body, content_hash, folder_id, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+                  body, content_hash, folder_id, sort_order, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
              ON CONFLICT (id) DO UPDATE SET
                  title         = EXCLUDED.title,
                  owner         = EXCLUDED.owner,
@@ -101,6 +102,7 @@ impl StorageAdapter for PostgresAdapter {
         .bind(&doc.body)
         .bind(&hash)
         .bind(&folder_id_str)
+        .bind(sort_order)
         .bind(now)
         .execute(&self.pool)
         .await
@@ -110,18 +112,47 @@ impl StorageAdapter for PostgresAdapter {
     }
 
     async fn delete_document(&self, id: Uuid) -> Result<(), StorageError> {
-        let now = chrono::Utc::now();
-        sqlx::query(
-            "UPDATE documents
-             SET deleted_at = $1
-             WHERE id = $2 AND user_id = $3 AND deleted_at IS NULL",
+        let id_str = id.to_string();
+        let user_id_str = self.user_id().to_string();
+
+        let row = sqlx::query(
+            "SELECT folder_id FROM documents \
+             WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL",
         )
-        .bind(now)
-        .bind(id.to_string())
-        .bind(self.user_id().to_string())
-        .execute(&self.pool)
+        .bind(&id_str)
+        .bind(&user_id_str)
+        .fetch_optional(&self.pool)
         .await
         .map_err(box_err)?;
+
+        if let Some(row) = row {
+            let folder_id_str: Option<String> = row.try_get("folder_id").map_err(box_err)?;
+            let folder_id = folder_id_str
+                .as_deref()
+                .map(Uuid::parse_str)
+                .transpose()
+                .map_err(box_err)?;
+
+            let now = chrono::Utc::now();
+            let mut tx = self.pool.begin().await.map_err(box_err)?;
+
+            sqlx::query(
+                "UPDATE documents SET deleted_at = $1 \
+                 WHERE id = $2 AND user_id = $3 AND deleted_at IS NULL",
+            )
+            .bind(now)
+            .bind(&id_str)
+            .bind(&user_id_str)
+            .execute(&mut *tx)
+            .await
+            .map_err(box_err)?;
+
+            let sibling_ids =
+                list_doc_ids_postgres(&mut tx, self.user_id(), folder_id, None).await?;
+            write_doc_positions_postgres(&mut tx, &sibling_ids).await?;
+
+            tx.commit().await.map_err(box_err)?;
+        }
         Ok(())
     }
 
@@ -142,10 +173,10 @@ impl StorageAdapter for PostgresAdapter {
 
     async fn list_documents(&self) -> Result<Vec<Document>, StorageError> {
         let rows = sqlx::query(
-            "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id
+            "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id, sort_order
              FROM documents
              WHERE user_id = $1 AND deleted_at IS NULL
-             ORDER BY updated_at DESC",
+             ORDER BY sort_order ASC, updated_at DESC",
         )
         .bind(self.user_id().to_string())
         .fetch_all(&self.pool)
@@ -161,20 +192,20 @@ impl StorageAdapter for PostgresAdapter {
     ) -> Result<Vec<Document>, StorageError> {
         let rows = match folder_id {
             None => sqlx::query(
-                "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id
+                "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id, sort_order
                      FROM documents
                      WHERE user_id = $1 AND deleted_at IS NULL AND folder_id IS NULL
-                     ORDER BY updated_at DESC",
+                     ORDER BY sort_order ASC, updated_at DESC",
             )
             .bind(self.user_id().to_string())
             .fetch_all(&self.pool)
             .await
             .map_err(box_err)?,
             Some(fid) => sqlx::query(
-                "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id
+                "SELECT id, title, owner, last_reviewed, tags, related_docs, body, folder_id, sort_order
                      FROM documents
                      WHERE user_id = $1 AND deleted_at IS NULL AND folder_id = $2
-                     ORDER BY updated_at DESC",
+                     ORDER BY sort_order ASC, updated_at DESC",
             )
             .bind(self.user_id().to_string())
             .bind(fid.to_string())
@@ -191,17 +222,96 @@ impl StorageAdapter for PostgresAdapter {
         doc_id: Uuid,
         folder_id: Option<Uuid>,
     ) -> Result<(), StorageError> {
+        let doc_id_str = doc_id.to_string();
+        let user_id_str = self.user_id().to_string();
+
+        // Read source folder before the transaction.
+        let row = sqlx::query(
+            "SELECT folder_id FROM documents \
+             WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL",
+        )
+        .bind(&doc_id_str)
+        .bind(&user_id_str)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(box_err)?
+        .ok_or(StorageError::NotFound(doc_id))?;
+        let src_folder_id_str: Option<String> = row.try_get("folder_id").map_err(box_err)?;
+        let src_folder_id = src_folder_id_str
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(box_err)?;
+
+        if src_folder_id == folder_id {
+            return Ok(());
+        }
+
+        let dest_sort_order =
+            next_doc_sort_order_postgres(&self.pool, self.user_id(), folder_id).await?;
         let folder_id_str = folder_id.map(|id| id.to_string());
+
+        let mut tx = self.pool.begin().await.map_err(box_err)?;
+
         sqlx::query(
-            "UPDATE documents SET folder_id = $1, updated_at = now()
-             WHERE id = $2 AND user_id = $3 AND deleted_at IS NULL",
+            "UPDATE documents SET folder_id = $1, sort_order = $2, updated_at = now() \
+             WHERE id = $3 AND user_id = $4 AND deleted_at IS NULL",
         )
         .bind(&folder_id_str)
-        .bind(doc_id.to_string())
-        .bind(self.user_id().to_string())
-        .execute(&self.pool)
+        .bind(dest_sort_order)
+        .bind(&doc_id_str)
+        .bind(&user_id_str)
+        .execute(&mut *tx)
         .await
         .map_err(box_err)?;
+
+        // Compact source folder (close the gap left by the removed document).
+        let src_ids =
+            list_doc_ids_postgres(&mut tx, self.user_id(), src_folder_id, None).await?;
+        write_doc_positions_postgres(&mut tx, &src_ids).await?;
+
+        // Compact destination folder (ensures 0, 1, 2, … with no collisions).
+        let dest_ids =
+            list_doc_ids_postgres(&mut tx, self.user_id(), folder_id, None).await?;
+        write_doc_positions_postgres(&mut tx, &dest_ids).await?;
+
+        tx.commit().await.map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn reorder_document(
+        &self,
+        doc_id: Uuid,
+        new_index: usize,
+    ) -> Result<(), StorageError> {
+        let doc_id_str = doc_id.to_string();
+        let user_id_str = self.user_id().to_string();
+
+        let folder_id_str: Option<String> = sqlx::query(
+            "SELECT folder_id FROM documents WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL",
+        )
+        .bind(&doc_id_str)
+        .bind(&user_id_str)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(box_err)?
+        .ok_or(StorageError::NotFound(doc_id))?
+        .try_get("folder_id")
+        .map_err(box_err)?;
+
+        let folder_id = folder_id_str
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(box_err)?;
+
+        let mut tx = self.pool.begin().await.map_err(box_err)?;
+        let mut sibling_ids = list_doc_ids_postgres(&mut tx, self.user_id(), folder_id, Some(doc_id)).await?;
+        let insert_at = new_index.min(sibling_ids.len());
+        sibling_ids.insert(insert_at, doc_id_str);
+        write_doc_positions_postgres(&mut tx, &sibling_ids).await?;
+        tx.commit().await.map_err(box_err)?;
+
         Ok(())
     }
 
@@ -348,17 +458,32 @@ impl StorageAdapter for PostgresAdapter {
         )
         .await?;
 
-        // Documents move to root (handled by ON DELETE SET NULL on the FK,
-        // but we set explicitly to be safe in case FK behaviour differs).
-        sqlx::query(
-            "UPDATE documents SET folder_id = NULL, updated_at = now()
-             WHERE folder_id = $1 AND user_id = $2",
+        // Move docs to root. Offset their sort_order above the current root max
+        // so they land at the end rather than colliding with existing root docs.
+        let root_max: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(sort_order), -1) \
+             FROM documents WHERE user_id = $1 AND deleted_at IS NULL AND folder_id IS NULL",
         )
+        .bind(&uid_str)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(box_err)?;
+
+        sqlx::query(
+            "UPDATE documents \
+             SET folder_id = NULL, sort_order = sort_order + $1, updated_at = now() \
+             WHERE folder_id = $2 AND user_id = $3",
+        )
+        .bind(root_max + 1)
         .bind(&id_str)
         .bind(&uid_str)
         .execute(&mut *tx)
         .await
         .map_err(box_err)?;
+
+        // Compact root documents to 0, 1, 2, … (no gaps or duplicate values).
+        let root_ids = list_doc_ids_postgres(&mut tx, self.user_id(), None, None).await?;
+        write_doc_positions_postgres(&mut tx, &root_ids).await?;
 
         let affected = sqlx::query("DELETE FROM folders WHERE id = $1 AND user_id = $2")
             .bind(&id_str)
@@ -542,6 +667,98 @@ impl StorageAdapter for PostgresAdapter {
     }
 }
 
+async fn next_doc_sort_order_postgres(
+    pool: &PgPool,
+    user_id: Uuid,
+    folder_id: Option<Uuid>,
+) -> Result<i64, StorageError> {
+    let row = match folder_id {
+        Some(fid) => sqlx::query(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort \
+             FROM documents WHERE user_id = $1 AND deleted_at IS NULL AND folder_id = $2",
+        )
+        .bind(user_id.to_string())
+        .bind(fid.to_string())
+        .fetch_one(pool)
+        .await
+        .map_err(box_err)?,
+        None => sqlx::query(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort \
+             FROM documents WHERE user_id = $1 AND deleted_at IS NULL AND folder_id IS NULL",
+        )
+        .bind(user_id.to_string())
+        .fetch_one(pool)
+        .await
+        .map_err(box_err)?,
+    };
+    row.try_get("next_sort").map_err(box_err)
+}
+
+async fn list_doc_ids_postgres(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    folder_id: Option<Uuid>,
+    exclude_id: Option<Uuid>,
+) -> Result<Vec<String>, StorageError> {
+    let rows = match (folder_id, exclude_id) {
+        (Some(fid), Some(excl)) => sqlx::query(
+            "SELECT id FROM documents WHERE user_id = $1 AND deleted_at IS NULL \
+             AND folder_id = $2 AND id != $3 ORDER BY sort_order ASC, updated_at DESC",
+        )
+        .bind(user_id.to_string())
+        .bind(fid.to_string())
+        .bind(excl.to_string())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(box_err)?,
+        (Some(fid), None) => sqlx::query(
+            "SELECT id FROM documents WHERE user_id = $1 AND deleted_at IS NULL \
+             AND folder_id = $2 ORDER BY sort_order ASC, updated_at DESC",
+        )
+        .bind(user_id.to_string())
+        .bind(fid.to_string())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(box_err)?,
+        (None, Some(excl)) => sqlx::query(
+            "SELECT id FROM documents WHERE user_id = $1 AND deleted_at IS NULL \
+             AND folder_id IS NULL AND id != $2 ORDER BY sort_order ASC, updated_at DESC",
+        )
+        .bind(user_id.to_string())
+        .bind(excl.to_string())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(box_err)?,
+        (None, None) => sqlx::query(
+            "SELECT id FROM documents WHERE user_id = $1 AND deleted_at IS NULL \
+             AND folder_id IS NULL ORDER BY sort_order ASC, updated_at DESC",
+        )
+        .bind(user_id.to_string())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(box_err)?,
+    };
+
+    rows.into_iter()
+        .map(|row| row.try_get("id").map_err(box_err))
+        .collect()
+}
+
+async fn write_doc_positions_postgres(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    doc_ids: &[String],
+) -> Result<(), StorageError> {
+    for (index, doc_id) in doc_ids.iter().enumerate() {
+        sqlx::query("UPDATE documents SET sort_order = $1, updated_at = now() WHERE id = $2")
+            .bind(index as i64)
+            .bind(doc_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(box_err)?;
+    }
+    Ok(())
+}
+
 async fn next_folder_sort_order_postgres(
     pool: &PgPool,
     user_id: Uuid,
@@ -680,6 +897,8 @@ fn row_to_document(row: &sqlx::postgres::PgRow) -> Result<Document, StorageError
         .transpose()
         .unwrap_or(None);
 
+    let sort_order: i64 = row.try_get("sort_order").unwrap_or(0);
+
     Ok(Document {
         id,
         title,
@@ -689,6 +908,7 @@ fn row_to_document(row: &sqlx::postgres::PgRow) -> Result<Document, StorageError
         related_docs,
         body,
         folder_id,
+        sort_order,
     })
 }
 
