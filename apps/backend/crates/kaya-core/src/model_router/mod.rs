@@ -50,6 +50,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::KayaError;
 
+// ---- Chat message ---------------------------------------------------------
+
+/// A single message in a structured conversation context.
+///
+/// Providers map `System` → preamble, `User` / `Assistant` → conversation turns.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "role", content = "content", rename_all = "snake_case")]
+pub enum ChatMessage {
+    System(String),
+    User(String),
+    Assistant(String),
+}
+
+impl ChatMessage {
+    pub fn system(s: impl Into<String>) -> Self { Self::System(s.into()) }
+    pub fn user(s: impl Into<String>) -> Self { Self::User(s.into()) }
+    pub fn assistant(s: impl Into<String>) -> Self { Self::Assistant(s.into()) }
+}
+
 // ---- Operation type -------------------------------------------------------
 
 /// The logical operation for which an LLM call is being made.
@@ -78,7 +97,7 @@ pub enum OperationType {
 
 #[derive(Debug, Clone)]
 pub struct CompletionRequest {
-    pub prompt: String,
+    pub messages: Vec<ChatMessage>,
     pub model: String,
     pub operation: OperationType,
     pub max_tokens: Option<u32>,
@@ -136,7 +155,7 @@ pub struct ToolCallResult {
 
 #[derive(Debug, Clone)]
 pub struct ToolCallRequest {
-    pub prompt: String,
+    pub messages: Vec<ChatMessage>,
     pub model: String,
     pub operation: OperationType,
     pub tools: Vec<ToolDefinition>,
@@ -212,13 +231,13 @@ mod tests {
         let router = router_with_mock(mock);
 
         let doc = router
-            .complete(OperationType::DocumentGeneration, "prompt")
+            .complete(OperationType::DocumentGeneration, vec![ChatMessage::user("prompt")])
             .await
             .unwrap();
         assert_eq!(doc.usage.model, "strong-model");
 
         let cls = router
-            .complete(OperationType::RetrievalClassification, "prompt")
+            .complete(OperationType::RetrievalClassification, vec![ChatMessage::user("prompt")])
             .await
             .unwrap();
         assert_eq!(cls.usage.model, "fast-model");
@@ -230,7 +249,7 @@ mod tests {
         let router = router_with_mock(mock);
 
         let mut stream = router
-            .stream(OperationType::DocumentGeneration, "prompt")
+            .stream(OperationType::DocumentGeneration, vec![ChatMessage::user("prompt")])
             .await
             .unwrap();
 
@@ -253,7 +272,7 @@ mod tests {
         let router = router_with_mock(mock);
 
         let mut stream = router
-            .stream(OperationType::DocumentGeneration, "prompt")
+            .stream(OperationType::DocumentGeneration, vec![ChatMessage::user("prompt")])
             .await
             .unwrap();
 
@@ -269,11 +288,11 @@ mod tests {
         let router = router_with_mock(mock);
 
         router
-            .complete(OperationType::DocumentGeneration, "p1")
+            .complete(OperationType::DocumentGeneration, vec![ChatMessage::user("p1")])
             .await
             .unwrap();
         router
-            .complete(OperationType::EditProposal, "p2")
+            .complete(OperationType::EditProposal, vec![ChatMessage::user("p2")])
             .await
             .unwrap();
         router.embed("text").await.unwrap();

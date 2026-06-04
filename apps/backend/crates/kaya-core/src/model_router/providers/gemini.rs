@@ -111,9 +111,14 @@ impl LlmProvider for GeminiProvider {
     ) -> Result<CompletionResponse, KayaError> {
         let client = self.client()?;
         let model = client.completion_model(&request.model);
-        let resp = model
-            .completion_request(request.prompt.clone())
-            .max_tokens(request.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS) as u64)
+        let (preamble, prompt) = super::messages_to_parts(&request.messages);
+        let mut builder = model
+            .completion_request(prompt)
+            .max_tokens(request.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS) as u64);
+        if let Some(p) = preamble {
+            builder = builder.preamble(p);
+        }
+        let resp = builder
             .send()
             .await
             .map_err(|e| KayaError::Internal(e.to_string()))?;
@@ -142,9 +147,14 @@ impl LlmProvider for GeminiProvider {
     ) -> Result<BoxStream<'static, Result<StreamItem, KayaError>>, KayaError> {
         let client = self.client()?;
         let model = client.completion_model(&request.model);
-        let rig_stream = model
-            .completion_request(request.prompt.clone())
-            .max_tokens(request.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS) as u64)
+        let (preamble, prompt) = super::messages_to_parts(&request.messages);
+        let mut builder = model
+            .completion_request(prompt)
+            .max_tokens(request.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS) as u64);
+        if let Some(p) = preamble {
+            builder = builder.preamble(p);
+        }
+        let rig_stream = builder
             .stream()
             .await
             .map_err(|e| KayaError::Internal(e.to_string()))?;
@@ -202,10 +212,15 @@ impl LlmProvider for GeminiProvider {
     async fn tool_call(&self, request: ToolCallRequest) -> Result<ToolCallResponse, KayaError> {
         let client = self.client()?;
         let model = client.completion_model(&request.model);
-        let resp = model
-            .completion_request(request.prompt.clone())
+        let (preamble, prompt) = super::messages_to_parts(&request.messages);
+        let mut builder = model
+            .completion_request(prompt)
             .max_tokens(DEFAULT_MAX_TOKENS as u64)
-            .tools(rig_tools(&request.tools))
+            .tools(rig_tools(&request.tools));
+        if let Some(p) = preamble {
+            builder = builder.preamble(p);
+        }
+        let resp = builder
             .send()
             .await
             .map_err(|e| KayaError::Internal(e.to_string()))?;

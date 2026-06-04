@@ -18,8 +18,8 @@ use super::providers::anthropic::AnthropicProvider;
 use super::providers::gemini::GeminiProvider;
 use super::providers::openai::OpenAIProvider;
 use super::{
-    CompletionRequest, CompletionResponse, EmbeddingRequest, EmbeddingResponse, LlmProvider,
-    OperationType, StreamItem, ToolCallRequest, ToolCallResponse,
+    ChatMessage, CompletionRequest, CompletionResponse, EmbeddingRequest, EmbeddingResponse,
+    LlmProvider, OperationType, StreamItem, ToolCallRequest, ToolCallResponse,
 };
 
 struct Route {
@@ -99,11 +99,11 @@ impl ModelRouter {
     pub async fn complete(
         &self,
         op: OperationType,
-        prompt: impl Into<String>,
+        messages: Vec<ChatMessage>,
     ) -> Result<CompletionResponse, KayaError> {
         let (provider, model) = self.route(&op)?;
         let req = CompletionRequest {
-            prompt: prompt.into(),
+            messages,
             model: model.to_owned(),
             operation: op,
             max_tokens: None,
@@ -116,11 +116,11 @@ impl ModelRouter {
     pub async fn stream(
         &self,
         op: OperationType,
-        prompt: impl Into<String>,
+        messages: Vec<ChatMessage>,
     ) -> Result<BoxStream<'static, Result<StreamItem, KayaError>>, KayaError> {
         let (provider, model) = self.route(&op)?;
         let req = CompletionRequest {
-            prompt: prompt.into(),
+            messages,
             model: model.to_owned(),
             operation: op,
             max_tokens: None,
