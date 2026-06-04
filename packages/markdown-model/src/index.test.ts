@@ -10,9 +10,10 @@ import {
   removeTableColumn,
   removeTableRow,
   serializeBlocksToMarkdown,
+  splitTextBlock,
   toggleTableHeader,
   updateTableColumnAlignment,
-} from "./model";
+} from "./index";
 
 describe("markdown model", () => {
   it("round-trips common markdown blocks into canonical markdown", () => {
@@ -93,19 +94,84 @@ describe("markdown model", () => {
   });
 
   it("indents and outdents list items", () => {
-    const [list] = parseMarkdownToBlocks([
+    const [first, second] = parseMarkdownToBlocks([
       "- one",
       "- two",
     ].join("\n"));
 
-    if (list.type !== "list") {
+    if (first.type !== "list" || second.type !== "list") {
+      throw new Error("Expected two list blocks.");
+    }
+
+    const indented = indentListItem(second, 0);
+    expect(indented.items[0].depth).toBe(1);
+
+    const outdented = outdentListItem(indented, 0);
+    expect(outdented.items[0].depth).toBe(0);
+  });
+
+  it("splits text blocks without changing their block type", () => {
+    const [paragraph, heading, quote] = parseMarkdownToBlocks([
+      "Hello world",
+      "",
+      "## Section title",
+      "",
+      "> Quoted text",
+    ].join("\n"));
+
+    if (paragraph.type !== "paragraph" || heading.type !== "heading" || quote.type !== "blockquote") {
+      throw new Error("Expected text-like blocks.");
+    }
+
+    expect(splitTextBlock(paragraph, "Hello", "world")).toMatchObject({
+      current: { type: "paragraph", html: "Hello" },
+      next: { type: "paragraph", html: "world" },
+    });
+    expect(splitTextBlock(heading, "Section", "title")).toMatchObject({
+      current: { type: "heading", level: 2, html: "Section" },
+      next: { type: "heading", level: 2, html: "title" },
+    });
+    expect(splitTextBlock(quote, "Quoted", "text")).toMatchObject({
+      current: { type: "blockquote", html: "Quoted" },
+      next: { type: "blockquote", html: "text" },
+    });
+  });
+
+  it("round-trips mixed ordered and unordered nested lists", () => {
+    const markdown = [
+      "1. Parent",
+      "    - Child bullet",
+      "    - Child bullet two",
+      "2. Second parent",
+      "- Root bullet",
+      "    1. Ordered child",
+      "    2. Ordered child two",
+    ].join("\n");
+
+    const blocks = parseMarkdownToBlocks(markdown);
+    expect(serializeBlocksToMarkdown(blocks)).toBe(markdown);
+  });
+
+  it("parses star bullets as lists", () => {
+    const blocks = parseMarkdownToBlocks([
+      "* one",
+      "* two",
+    ].join("\n"));
+
+    expect(blocks).toHaveLength(2);
+    expect(blocks.every((b) => b.type === "list" && b.items[0].ordered === false)).toBe(true);
+  });
+
+  it("treats tab indentation as nested list depth", () => {
+    const [, child] = parseMarkdownToBlocks([
+      "- parent",
+      "	* child",
+    ].join("\n"));
+
+    if (child.type !== "list") {
       throw new Error("Expected a list block.");
     }
 
-    const indented = indentListItem(list, 1);
-    expect(indented.items[1].depth).toBe(1);
-
-    const outdented = outdentListItem(indented, 1);
-    expect(outdented.items[1].depth).toBe(0);
+    expect(child.items[0]).toMatchObject({ depth: 1, ordered: false });
   });
 });

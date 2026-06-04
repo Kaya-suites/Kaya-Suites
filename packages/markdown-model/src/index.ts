@@ -3,20 +3,23 @@ export type MarkdownAlignment = "left" | "center" | "right" | null;
 export type MarkdownListItem = {
   id: string;
   depth: number;
+  ordered: boolean;
   checked: boolean | null;
   html: string;
 };
 
 export type MarkdownBlock =
-  | { id: string; type: "paragraph"; html: string }
-  | { id: string; type: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6; html: string }
-  | { id: string; type: "blockquote"; html: string }
+  | { id: string; type: "paragraph"; html: string; depth: number }
+  | { id: string; type: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6; html: string; depth: number }
+  | { id: string; type: "blockquote"; html: string; depth: number }
   | { id: string; type: "list"; ordered: boolean; start: number; items: MarkdownListItem[] }
   | { id: string; type: "table"; alignments: MarkdownAlignment[]; header: string[]; rows: string[][] }
   | { id: string; type: "code"; language: string; code: string }
   | { id: string; type: "image"; alt: string; src: string; title: string }
   | { id: string; type: "hr" }
-  | { id: string; type: "html"; source: string };
+  | { id: string; type: "html"; source: string }
+  | { id: string; type: "callout"; icon: string; html: string }
+  | { id: string; type: "toggle"; summary: string; html: string; open: boolean };
 
 type InlineToken =
   | { type: "text"; value: string }
@@ -188,7 +191,11 @@ function parseInlineTokens(source: string): InlineToken[] {
     }
 
     if (rest.startsWith("*")) {
-      const end = source.indexOf("*", index + 1);
+      // Skip over any ** sequences so we don't close an em span inside bold markers.
+      let end = source.indexOf("*", index + 1);
+      while (end !== -1 && source[end + 1] === "*") {
+        end = source.indexOf("*", end + 2);
+      }
       if (end > index) {
         tokens.push({ type: "em", children: parseInlineTokens(source.slice(index + 1, end)) });
         index = end + 1;
@@ -297,17 +304,24 @@ export function inlineHtmlToMarkdown(html: string): string {
     .replace(/\u00a0/g, " ");
 }
 
-function paragraphBlock(markdown: string): MarkdownBlock {
+function paragraphBlock(markdown: string, depth = 0): MarkdownBlock {
+  // Convert Markdown hard line breaks (two trailing spaces + newline) to <br>,
+  // then collapse remaining soft-wrap newlines into spaces.
+  const normalized = markdown.replace(/  \n/g, "<br>").replace(/\n/g, " ");
   return {
     id: createId("p"),
     type: "paragraph",
-    html: inlineMarkdownToHtml(markdown),
+    depth,
+    html: inlineMarkdownToHtml(normalized),
   };
 }
 
-function parseList(lines: string[], startIndex: number) {
+function getIndentWidth(indent: string) {
+  return indent.replace(/\t/g, "    ").length;
+}
+
+function parseList(lines: string[], startIndex: number): { nextIndex: number; blocks: MarkdownBlock[] } {
   const items: MarkdownListItem[] = [];
-  let ordered = false;
   let start = 1;
   let index = startIndex;
 
@@ -315,20 +329,20 @@ function parseList(lines: string[], startIndex: number) {
     const line = lines[index];
     const match = line.match(/^(\s*)([-+*]|\d+\.)\s+(.*)$/);
     if (!match) break;
-    const indent = match[1].length;
+    const indent = getIndentWidth(match[1]);
     const marker = match[2];
     const content = match[3];
 
-    if (items.length === 0) {
-      ordered = /\d+\./.test(marker);
-      if (ordered) start = Number.parseInt(marker, 10) || 1;
+    if (items.length === 0 && /\d+\./.test(marker)) {
+      start = Number.parseInt(marker, 10) || 1;
     }
 
     const taskMatch = content.match(/^\[( |x|X)]\s+(.*)$/);
 
     items.push({
       id: createId("li"),
-      depth: Math.floor(indent / 2),
+      depth: Math.floor(indent / 4),
+      ordered: /\d+\./.test(marker),
       checked: taskMatch ? taskMatch[1].toLowerCase() === "x" : null,
       html: inlineMarkdownToHtml(taskMatch ? taskMatch[2] : content),
     });
@@ -338,13 +352,13 @@ function parseList(lines: string[], startIndex: number) {
 
   return {
     nextIndex: index,
-    block: {
+    blocks: items.map((item, i) => ({
       id: createId("list"),
-      type: "list",
-      ordered,
-      start,
-      items,
-    } satisfies MarkdownBlock,
+      type: "list" as const,
+      ordered: item.ordered,
+      start: i === 0 ? start : 1,
+      items: [item],
+    })),
   };
 }
 
@@ -416,7 +430,7 @@ export function parseMarkdownToBlocks(markdown: string): MarkdownBlock[] {
 
     if (/^(\s*)([-+*]|\d+\.)\s+/.test(line)) {
       const list = parseList(lines, index);
-      blocks.push(list.block);
+      blocks.push(...list.blocks);
       index = list.nextIndex;
       continue;
     }
@@ -428,6 +442,7 @@ export function parseMarkdownToBlocks(markdown: string): MarkdownBlock[] {
         type: "heading",
         level: headingMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6,
         html: inlineMarkdownToHtml(headingMatch[2]),
+        depth: 0,
       });
       index += 1;
       continue;
@@ -440,16 +455,42 @@ export function parseMarkdownToBlocks(markdown: string): MarkdownBlock[] {
     }
 
     if (line.startsWith(">")) {
-      const buffer: string[] = [];
+      function stripQuotePrefix(l: string): { quoteDepth: number; stripped: string } {
+        let quoteDepth = 0;
+        let stripped = l;
+        while (stripped.startsWith(">")) {
+          quoteDepth++;
+          stripped = stripped.replace(/^>\s?/, "");
+        }
+        return { quoteDepth, stripped };
+      }
+      const first = stripQuotePrefix(line);
+      const quoteDepth = first.quoteDepth;
+      const buffer: string[] = [first.stripped];
+      index += 1;
       while (index < lines.length && lines[index].startsWith(">")) {
-        buffer.push(lines[index].replace(/^>\s?/, ""));
+        const { quoteDepth: d, stripped } = stripQuotePrefix(lines[index]);
+        if (d !== quoteDepth) break;
+        buffer.push(stripped);
         index += 1;
       }
-      blocks.push({
-        id: createId("quote"),
-        type: "blockquote",
-        html: inlineMarkdownToHtml(buffer.join("\n")),
-      });
+      const headingMatch = buffer.length === 1 ? buffer[0].match(/^(#{1,6})\s+(.*)$/) : null;
+      if (headingMatch) {
+        blocks.push({
+          id: createId("heading"),
+          type: "heading",
+          level: headingMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6,
+          html: inlineMarkdownToHtml(headingMatch[2]),
+          depth: quoteDepth,
+        });
+      } else {
+        blocks.push({
+          id: createId("quote"),
+          type: "blockquote",
+          html: inlineMarkdownToHtml(buffer.join("\n")),
+          depth: quoteDepth - 1,
+        });
+      }
       continue;
     }
 
@@ -495,37 +536,85 @@ export function parseMarkdownToBlocks(markdown: string): MarkdownBlock[] {
       index += 1;
     }
 
-    blocks.push(paragraphBlock(paragraphLines.join(" ")));
+    blocks.push(paragraphBlock(paragraphLines.join("\n")));
   }
 
   return blocks.length > 0 ? blocks : [paragraphBlock("")];
 }
 
+function serializeListRun(items: MarkdownListItem[], firstStart: number): string {
+  const counters = new Map<number, number>();
+  const markerKinds = new Map<number, "ordered" | "unordered">();
+  return items
+    .map((item) => {
+      Array.from(counters.keys()).forEach((depth) => {
+        if (depth > item.depth) counters.delete(depth);
+      });
+      Array.from(markerKinds.keys()).forEach((depth) => {
+        if (depth > item.depth) markerKinds.delete(depth);
+      });
+
+      const indent = "    ".repeat(item.depth);
+      const taskPrefix = item.checked !== null ? `[${item.checked ? "x" : " "}] ` : "";
+
+      if (item.ordered) {
+        const previousKind = markerKinds.get(item.depth);
+        const initial = item.depth === 0 ? firstStart : 1;
+        const current = previousKind === "ordered" ? (counters.get(item.depth) ?? initial) : initial;
+        counters.set(item.depth, current + 1);
+        markerKinds.set(item.depth, "ordered");
+        return `${indent}${current}. ${taskPrefix}${inlineHtmlToMarkdown(item.html).trim()}`;
+      }
+
+      counters.delete(item.depth);
+      markerKinds.set(item.depth, "unordered");
+      return `${indent}- ${taskPrefix}${inlineHtmlToMarkdown(item.html).trim()}`;
+    })
+    .join("\n");
+}
+
 export function serializeBlocksToMarkdown(blocks: MarkdownBlock[]) {
-  const parts = blocks.map((block) => {
+  const parts: string[] = [];
+  let i = 0;
+
+  while (i < blocks.length) {
+    const block = blocks[i];
+
+    if (block.type === "list") {
+      const firstStart = block.start;
+      const allItems: MarkdownListItem[] = [...block.items];
+      let j = i + 1;
+      while (j < blocks.length && blocks[j].type === "list") {
+        allItems.push(...(blocks[j] as Extract<MarkdownBlock, { type: "list" }>).items);
+        j++;
+      }
+      parts.push(serializeListRun(allItems, firstStart));
+      i = j;
+      continue;
+    }
+
     switch (block.type) {
-      case "paragraph":
-        return inlineHtmlToMarkdown(block.html).trimEnd();
-      case "heading":
-        return `${"#".repeat(block.level)} ${inlineHtmlToMarkdown(block.html).trim()}`.trimEnd();
-      case "blockquote":
-        return inlineHtmlToMarkdown(block.html)
-          .split("\n")
-          .map((line: string) => `> ${line}`)
-          .join("\n");
-      case "list": {
-        const counters = new Map<number, number>();
-        return block.items
-          .map((item) => {
-            const indent = "  ".repeat(item.depth);
-            if (block.ordered) {
-              const current = counters.get(item.depth) ?? (item.depth === 0 ? block.start : 1);
-              counters.set(item.depth, current + 1);
-              return `${indent}${current}. ${item.checked !== null ? `[${item.checked ? "x" : " "}] ` : ""}${inlineHtmlToMarkdown(item.html).trim()}`;
-            }
-            return `${indent}- ${item.checked !== null ? `[${item.checked ? "x" : " "}] ` : ""}${inlineHtmlToMarkdown(item.html).trim()}`;
-          })
-          .join("\n");
+      case "paragraph": {
+        const paraContent = inlineHtmlToMarkdown(block.html).trimEnd();
+        const paraPrefix = "> ".repeat(block.depth);
+        parts.push(paraPrefix + paraContent);
+        break;
+      }
+      case "heading": {
+        const headingContent = `${"#".repeat(block.level)} ${inlineHtmlToMarkdown(block.html).trim()}`.trimEnd();
+        const headingPrefix = "> ".repeat(block.depth);
+        parts.push(headingPrefix + headingContent);
+        break;
+      }
+      case "blockquote": {
+        const quotePrefix = "> ".repeat(block.depth + 1);
+        parts.push(
+          inlineHtmlToMarkdown(block.html)
+            .split("\n")
+            .map((line: string) => `${quotePrefix}${line}`)
+            .join("\n"),
+        );
+        break;
       }
       case "table": {
         const header = `| ${block.header.map((cell) => inlineHtmlToMarkdown(cell).trim()).join(" | ")} |`;
@@ -533,20 +622,36 @@ export function serializeBlocksToMarkdown(blocks: MarkdownBlock[]) {
         const rows = block.rows.map(
           (row) => `| ${row.map((cell) => inlineHtmlToMarkdown(cell).trim()).join(" | ")} |`,
         );
-        return [header, alignments, ...rows].join("\n");
+        parts.push([header, alignments, ...rows].join("\n"));
+        break;
       }
       case "code":
-        return `\`\`\`${block.language}\n${block.code}\n\`\`\``;
+        parts.push(`\`\`\`${block.language}\n${block.code}\n\`\`\``);
+        break;
       case "image": {
         const title = block.title ? ` "${block.title}"` : "";
-        return `![${block.alt}](${block.src}${title})`;
+        parts.push(`![${block.alt}](${block.src}${title})`);
+        break;
       }
       case "hr":
-        return "---";
+        parts.push("---");
+        break;
       case "html":
-        return block.source.trimEnd();
+        parts.push(block.source.trimEnd());
+        break;
+      case "callout": {
+        const body = inlineHtmlToMarkdown(block.html).trim();
+        parts.push(`> [!CALLOUT icon=${block.icon}]\n${body.split("\n").map((l) => `> ${l}`).join("\n")}`);
+        break;
+      }
+      case "toggle": {
+        const body = inlineHtmlToMarkdown(block.html).trim();
+        parts.push(`<details${block.open ? " open" : ""}><summary>${block.summary}</summary>\n\n${body}\n\n</details>`);
+        break;
+      }
     }
-  });
+    i++;
+  }
 
   return parts.join("\n\n").trim();
 }
@@ -558,16 +663,16 @@ export function duplicateBlock(block: MarkdownBlock): MarkdownBlock {
 export function createDefaultBlock(type: MarkdownBlock["type"]): MarkdownBlock {
   switch (type) {
     case "heading":
-      return { id: createId("heading"), type: "heading", level: 2, html: "" };
+      return { id: createId("heading"), type: "heading", level: 2, html: "", depth: 0 };
     case "blockquote":
-      return { id: createId("quote"), type: "blockquote", html: "" };
+      return { id: createId("quote"), type: "blockquote", html: "", depth: 0 };
     case "list":
       return {
         id: createId("list"),
         type: "list",
         ordered: false,
         start: 1,
-        items: [{ id: createId("li"), depth: 0, checked: null, html: "" }],
+        items: [{ id: createId("li"), depth: 0, ordered: false, checked: null, html: "" }],
       };
     case "table":
       return {
@@ -585,8 +690,12 @@ export function createDefaultBlock(type: MarkdownBlock["type"]): MarkdownBlock {
       return { id: createId("hr"), type: "hr" };
     case "html":
       return { id: createId("html"), type: "html", source: "<div></div>" };
+    case "callout":
+      return { id: createId("callout"), type: "callout", icon: "💡", html: "" };
+    case "toggle":
+      return { id: createId("toggle"), type: "toggle", summary: "Toggle", html: "", open: false };
     case "paragraph":
-      return { id: createId("p"), type: "paragraph", html: "" };
+      return { id: createId("p"), type: "paragraph", html: "", depth: 0 };
   }
 }
 
@@ -685,18 +794,54 @@ export function splitListItem(
   items.splice(itemIndex + 1, 0, {
     id: createId("li"),
     depth: current.depth,
+    ordered: current.ordered,
     checked: current.checked,
     html: afterHtml,
   });
   return { ...block, items };
 }
 
+export function splitTextBlock(
+  block: Extract<MarkdownBlock, { type: "paragraph" | "blockquote" | "heading" }>,
+  beforeHtml: string,
+  afterHtml: string,
+): {
+  current: Extract<MarkdownBlock, { type: "paragraph" | "blockquote" | "heading" }>;
+  next: Extract<MarkdownBlock, { type: "paragraph" | "blockquote" | "heading" }>;
+} {
+  switch (block.type) {
+    case "heading":
+      return {
+        current: { ...block, html: beforeHtml },
+        next: { id: createId("heading"), type: "heading", level: block.level, html: afterHtml, depth: block.depth },
+      };
+    case "blockquote":
+      return {
+        current: { ...block, html: beforeHtml },
+        next: { id: createId("quote"), type: "blockquote", html: afterHtml, depth: block.depth },
+      };
+    case "paragraph":
+      return {
+        current: { ...block, html: beforeHtml },
+        next: { id: createId("p"), type: "paragraph", html: afterHtml, depth: block.depth },
+      };
+  }
+}
+
 export function removeListItem(block: Extract<MarkdownBlock, { type: "list" }>, itemIndex: number) {
   const items = block.items.filter((_, index) => index !== itemIndex);
   if (items.length === 0) {
-    items.push({ id: createId("li"), depth: 0, checked: null, html: "" });
+    items.push({ id: createId("li"), depth: 0, ordered: false, checked: null, html: "" });
   }
   return { ...block, items };
+}
+
+export function indentBlock(block: Extract<MarkdownBlock, { type: "paragraph" | "heading" | "blockquote" }>) {
+  return { ...block, depth: Math.min(block.depth + 1, 6) };
+}
+
+export function outdentBlock(block: Extract<MarkdownBlock, { type: "paragraph" | "heading" | "blockquote" }>) {
+  return { ...block, depth: Math.max(block.depth - 1, 0) };
 }
 
 export function normalizeBlockHtml(block: MarkdownBlock): MarkdownBlock {
@@ -705,6 +850,9 @@ export function normalizeBlockHtml(block: MarkdownBlock): MarkdownBlock {
     case "blockquote":
       return { ...block, html: stripOuterParagraph(block.html) };
     case "heading":
+      return { ...block, html: stripOuterParagraph(block.html) };
+    case "callout":
+    case "toggle":
       return { ...block, html: stripOuterParagraph(block.html) };
     default:
       return block;
