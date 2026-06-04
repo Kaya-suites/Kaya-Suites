@@ -209,7 +209,7 @@ fn noop_orch_ctx(
         session: UserSession {
             user_id: Uuid::new_v4(),
         },
-        conversation_context: None,
+        turn: Default::default(),
     }
 }
 
@@ -227,6 +227,8 @@ struct ScriptedProvider {
     turns: Mutex<std::collections::VecDeque<ScriptedTurn>>,
     /// Pre-baked responses for `complete()` calls (e.g. classification).
     complete_responses: Mutex<std::collections::VecDeque<String>>,
+    /// Every `complete()` request's message list, captured in call order.
+    captured_complete: Mutex<Vec<Vec<kaya_core::model_router::ChatMessage>>>,
 }
 
 impl ScriptedProvider {
@@ -234,6 +236,7 @@ impl ScriptedProvider {
         Self {
             turns: Mutex::new(turns.into()),
             complete_responses: Mutex::new(std::collections::VecDeque::new()),
+            captured_complete: Mutex::new(Vec::new()),
         }
     }
 
@@ -241,11 +244,19 @@ impl ScriptedProvider {
         *self.complete_responses.lock().unwrap() = responses.into();
         self
     }
+
+    fn captured_complete(&self) -> Vec<Vec<kaya_core::model_router::ChatMessage>> {
+        self.captured_complete.lock().unwrap().clone()
+    }
 }
 
 #[async_trait]
 impl LlmProvider for ScriptedProvider {
     async fn complete(&self, req: CompletionRequest) -> Result<CompletionResponse, KayaError> {
+        self.captured_complete
+            .lock()
+            .unwrap()
+            .push(req.messages.clone());
         let content = self
             .complete_responses
             .lock()
@@ -330,6 +341,7 @@ fn make_doc(body: &str) -> Document {
         related_docs: vec![],
         body: body.into(),
         folder_id: None,
+        sort_order: 0,
     }
 }
 
@@ -453,7 +465,7 @@ async fn invocation_log_captures_every_tool_used() {
         session: UserSession {
             user_id: Uuid::new_v4(),
         },
-        conversation_context: None,
+        turn: Default::default(),
     });
 
     let log = Arc::new(InvocationLog::new());
@@ -632,6 +644,87 @@ async fn orchestrator_routes_question_to_research_only() {
     }
 }
 
+// ── Test 5b: Orchestrator classifier excludes doc body ───────────────────────
+
+#[tokio::test]
+async fn orchestrator_classifier_omits_document_body() {
+    use kaya_core::agent::{DocumentFocus, TurnContext};
+    use kaya_core::model_router::ChatMessage;
+
+    let storage = Arc::new(MemStorage::new());
+
+    // classify → research_only; researcher does one synthesis complete().
+    let provider = Arc::new(ScriptedProvider::new(vec![]).with_complete(vec![
+        r#"{"intent":"research_only","query":"q"}"#.into(),
+        "synthesised answer".into(),
+    ]));
+    let provider_capture = provider.clone();
+
+    let doc_body =
+        "SECRET_BODY_MARKER: this string must never appear in the classifier prompt.";
+
+    let orch_ctx = OrchestratorContext {
+        storage: storage as Arc<dyn StorageAdapter>,
+        sessions: Arc::new(NoopSessions),
+        router: router_with(provider),
+        session: UserSession {
+            user_id: Uuid::new_v4(),
+        },
+        turn: TurnContext {
+            chat: None,
+            document: Some(DocumentFocus {
+                doc_id: Uuid::new_v4(),
+                title: "Distinctive Title".into(),
+                body: doc_body.into(),
+                tags: vec![],
+            }),
+        },
+    };
+
+    let mut stream = orchestrate("summarise the open doc", orch_ctx);
+    while let Some(_ev) = stream.next().await {}
+
+    let captured = provider_capture.captured_complete();
+    assert!(
+        !captured.is_empty(),
+        "classifier must have made at least one complete() call"
+    );
+
+    // First complete() call is the intent classifier.
+    let classifier_msgs = &captured[0];
+    let classifier_text = classifier_msgs
+        .iter()
+        .map(|m| match m {
+            ChatMessage::System(s) | ChatMessage::User(s) | ChatMessage::Assistant(s) => s.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        !classifier_text.contains("SECRET_BODY_MARKER"),
+        "classifier prompt must NOT contain the document body; got:\n{classifier_text}"
+    );
+    assert!(
+        classifier_text.contains("Distinctive Title"),
+        "classifier prompt MUST contain the document title; got:\n{classifier_text}"
+    );
+
+    // Second complete() call is the Researcher's synthesis: it SHOULD see the body.
+    assert!(captured.len() >= 2, "researcher must have called complete()");
+    let synth_msgs = &captured[1];
+    let synth_text = synth_msgs
+        .iter()
+        .map(|m| match m {
+            ChatMessage::System(s) | ChatMessage::User(s) | ChatMessage::Assistant(s) => s.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        synth_text.contains("SECRET_BODY_MARKER"),
+        "researcher synthesis prompt MUST contain the document body; got:\n{synth_text}"
+    );
+}
+
 // ── Test 6: ResearchThenEdit routing ─────────────────────────────────────────
 
 #[tokio::test]
@@ -739,10 +832,8 @@ async fn research_result_injected_into_editor_prompt() {
     #[async_trait]
     impl LlmProvider for CapturingProvider {
         async fn complete(&self, req: CompletionRequest) -> Result<CompletionResponse, KayaError> {
-            self.captured_prompts
-                .lock()
-                .unwrap()
-                .push(req.prompt.clone());
+            let snapshot = serde_json::to_string(&req.messages).unwrap_or_default();
+            self.captured_prompts.lock().unwrap().push(snapshot);
             self.inner.complete(req).await
         }
         async fn stream(
@@ -756,10 +847,8 @@ async fn research_result_injected_into_editor_prompt() {
             self.inner.embed(req).await
         }
         async fn tool_call(&self, req: ToolCallRequest) -> Result<ToolCallResponse, KayaError> {
-            self.captured_prompts
-                .lock()
-                .unwrap()
-                .push(req.prompt.clone());
+            let snapshot = serde_json::to_string(&req.messages).unwrap_or_default();
+            self.captured_prompts.lock().unwrap().push(snapshot);
             self.inner.tool_call(req).await
         }
     }
@@ -848,7 +937,7 @@ async fn search_directories_returns_current_folder_paths() {
         session: UserSession {
             user_id: Uuid::new_v4(),
         },
-        conversation_context: None,
+        turn: Default::default(),
     };
 
     let output = SearchDirectories
@@ -880,7 +969,7 @@ async fn create_folder_treats_nil_uuid_parent_as_root() {
         session: UserSession {
             user_id: Uuid::new_v4(),
         },
-        conversation_context: None,
+        turn: Default::default(),
     };
 
     let output = CreateFolder
@@ -917,7 +1006,7 @@ async fn create_folder_rejects_unknown_parent_id() {
         session: UserSession {
             user_id: Uuid::new_v4(),
         },
-        conversation_context: None,
+        turn: Default::default(),
     };
 
     let missing_parent = Uuid::parse_str("11111111-1111-1111-1111-111111111111")

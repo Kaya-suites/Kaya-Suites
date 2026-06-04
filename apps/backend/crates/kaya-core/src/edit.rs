@@ -30,7 +30,12 @@ pub enum ProposedEditKind {
     /// Delete a document entirely.
     DeleteDocument { document_id: Uuid },
     /// Create a brand-new document. Requires approval before it is persisted.
-    Create { title: String, body: String },
+    /// `folder_id = None` places the document at the workspace root.
+    Create {
+        title: String,
+        body: String,
+        folder_id: Option<Uuid>,
+    },
     /// Modify an existing document at the paragraph level.
     ///
     /// `diff` is for display (UI diff renderer). `new_body` is the
@@ -137,7 +142,12 @@ pub async fn commit_edit(
             storage.delete_document(document_id).await?;
             Ok(None)
         }
-        ProposedEditKind::Create { title, body } => {
+        ProposedEditKind::Create {
+            title,
+            body,
+            folder_id,
+        } => {
+            let next_sort_order = storage.next_document_sort_order(folder_id).await?;
             let doc = Document {
                 id: Uuid::new_v4(),
                 title,
@@ -146,7 +156,8 @@ pub async fn commit_edit(
                 tags: vec![],
                 related_docs: vec![],
                 body,
-                folder_id: None,
+                folder_id,
+                sort_order: next_sort_order,
             };
             let doc_id = doc.id;
             storage.save_document(&doc).await?;

@@ -20,6 +20,7 @@ pub mod researcher;
 pub mod summarizer;
 pub mod tool;
 pub mod tools;
+pub mod turn_context;
 
 pub use editor::Editor;
 pub use log::{InvocationLog, ToolInvocation};
@@ -27,6 +28,7 @@ pub use orchestrator::{AgentPlan, OrchestratorContext, orchestrate};
 pub use researcher::{ResearchResult, Researcher, RetrievedChunk, StaleRef};
 pub use summarizer::ConversationSummarizer;
 pub use tool::{ReadTool, Tool, ToolOutput, WriteTool};
+pub use turn_context::{ChatContext, DocumentFocus, TurnContext};
 
 // AgentSource and SourcedEvent are defined in this file — no re-export needed.
 
@@ -46,7 +48,7 @@ pub struct AgentContext {
     pub sessions: Arc<dyn SessionStorage>,
     pub router: Arc<ModelRouter>,
     pub session: UserSession,
-    pub conversation_context: Option<String>,
+    pub turn: TurnContext,
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────

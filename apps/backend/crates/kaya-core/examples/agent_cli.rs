@@ -274,6 +274,7 @@ async fn main() {
         related_docs: vec![],
         body: "Welcome to the team.\n\nThis guide covers your first week.".into(),
         folder_id: None,
+        sort_order: 0,
     };
     let storage = Mem::new(vec![doc]);
 
@@ -313,7 +314,7 @@ async fn main() {
         sessions: Arc::new(NoopSessions),
         router: router(provider as Arc<dyn LlmProvider>),
         session: session.clone(),
-        conversation_context: None,
+        turn: Default::default(),
     };
 
     println!("── Agent turn ─────────────────────────────────────────────────");

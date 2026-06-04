@@ -20,9 +20,10 @@ use uuid::Uuid;
 use crate::agent::log::{InvocationLog, ToolInvocation};
 use crate::agent::tool::Tool;
 use crate::agent::tools::SearchDirectories;
+use crate::agent::turn_context::TurnContext;
 use crate::agent::{AgentContext, AgentEvent};
 use crate::error::KayaError;
-use crate::model_router::OperationType;
+use crate::model_router::{ChatMessage, OperationType};
 use crate::retrieval::{self, EmbeddingTaskContext, RetrievalResult};
 
 use super::orchestrator::AgentPlan;
@@ -208,16 +209,12 @@ impl Researcher {
             .await;
 
         // Single synthesis call — grounded on retrieved chunks.
-        let synthesis_prompt = build_synthesis_prompt(
-            query,
-            &hits,
-            &directory_output.content,
-            ctx.conversation_context.as_deref(),
-        );
+        let synthesis_messages =
+            build_synthesis_messages(query, &hits, &directory_output.content, &ctx.turn);
 
         let synthesis_resp = match ctx
             .router
-            .complete(OperationType::ResearchSynthesis, synthesis_prompt)
+            .complete(OperationType::ResearchSynthesis, synthesis_messages)
             .await
         {
             Ok(r) => r,
@@ -270,55 +267,68 @@ impl Researcher {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn build_synthesis_prompt(
+fn build_synthesis_messages(
     query: &str,
     hits: &[RetrievalResult],
     directories: &serde_json::Value,
-    conversation_context: Option<&str>,
-) -> String {
+    turn: &TurnContext,
+) -> Vec<ChatMessage> {
     let directory_text = serde_json::to_string_pretty(directories)
         .unwrap_or_else(|_| "{\"folders\":[]}".to_string());
-    let conversation_context = conversation_context
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| format!("Conversation context:\n{s}\n\n"))
+
+    // Document block goes at the front so it can become a stable cache prefix.
+    // Chat block goes after, since it changes every turn.
+    let document_block = turn
+        .format_document_block()
+        .map(|s| format!("## Open document\n{s}\n\n"))
+        .unwrap_or_default();
+    let chat_block = turn
+        .format_chat_block()
+        .map(|s| format!("## Conversation context\n{s}\n\n"))
         .unwrap_or_default();
 
-    if hits.is_empty() {
-        return format!(
-            "Query: {query}\n\n\
-             {conversation_context}\
+    let user_content = if hits.is_empty() {
+        format!(
+            "{document_block}\
+             {chat_block}\
+             Query: {query}\n\n\
              Current directory context:\n{directory_text}\n\n\
              No relevant documents were found in the knowledge base. \
              Answer based on what you know, or indicate the information is unavailable."
-        );
-    }
+        )
+    } else {
+        let chunks_text = hits
+            .iter()
+            .enumerate()
+            .map(|(i, h)| {
+                format!(
+                    "[{}] doc_id={} para_id={}\n{}",
+                    i + 1,
+                    h.document_id,
+                    h.paragraph_id,
+                    h.content
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
 
-    let chunks_text = hits
-        .iter()
-        .enumerate()
-        .map(|(i, h)| {
-            format!(
-                "[{}] doc_id={} para_id={}\n{}",
-                i + 1,
-                h.document_id,
-                h.paragraph_id,
-                h.content
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
+        format!(
+            "{document_block}\
+             {chat_block}\
+             Query: {query}\n\n\
+             Current directory context:\n{directory_text}\n\n\
+             Retrieved chunks (ranked by relevance):\n\n\
+             {chunks_text}\n\n\
+             Write a comprehensive answer grounded in the chunks above. \
+             When directory structure is relevant, use the directory context above rather than \
+             inferring folder IDs or paths from stale document references. \
+             Cite sources inline using [[doc_id:para_id]] immediately after each \
+             cited sentence. Do not propose or apply any edits — only summarise."
+        )
+    };
 
-    format!(
-        "You are a research assistant synthesising knowledge-base content.\n\n\
-         Query: {query}\n\n\
-         {conversation_context}\
-         Current directory context:\n{directory_text}\n\n\
-         Retrieved chunks (ranked by relevance):\n\n\
-         {chunks_text}\n\n\
-         Write a comprehensive answer grounded in the chunks above. \
-         When directory structure is relevant, use the directory context above rather than \
-         inferring folder IDs or paths from stale document references. \
-         Cite sources inline using [[doc_id:para_id]] immediately after each \
-         cited sentence. Do not propose or apply any edits — only summarise."
-    )
+    vec![
+        ChatMessage::system("You are a research assistant synthesising knowledge-base content."),
+        ChatMessage::user(user_content),
+    ]
 }

@@ -2,7 +2,7 @@
 //! session summary for later prompt context.
 
 use crate::error::KayaError;
-use crate::model_router::{ModelRouter, OperationType};
+use crate::model_router::{ChatMessage, ModelRouter, OperationType};
 
 pub struct ConversationSummarizer;
 
@@ -26,16 +26,18 @@ impl ConversationSummarizer {
             .collect::<Vec<_>>()
             .join("\n\n");
 
-        let prompt = format!(
-            "Summarize the following Kaya chat history for future agent turns.\n\
-             Focus on user goals, confirmed facts, document decisions, unresolved questions, \
-             and any instructions that should remain in force.\n\
-             Keep it concise, accurate, and grounded only in the chat.\n\
-             Return plain text only.\n\n\
-             Chat history:\n{transcript}"
-        );
+        let chat_messages = vec![
+            ChatMessage::system(
+                "Summarize the following Kaya chat history for future agent turns. \
+                 Focus on user goals, confirmed facts, document decisions, unresolved questions, \
+                 and any instructions that should remain in force. \
+                 Keep it concise, accurate, and grounded only in the chat. \
+                 Return plain text only.",
+            ),
+            ChatMessage::user(format!("Chat history:\n{transcript}")),
+        ];
 
-        let response = router.complete(OperationType::ResearchSynthesis, prompt).await?;
+        let response = router.complete(OperationType::ResearchSynthesis, chat_messages).await?;
         Ok(response.content.trim().to_string())
     }
 }

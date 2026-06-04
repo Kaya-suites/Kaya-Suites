@@ -36,6 +36,11 @@ impl Tool for CreateDocument {
                 "body": {
                     "type": "string",
                     "description": "Full Markdown body of the new document."
+                },
+                "folder_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "UUID of the folder to place the document in. Omit to create at workspace root. Only use IDs that appear in DIRECTORY_CONTEXT."
                 }
             }
         })
@@ -50,12 +55,20 @@ impl Tool for CreateDocument {
             .as_str()
             .ok_or_else(|| KayaError::Internal("create_document: missing 'body'".into()))?
             .to_owned();
+        let folder_id = input["folder_id"]
+            .as_str()
+            .map(|s| {
+                s.parse::<Uuid>()
+                    .map_err(|_| KayaError::Internal("create_document: invalid 'folder_id' UUID".into()))
+            })
+            .transpose()?;
 
         let edit = ProposedEdit {
             id: Uuid::new_v4(),
             kind: ProposedEditKind::Create {
                 title: title.clone(),
                 body,
+                folder_id,
             },
         };
         let edit_id = edit.id;
@@ -65,6 +78,7 @@ impl Tool for CreateDocument {
                 "proposed_edit_id": edit_id,
                 "action": "create",
                 "title": title,
+                "folder_id": folder_id,
                 "status": "pending_approval",
             }),
             edit,

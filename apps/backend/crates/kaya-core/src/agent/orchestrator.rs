@@ -23,10 +23,11 @@ use crate::agent::editor::Editor;
 use crate::agent::log::InvocationLog;
 use crate::agent::researcher::Researcher;
 use crate::agent::tools::write_tools;
+use crate::agent::turn_context::TurnContext;
 use crate::agent::{AgentContext, AgentEvent, AgentSource, SourcedEvent};
 use crate::auth::UserSession;
 use crate::error::KayaError;
-use crate::model_router::{ModelRouter, OperationType};
+use crate::model_router::{ChatMessage, ModelRouter, OperationType};
 use crate::session::SessionStorage;
 use crate::storage::StorageAdapter;
 
@@ -39,7 +40,7 @@ pub struct OrchestratorContext {
     pub sessions: Arc<dyn SessionStorage>,
     pub router: Arc<ModelRouter>,
     pub session: UserSession,
-    pub conversation_context: Option<String>,
+    pub turn: TurnContext,
 }
 
 impl OrchestratorContext {
@@ -49,7 +50,7 @@ impl OrchestratorContext {
             sessions: self.sessions.clone(),
             router: self.router.clone(),
             session: self.session.clone(),
-            conversation_context: self.conversation_context.clone(),
+            turn: self.turn.clone(),
         })
     }
 }
@@ -242,35 +243,44 @@ async fn orchestrate_task(
 // ── Classification ────────────────────────────────────────────────────────────
 
 async fn classify_intent(msg: &str, ctx: &OrchestratorContext) -> AgentPlan {
-    let convo_context = ctx
-        .conversation_context
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| format!("\nConversation context:\n{s}\n"))
-        .unwrap_or_default();
+    // Classifier sees only the chat block and a document *handle* (title + id).
+    // The full document body is intentionally withheld — it doesn't change the
+    // intent decision and costs tokens on every turn. The body is still
+    // available to the Researcher and Editor via `AgentContext.turn`.
+    let mut context_sections: Vec<String> = Vec::new();
+    if let Some(handle) = ctx.turn.format_document_handle() {
+        context_sections.push(handle);
+    }
+    if let Some(chat) = ctx.turn.format_chat_block() {
+        context_sections.push(chat);
+    }
+    let convo_context = if context_sections.is_empty() {
+        String::new()
+    } else {
+        format!("Context:\n{}\n\n", context_sections.join("\n\n"))
+    };
 
-    let prompt = format!(
-        "Classify the following user message as one of two intents.\n\
-         Return a JSON object only, no explanation.\n\
-         \n\
-         Intent options:\n\
-         1. research_only — the user wants information, a summary, or an answer.\n\
-         2. research_then_edit — the user wants to create, modify, move, or delete documents or folders.\n\
-         \n\
-         JSON format for research_only:\n\
-         {{\"intent\":\"research_only\",\"query\":\"<user query>\"}}\n\
-         \n\
-         JSON format for research_then_edit:\n\
-         {{\"intent\":\"research_then_edit\",\"query\":\"<what to research>\",\"instruction\":\"<what to edit>\"}}\n\
-         \n\
-         Use the conversation context only as supporting background. The current user message is the source of truth for the requested action.\n\
-         {convo_context}\
-         User message: {msg}"
-    );
+    let system = "\
+Classify the following user message as one of two intents.\n\
+Return a JSON object only, no explanation.\n\
+\n\
+Intent options:\n\
+1. research_only — the user wants information, a summary, or an answer.\n\
+2. research_then_edit — the user wants to create, modify, move, or delete documents or folders.\n\
+\n\
+JSON format for research_only:\n\
+{\"intent\":\"research_only\",\"query\":\"<user query>\"}\n\
+\n\
+JSON format for research_then_edit:\n\
+{\"intent\":\"research_then_edit\",\"query\":\"<what to research>\",\"instruction\":\"<what to edit>\"}";
+
+    let user = format!("{convo_context}User message: {msg}");
+
+    let messages = vec![ChatMessage::system(system), ChatMessage::user(user)];
 
     match ctx
         .router
-        .complete(OperationType::IntentClassification, prompt)
+        .complete(OperationType::IntentClassification, messages)
         .await
     {
         Ok(resp) => {

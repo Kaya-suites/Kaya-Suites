@@ -21,9 +21,10 @@ use uuid::Uuid;
 
 use crate::agent::log::{InvocationLog, ToolInvocation};
 use crate::agent::tool::WriteTool;
+use crate::agent::turn_context::TurnContext;
 use crate::agent::{AgentContext, AgentEvent};
 use crate::error::KayaError;
-use crate::model_router::{OperationType, ToolCallRequest, ToolDefinition};
+use crate::model_router::{ChatMessage, OperationType, ToolCallRequest, ToolDefinition};
 use crate::token_counter::count_tokens;
 
 use super::orchestrator::AgentPlan;
@@ -77,24 +78,32 @@ impl Editor {
             })
             .collect();
 
-        let system_prompt = build_editor_prompt(
-            &self.tools,
-            instruction,
-            &research,
-            ctx.conversation_context.as_deref(),
-        );
+        let system_prompt =
+            build_editor_system_prompt(&self.tools, instruction, &research, &ctx.turn);
         let turn_id = Uuid::new_v4();
-        let mut tool_history = String::new();
+        let mut message_history: Vec<ChatMessage> = vec![
+            ChatMessage::system(system_prompt),
+            ChatMessage::user(instruction),
+        ];
         let mut total_input_tokens: u32 = 0;
         let mut total_output_tokens: u32 = 0;
         let mut last_model = String::new();
 
         for _ in 0..self.max_turns {
-            let prompt = format!("{system_prompt}\nUser: {instruction}\n{tool_history}");
-            total_input_tokens = total_input_tokens.saturating_add(count_tokens(&prompt, "gpt-4"));
+            let history_text = message_history
+                .iter()
+                .map(|m| match m {
+                    ChatMessage::System(s) => s.clone(),
+                    ChatMessage::User(s) => format!("User: {s}"),
+                    ChatMessage::Assistant(s) => format!("Assistant: {s}"),
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            total_input_tokens =
+                total_input_tokens.saturating_add(count_tokens(&history_text, "gpt-4"));
 
             let req = ToolCallRequest {
-                prompt,
+                messages: message_history.clone(),
                 model: String::new(),
                 operation: OperationType::EditProposal,
                 tools: tool_defs.clone(),
@@ -180,10 +189,11 @@ impl Editor {
 
                     let result_json = serde_json::to_string(&output_json).unwrap_or_default();
                     let args_json = serde_json::to_string(&tool_call.arguments).unwrap_or_default();
-                    tool_history.push_str(&format!(
-                        "\n[Calling: {}({args_json})]\n[Result]: {result_json}\n",
+                    message_history.push(ChatMessage::assistant(format!(
+                        "[Calling: {}({args_json})]",
                         tool_call.tool_name,
-                    ));
+                    )));
+                    message_history.push(ChatMessage::user(format!("[Result]: {result_json}")));
                 }
 
                 None => {
@@ -228,11 +238,11 @@ impl Editor {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn build_editor_prompt(
+fn build_editor_system_prompt(
     tools: &[Arc<dyn WriteTool>],
     instruction: &str,
     research: &ResearchResult,
-    conversation_context: Option<&str>,
+    turn: &TurnContext,
 ) -> String {
     let tool_list = tools
         .iter()
@@ -241,15 +251,22 @@ fn build_editor_prompt(
         .join("\n");
     let directory_context = serde_json::to_string_pretty(&research.directory_context)
         .unwrap_or_else(|_| "{\"folders\":[]}".to_string());
-    let conversation_context = conversation_context
-        .filter(|s| !s.trim().is_empty())
+
+    // Document block first (stable prefix for future caching), chat block after.
+    let document_block = turn
+        .format_document_block()
+        .map(|s| format!("## Open document\n{s}\n\n"))
+        .unwrap_or_default();
+    let chat_block = turn
+        .format_chat_block()
         .map(|s| format!("## Conversation context\n{s}\n\n"))
         .unwrap_or_default();
 
     format!(
         "You are the Editor agent for Kaya Suites.\n\
          \n\
-         {conversation_context}\
+         {document_block}\
+         {chat_block}\
          ## Research context\n\
          The Researcher agent has gathered the following context for you:\n\
          {}\n\
