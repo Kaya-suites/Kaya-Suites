@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, type ReactNode, useMemo } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Prism from "prismjs";
 import "prismjs/components/prism-markup";
 import "prismjs/components/prism-javascript";
@@ -17,8 +17,10 @@ import Link from "next/link";
 import {
   inlineHtmlToMarkdown,
   parseMarkdownToBlocks,
+  type MarkdownBlock,
   type MarkdownAlignment,
-} from "@/lib/markdown/model";
+} from "@kaya/markdown-model";
+import { useEditorContext } from "../EditorContext";
 import { MermaidDiagram } from "./MermaidDiagram";
 
 type Props = {
@@ -182,8 +184,97 @@ function alignmentClass(alignment: MarkdownAlignment) {
   }
 }
 
+function MarkdownTable({
+  block,
+  decorateText,
+  stickyTopOffset,
+}: {
+  block: Extract<MarkdownBlock, { type: "table" }>;
+  decorateText?: (text: string) => ReactNode;
+  stickyTopOffset: number;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const headerRowRef = useRef<HTMLTableRowElement>(null);
+  const [stickyActive, setStickyActive] = useState(false);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+
+    const scrollParent = node.closest<HTMLElement>("[data-editor-scroll]");
+
+    const updateStickyState = () => {
+      const containerRect = node.getBoundingClientRect();
+      const headerHeight = headerRowRef.current?.getBoundingClientRect().height ?? 0;
+      const nextSticky =
+        containerRect.top <= stickyTopOffset &&
+        containerRect.bottom - headerHeight > stickyTopOffset;
+      setStickyActive((current) => (current === nextSticky ? current : nextSticky));
+    };
+
+    updateStickyState();
+    const scrollTarget: HTMLElement | Window = scrollParent ?? window;
+    scrollTarget.addEventListener("scroll", updateStickyState, { passive: true });
+    window.addEventListener("resize", updateStickyState);
+
+    return () => {
+      scrollTarget.removeEventListener("scroll", updateStickyState);
+      window.removeEventListener("resize", updateStickyState);
+    };
+  }, [stickyTopOffset]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="mb-4 overflow-x-auto overflow-y-visible border-2 border-black bg-white"
+      style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+    >
+      <table className="min-w-full border-separate border-spacing-0 text-sm font-mono">
+        <thead>
+          <tr ref={headerRowRef}>
+            {block.header.map((cell, columnIndex) => (
+              <th
+                key={`${block.id}-head-${columnIndex}`}
+                data-sticky-header="true"
+                className={`border-b-2 border-black bg-[var(--color-muted-bg)] px-3 py-2 font-bold uppercase tracking-wide break-words ${alignmentClass(block.alignments[columnIndex] ?? null)} ${columnIndex < block.header.length - 1 ? "border-r-2" : ""}`}
+                style={
+                  stickyActive
+                    ? {
+                        top: `${stickyTopOffset}px`,
+                        position: "sticky",
+                        zIndex: 10,
+                        boxShadow: "inset 0 -2px 0 black, 0 4px 0 rgba(0,0,0,0.04)",
+                      }
+                    : undefined
+                }
+              >
+                <InlineMarkdown markdown={inlineHtmlToMarkdown(cell)} decorateText={decorateText} />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {block.rows.map((row, rowIndex) => (
+            <tr key={`${block.id}-row-${rowIndex}`}>
+              {row.map((cell, columnIndex) => (
+                <td
+                  key={`${block.id}-row-${rowIndex}-col-${columnIndex}`}
+                  className={`border-b-2 border-black px-3 py-2 break-words ${alignmentClass(block.alignments[columnIndex] ?? null)} ${columnIndex < row.length - 1 ? "border-r-2" : ""}`}
+                >
+                  <InlineMarkdown markdown={inlineHtmlToMarkdown(cell)} decorateText={decorateText} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function MarkdownContent({ markdown, className, decorateText, isStreaming }: Props) {
   const blocks = useMemo(() => parseMarkdownToBlocks(markdown), [markdown]);
+  const { stickyTopOffset } = useEditorContext();
 
   return (
     <div className={className}>
@@ -191,53 +282,67 @@ export function MarkdownContent({ markdown, className, decorateText, isStreaming
         switch (block.type) {
           case "paragraph":
             return (
-              <p key={block.id} className="mb-3 last:mb-0 font-mono leading-relaxed">
+              <p
+                key={block.id}
+                className="mb-3 last:mb-0 font-mono leading-relaxed"
+                style={{
+                  paddingLeft: block.depth > 0 ? `${block.depth * 1.5}rem` : undefined,
+                  borderLeft: block.depth > 0 ? "2px solid var(--color-muted)" : undefined,
+                }}
+              >
                 <InlineMarkdown markdown={inlineHtmlToMarkdown(block.html)} decorateText={decorateText} />
               </p>
             );
           case "heading": {
-            const headingKey = block.id;
             const headingClass =
               block.level === 1
                 ? "mb-3 text-2xl font-bold font-mono"
                 : block.level === 2
                   ? "mb-3 mt-6 text-lg font-bold font-mono"
                   : "mb-3 mt-4 text-base font-bold font-mono";
-
+            const depthStyle = block.depth > 0
+              ? { paddingLeft: `${block.depth * 1.5}rem`, borderLeft: "2px solid var(--color-muted)" }
+              : undefined;
             const content = <InlineMarkdown markdown={inlineHtmlToMarkdown(block.html)} decorateText={decorateText} />;
-            if (block.level === 1) return <h1 key={headingKey} className={headingClass}>{content}</h1>;
-            if (block.level === 2) return <h2 key={headingKey} className={headingClass}>{content}</h2>;
-            if (block.level === 3) return <h3 key={headingKey} className={headingClass}>{content}</h3>;
-            if (block.level === 4) return <h4 key={headingKey} className={headingClass}>{content}</h4>;
-            if (block.level === 5) return <h5 key={headingKey} className={headingClass}>{content}</h5>;
-            return <h6 key={headingKey} className={headingClass}>{content}</h6>;
+            if (block.level === 1) return <h1 key={block.id} className={headingClass} style={depthStyle}>{content}</h1>;
+            if (block.level === 2) return <h2 key={block.id} className={headingClass} style={depthStyle}>{content}</h2>;
+            if (block.level === 3) return <h3 key={block.id} className={headingClass} style={depthStyle}>{content}</h3>;
+            if (block.level === 4) return <h4 key={block.id} className={headingClass} style={depthStyle}>{content}</h4>;
+            if (block.level === 5) return <h5 key={block.id} className={headingClass} style={depthStyle}>{content}</h5>;
+            return <h6 key={block.id} className={headingClass} style={depthStyle}>{content}</h6>;
           }
           case "blockquote":
             return (
               <blockquote
                 key={block.id}
                 className="mb-3 border-l-4 border-black bg-[var(--color-muted-bg)] px-4 py-3 font-mono"
-                style={{ borderRadius: "var(--border-radius)" }}
+                style={{ borderRadius: "var(--border-radius)", marginLeft: block.depth > 0 ? `${block.depth * 1.5}rem` : undefined }}
               >
                 <InlineMarkdown markdown={inlineHtmlToMarkdown(block.html)} decorateText={decorateText} />
               </blockquote>
             );
           case "list": {
-            const numbers = new Map<number, number>();
+            const orderedCounters = new Map<number, number>();
             return (
               <div key={block.id} className="mb-3 last:mb-0 space-y-1 font-mono">
                 {block.items.map((item) => {
-                  const counter = numbers.get(item.depth) ?? (item.depth === 0 ? block.start : 1);
-                  numbers.set(item.depth, counter + 1);
-                  const prefix = item.checked !== null ? (
-                    <span className="mt-1 inline-flex h-4 w-4 items-center justify-center border-2 border-black text-[10px]">
-                      {item.checked ? "x" : ""}
-                    </span>
-                  ) : block.ordered ? (
-                    <span className="min-w-6 text-right font-bold">{counter}.</span>
-                  ) : (
-                    <span className="min-w-4 text-center font-bold">•</span>
-                  );
+                  let prefix: ReactNode;
+                  if (item.checked !== null) {
+                    prefix = (
+                      <span className="mt-1 inline-flex h-4 w-4 items-center justify-center border-2 border-black text-[10px]">
+                        {item.checked ? "x" : ""}
+                      </span>
+                    );
+                  } else if (item.ordered) {
+                    const counter = orderedCounters.get(item.depth) ?? (item.depth === 0 ? block.start : 1);
+                    orderedCounters.set(item.depth, counter + 1);
+                    for (const depth of orderedCounters.keys()) {
+                      if (depth > item.depth) orderedCounters.delete(depth);
+                    }
+                    prefix = <span className="min-w-6 text-right font-bold">{counter}.</span>;
+                  } else {
+                    prefix = <span className="min-w-4 text-center font-bold">•</span>;
+                  }
 
                   return (
                     <div key={item.id} className="flex gap-2" style={{ paddingLeft: `${item.depth * 1.5}rem` }}>
@@ -253,36 +358,12 @@ export function MarkdownContent({ markdown, className, decorateText, isStreaming
           }
           case "table":
             return (
-              <div key={block.id} className="mb-4 overflow-x-auto">
-                <table className="w-full border-collapse border-2 border-black text-sm font-mono">
-                  <thead>
-                    <tr>
-                      {block.header.map((cell, columnIndex) => (
-                        <th
-                          key={`${block.id}-head-${columnIndex}`}
-                          className={`border-2 border-black bg-[var(--color-muted-bg)] px-3 py-2 font-bold uppercase tracking-wide break-words ${alignmentClass(block.alignments[columnIndex] ?? null)}`}
-                        >
-                          <InlineMarkdown markdown={inlineHtmlToMarkdown(cell)} decorateText={decorateText} />
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {block.rows.map((row, rowIndex) => (
-                      <tr key={`${block.id}-row-${rowIndex}`}>
-                        {row.map((cell, columnIndex) => (
-                          <td
-                            key={`${block.id}-row-${rowIndex}-col-${columnIndex}`}
-                            className={`border-2 border-black px-3 py-2 break-words ${alignmentClass(block.alignments[columnIndex] ?? null)}`}
-                          >
-                            <InlineMarkdown markdown={inlineHtmlToMarkdown(cell)} decorateText={decorateText} />
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <MarkdownTable
+                key={block.id}
+                block={block}
+                decorateText={decorateText}
+                stickyTopOffset={stickyTopOffset}
+              />
             );
           case "code":
             if (block.language.toLowerCase() === "mermaid") {
