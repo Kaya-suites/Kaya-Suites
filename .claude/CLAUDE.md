@@ -16,12 +16,9 @@ All crates use `edition = "2024"`.
 
 `apps/backend/Cargo.toml` is the Cargo workspace root. There is **no** `Cargo.toml` at the repo root.
 
-## License boundary
+## Licence
 
-- Anything inside a directory named `ee/` → **BSL 1.1**
-- Everything else → **Apache 2.0**
-- `bin/kaya-oss/Cargo.toml` lists **only** Apache crates as dependencies.
-- `scripts/strip-ee.sh` strips all `ee/` directories before syncing to the public mirror.
+The entire repository is Apache 2.0. There is no separate BSL/enterprise tier.
 
 ## Non-negotiable architectural seams
 
@@ -59,12 +56,10 @@ No code outside the provider implementation files imports a vendor SDK.
 
 - Target: **Next.js 16.x** (currently 16.2.6). Flag any tooling that defaults to 15.
 - App router only. No pages router.
-- Route layout: `app/(shared)/` for Apache routes. Route groups do **not** add a URL prefix.
+- Route layout: `app/(shared)/`. Route groups do **not** add a URL prefix.
 - Component layout: `components/shared/`.
 - Backend URL: `NEXT_PUBLIC_API_URL`, default `http://localhost:3001`.
 
 ## What has NOT been implemented yet
 
 - No AuthAdapter implementation (trait only)
-
-@.claude/ee/enterprise.md

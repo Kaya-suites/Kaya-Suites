@@ -1,18 +1,17 @@
 # Kaya Suites — Documentation
 
-This directory contains documentation for the Apache 2.0 open-source distribution of Kaya Suites.
-
-> Enterprise / cloud documentation lives in `docs/ee/` and is stripped from the public mirror before release.
+This directory contains the documentation for Kaya Suites. The project is Apache 2.0 throughout; there is no separate enterprise/BSL tier in this repository.
 
 ## Contents
 
 | Document | Description |
 |---|---|
-| [Architecture](architecture.md) | System overview, two-build-system layout, dependency graph |
-| [Agent Architecture](agent/architecture.md) | Orchestrator, researcher/editor split, SSE review flow |
-| [Storage Adapter](storage-adapter.md) | `StorageAdapter` trait, domain types, `SqliteAdapter` |
-| [Auth Adapter](auth-adapter.md) | `AuthAdapter` trait and `LocalAuthAdapter` (single-user) |
-| [LLM Provider](llm-provider.md) | `LlmProvider` trait, `ModelRouter`, routing config |
-| [API Codegen](api-codegen.md) | OpenAPI schema → TypeScript client pipeline |
-| [Building](building.md) | Building frontend, backend, and the OSS static binary |
-| [License Boundary](license-boundary.md) | How Apache 2.0 and BSL 1.1 are separated |
+| [Architecture](architecture.md) | System overview, crate map, two-build-system layout |
+| [Agent architecture](agent/architecture.md) | Orchestrator / Researcher / Editor pipeline, tool isolation, SSE contract |
+| [Storage adapter](storage-adapter.md) | `StorageAdapter` trait, domain types, SQLite / Postgres / MySQL backends |
+| [Auth adapter](auth-adapter.md) | `AuthAdapter` trait and the current adapter scaffolds |
+| [LLM provider](llm-provider.md) | `LlmProvider` trait, `ModelRouter`, routing config, adding providers |
+| [API codegen](api-codegen.md) | OpenAPI schema → TypeScript client pipeline |
+| [Packages](packages.md) | Frontend workspace packages (`@kaya/*`) |
+| [Building](building.md) | Build commands for frontend, backend, and the embedded OSS binary |
+| [License](license.md) | Licensing notes |

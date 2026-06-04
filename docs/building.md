@@ -2,24 +2,24 @@
 
 ## Prerequisites
 
-- Rust (stable toolchain, edition 2024 crates)
-- Node.js + pnpm
-- `sqlite3` system library (for `kaya-storage`)
+- Rust (stable toolchain, edition 2024)
+- Node.js ≥ 20 and pnpm ≥ 9
+- `sqlite3` system library (default storage backend)
 
 ## Frontend
 
 ```bash
-# Install dependencies (run from repo root)
+# Install dependencies (from repo root)
 pnpm install
 
 # Start the dev server
 pnpm dev
 
-# Production build
-pnpm --filter apps/web build
+# Production build (workspace-wide)
+pnpm build
 ```
 
-The frontend dev server proxies API calls to `NEXT_PUBLIC_API_URL` (default `http://localhost:3001`).
+The frontend reads its backend base URL from `NEXT_PUBLIC_API_URL` (default `http://localhost:3001`).
 
 ## Backend
 
@@ -27,19 +27,18 @@ The frontend dev server proxies API calls to `NEXT_PUBLIC_API_URL` (default `htt
 cd apps/backend
 
 cargo build --workspace
+cargo test --workspace
 
 # Run the OSS binary
 cargo run --bin kaya-oss
-
-cargo test --workspace
 ```
 
-## OSS static binary (embeds frontend)
+## OSS static binary (frontend embedded)
 
-The `kaya-oss` binary can serve the frontend directly without a separate Node.js process. This is the recommended distribution for self-hosted deployments.
+The `kaya-oss` binary can serve the frontend directly without a separate Node.js process. Recommended for self-hosted deployments.
 
 ```bash
-# 1. Build the frontend in OSS mode
+# 1. Build the frontend in OSS mode (static export)
 cd apps/web
 NEXT_PUBLIC_KAYA_BUILD=oss pnpm build
 
@@ -62,7 +61,7 @@ cargo fmt
 cargo clippy --all-targets
 
 # TypeScript / Next.js
-pnpm --filter apps/web lint
+pnpm --filter web lint
 ```
 
 Both must pass before a PR can be merged.
@@ -72,7 +71,10 @@ Both must pass before a PR can be merged.
 | Variable | Default | Description |
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:3001` | Backend base URL used by the frontend |
-| `ANTHROPIC_API_KEY` | — | Required for `DocumentGeneration` and `EditProposal` operations |
-| `OPENAI_API_KEY` | — | Required for classification, stale detection, and embedding |
+| `NEXT_PUBLIC_KAYA_BUILD` | (unset) | Set to `oss` to enable Next.js `output: "export"` for the embedded-binary path |
+| `DATABASE_URL` | sqlite default | Selects the storage backend (sqlite / postgres / mysql) |
+| `OPENAI_API_KEY` | — | Required by the OpenAI provider |
+| `ANTHROPIC_API_KEY` | — | Required by the Anthropic provider |
+| `GEMINI_API_KEY` | — | Required by the Gemini provider |
 
-Provider API keys are read from the environment variables named in `kaya.yaml` (see [LLM Provider](llm-provider.md)).
+Provider API keys are resolved through the env-var names declared in `kaya.yaml` — see [LLM provider](llm-provider.md) and [Configuration](../CONFIG.md).

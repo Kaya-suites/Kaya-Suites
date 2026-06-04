@@ -81,7 +81,7 @@ It only runs for `ResearchThenEdit` plans. The editor receives the `ResearchResu
 - `propose_edit`
 - `update_document`
 
-When a tool returns a pending change, the editor emits `AgentEvent::ProposedEditEmitted` instead of mutating storage directly.
+When a tool returns a pending change, the editor emits `AgentEvent::ProposedEditEmitted` instead of mutating storage directly. The HTTP layer translates this into the matching SSE variant (`ProposedEditEmitted`, `ProposedDeleteEmitted`, or `ProposedFolderCreateEmitted`) depending on the proposal kind.
 
 ## Tool Isolation
 
@@ -137,9 +137,12 @@ The main SSE messages are:
 - `CitationFound`
 - `ProposedEditEmitted`
 - `ProposedDeleteEmitted`
+- `ProposedFolderCreateEmitted`
 - `SessionRenamed`
 - `Done`
 - `Error`
+
+The internal `AgentEvent` enum is a superset (it also carries `ThinkingChunk`, `ToolCall`, `ToolResult`, `FinalMessage`, and `Usage`); the chat route in `kaya-server` decides which of those reach the browser.
 
 The backend streams text incrementally, emits citations as they are resolved from the final message, buffers proposed edits for approval, and only finalizes the turn on `Done`.
 

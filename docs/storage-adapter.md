@@ -1,17 +1,17 @@
 # StorageAdapter
 
-**Trait location:** `crates/kaya-core/src/storage.rs`  
-**License:** Apache 2.0
+**Trait location:** `apps/backend/crates/kaya-core/src/storage.rs`
+**Implementations:** `apps/backend/crates/kaya-storage/src/{sqlite,postgres,mysql}.rs`
 
 ## Why it lives in `kaya-core`
 
-The brief originally placed this trait in `crates/kaya-storage`, but that creates a circular dependency: `commit_edit` (in `kaya-core`) takes `Arc<dyn StorageAdapter>`, so the trait must be in a crate that neither `kaya-storage` nor `kaya-core` imports. Moving it to `kaya-core` keeps the dependency graph acyclic.
+`commit_edit` (in `kaya-core`) takes `Arc<dyn StorageAdapter>`, so the trait must live in a crate that `kaya-storage` can depend on — not the other way around. Moving the trait into `kaya-core` keeps the dependency graph acyclic.
 
 ## Domain types
 
 ### `Document`
 
-A knowledge-base document. Frontmatter fields follow FR-1/FR-2 from the BRD.
+A knowledge-base document.
 
 | Field | Type | Description |
 |---|---|---|
@@ -26,15 +26,15 @@ A knowledge-base document. Frontmatter fields follow FR-1/FR-2 from the BRD.
 
 ### `Chunk`
 
-A paragraph extracted from a document body. The `paragraph_id` is the first 16 hex characters of `SHA-256(ordinal_le | content_utf8)`, making it stable across re-indexing runs as long as neither the paragraph's position nor content changes (FR-6).
+A paragraph extracted from a document body. The `paragraph_id` is the first 16 hex characters of `SHA-256(ordinal_le | content_utf8)`, making it stable across re-indexing runs as long as neither the paragraph's position nor content changes.
 
 ### `ChunkHit`
 
-A chunk returned from text or vector search, ready for citation (FR-8).
+A chunk returned from text or vector search, ready for citation.
 
 ### `Embedding`
 
-A vector embedding for a single chunk. Matches a `Chunk` by `paragraph_id`.
+A vector embedding for a single chunk, matched to a `Chunk` by `paragraph_id`.
 
 ### `StorageError`
 
@@ -43,7 +43,7 @@ A vector embedding for a single chunk. Matches a `Chunk` by `paragraph_id`.
 | `NotFound(Uuid)` | Requested document does not exist. |
 | `Backend(Box<dyn Error>)` | Underlying I/O or database error. |
 
-## Trait methods
+## Trait surface
 
 ```rust
 #[async_trait]
@@ -54,7 +54,7 @@ pub trait StorageAdapter: Send + Sync {
     async fn delete_document(&self, id: Uuid) -> Result<(), StorageError>;
     async fn list_documents(&self) -> Result<Vec<Document>, StorageError>;
 
-    // Chunks and text index (FTS5)
+    // Chunks and text index
     async fn save_chunk(&self, chunk: &Chunk) -> Result<(), StorageError>;
     async fn delete_chunks_for_document(&self, document_id: Uuid) -> Result<(), StorageError>;
     async fn get_chunk_hashes(&self, document_id: Uuid) -> Result<Vec<(String, String)>, StorageError>;
@@ -69,13 +69,28 @@ pub trait StorageAdapter: Send + Sync {
 
 ## Implementations
 
-### `SqliteAdapter` (Apache 2.0)
+### `SqliteAdapter`
 
 **Location:** `crates/kaya-storage/src/sqlite.rs`
 
-- Persists documents as `.md` files in a content directory.
+- Persists documents as `.md` files in a content directory and indexes metadata in SQLite.
 - Maintains an FTS5 table for BM25 full-text search (`search_text`).
-- Loads all embeddings into memory and computes cosine similarity in Rust for `search_embeddings`. Suitable for single-user OSS deployments.
+- Loads embeddings into memory and computes cosine similarity in Rust for `search_embeddings`. Suitable for single-node deployments.
+
+### `PostgresAdapter`
+
+**Location:** `crates/kaya-storage/src/postgres.rs`
+
+- Uses Postgres + pgvector for vector search at the database tier.
+- Recommended for multi-user deployments where SQLite's single-writer model is a bottleneck.
+
+### `MysqlAdapter`
+
+**Location:** `crates/kaya-storage/src/mysql.rs`
+
+- MySQL backend. Experimental — exact feature parity with the SQLite/Postgres adapters may lag.
+
+The active backend is selected from `DATABASE_URL` at startup. See [CONFIG.md](../CONFIG.md).
 
 ## Usage
 
