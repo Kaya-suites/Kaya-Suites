@@ -8,7 +8,10 @@ members = [
   "crates/kaya-auth",
   "crates/kaya-metering",
   "crates/kaya-db",
+  "crates/kaya-mcp",
+  "crates/kaya-oauth",
   "bin/kaya-oss",
+  "bin/kaya-mcp",
 ]
 resolver = "2"
 

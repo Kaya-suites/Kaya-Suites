@@ -1,0 +1,29 @@
+[package]
+name = "kaya-oauth"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "OAuth 2.1 authorization server primitives for Kaya Suites (Apache 2.0)"
+
+[dependencies]
+tokio       = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+anyhow      = { workspace = true }
+uuid        = { workspace = true }
+chrono      = { workspace = true }
+async-trait = { workspace = true }
+
+sha2        = "0.10"
+hex         = "0.4"
+base64      = "0.22"
+rand        = "0.9"
+argon2      = "0.5"
+subtle      = "2"
+sqlx        = { version = "0.8", features = ["runtime-tokio", "any", "sqlite", "postgres", "mysql", "uuid", "chrono"] }
+
+[dev-dependencies]
+kaya-db     = { path = "../kaya-db" }
+tempfile    = "3"
+tokio       = { workspace = true, features = ["full", "test-util"] }
