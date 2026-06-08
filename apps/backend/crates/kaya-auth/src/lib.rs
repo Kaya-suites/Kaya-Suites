@@ -20,7 +20,7 @@ pub mod password_auth;
 
 pub use auth_adapter::{AuthUser, CloudAuthAdapter, KayaAuthBackend, PasswordCredentials};
 pub use error::{AuthError, RegisterError};
-pub use password_auth::{PasswordAuthService, SeedError};
+pub use password_auth::{Backend, PasswordAuthService, SeedError};
 
 // ── Re-export session types used by callers ───────────────────────────────────
 

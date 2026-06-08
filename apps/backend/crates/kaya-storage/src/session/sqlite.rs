@@ -61,7 +61,8 @@ impl SqliteSessionStorage {
                 created_at    INTEGER NOT NULL,
                 input_tokens  INTEGER NOT NULL DEFAULT 0,
                 output_tokens INTEGER NOT NULL DEFAULT 0,
-                model         TEXT    NOT NULL DEFAULT ''
+                model         TEXT    NOT NULL DEFAULT '',
+                proposals     TEXT    NOT NULL DEFAULT '[]'
             )",
         )
         .execute(pool)
@@ -75,6 +76,7 @@ impl SqliteSessionStorage {
             "ALTER TABLE chat_messages ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE chat_messages ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE chat_messages ADD COLUMN model TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE chat_messages ADD COLUMN proposals TEXT NOT NULL DEFAULT '[]'",
         ] {
             let _ = sqlx::query(stmt).execute(pool).await;
         }
@@ -234,8 +236,12 @@ impl SessionStorage for SqliteSessionStorage {
             .collect()
     }
 
-    async fn create_session(&self, title: Option<String>) -> Result<Session, SessionError> {
-        let id = Uuid::new_v4();
+    async fn create_session(
+        &self,
+        id: Option<Uuid>,
+        title: Option<String>,
+    ) -> Result<Session, SessionError> {
+        let id = id.unwrap_or_else(Uuid::new_v4);
         let now = Utc::now().timestamp_millis();
         let title = title.unwrap_or_else(|| "New conversation".to_string());
 
@@ -265,7 +271,7 @@ impl SessionStorage for SqliteSessionStorage {
 
     async fn get_messages(&self, session_id: Uuid) -> Result<Vec<MessageRecord>, SessionError> {
         let rows = sqlx::query(
-            "SELECT id, role, content, citations, created_at, input_tokens, output_tokens, model
+            "SELECT id, role, content, citations, created_at, input_tokens, output_tokens, model, proposals
              FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC",
         )
         .bind(session_id.to_string())
@@ -284,6 +290,7 @@ impl SessionStorage for SqliteSessionStorage {
                     input_tokens: row.try_get::<i64, _>("input_tokens").map_err(box_err)? as u32,
                     output_tokens: row.try_get::<i64, _>("output_tokens").map_err(box_err)? as u32,
                     model: row.try_get("model").map_err(box_err)?,
+                    proposals_json: row.try_get("proposals").map_err(box_err)?,
                 })
             })
             .collect()
@@ -423,6 +430,56 @@ impl SessionStorage for SqliteSessionStorage {
         .await
         .map_err(box_err)?;
 
+        Ok(())
+    }
+
+    async fn update_message_proposals(
+        &self,
+        message_id: &str,
+        proposals_json: &str,
+    ) -> Result<(), SessionError> {
+        sqlx::query("UPDATE chat_messages SET proposals = ? WHERE id = ?")
+            .bind(proposals_json)
+            .bind(message_id)
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn update_proposal_status(
+        &self,
+        message_id: &str,
+        edit_id: Uuid,
+        status: &str,
+    ) -> Result<(), SessionError> {
+        let row = sqlx::query("SELECT proposals FROM chat_messages WHERE id = ?")
+            .bind(message_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(box_err)?;
+        let Some(row) = row else { return Ok(()) };
+        let json: String = row.try_get("proposals").map_err(box_err)?;
+        let mut arr: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap_or_default();
+        let target = edit_id.to_string();
+        let mut changed = false;
+        for item in arr.iter_mut() {
+            if item.get("id").and_then(|v| v.as_str()) == Some(target.as_str()) {
+                item["status"] = serde_json::Value::String(status.to_string());
+                changed = true;
+                break;
+            }
+        }
+        if !changed {
+            return Ok(());
+        }
+        let new_json = serde_json::to_string(&arr).map_err(box_err)?;
+        sqlx::query("UPDATE chat_messages SET proposals = ? WHERE id = ?")
+            .bind(new_json)
+            .bind(message_id)
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
         Ok(())
     }
 

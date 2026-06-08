@@ -33,6 +33,9 @@ pub struct MessageRecord {
     pub input_tokens: u32,
     pub output_tokens: u32,
     pub model: String,
+    /// JSON array string of proposal objects (edits/deletes/folder-creates),
+    /// each with a `status` field. Empty array `"[]"` if none.
+    pub proposals_json: String,
 }
 
 /// A persisted summary of older chat history for a session.
@@ -144,7 +147,11 @@ pub enum SessionError {
 #[async_trait]
 pub trait SessionStorage: Send + Sync {
     async fn list_sessions(&self) -> Result<Vec<Session>, SessionError>;
-    async fn create_session(&self, title: Option<String>) -> Result<Session, SessionError>;
+    async fn create_session(
+        &self,
+        id: Option<Uuid>,
+        title: Option<String>,
+    ) -> Result<Session, SessionError>;
     async fn get_messages(&self, session_id: Uuid) -> Result<Vec<MessageRecord>, SessionError>;
     /// Return (role, content) pairs ordered oldest-first for LLM context.
     async fn get_prior_messages(
@@ -198,6 +205,26 @@ pub trait SessionStorage: Send + Sync {
         output_tokens: u32,
         model: &str,
     ) -> Result<(), SessionError>;
+    /// Persist the proposals JSON array for an assistant message. Called once
+    /// per turn after `save_assistant_message`. Default impl is a no-op so
+    /// in-memory test backends do not need to opt in.
+    async fn update_message_proposals(
+        &self,
+        _message_id: &str,
+        _proposals_json: &str,
+    ) -> Result<(), SessionError> {
+        Ok(())
+    }
+    /// Flip the `status` field of a single proposal (by `edit_id`) inside an
+    /// assistant message's stored proposals array. Default impl is a no-op.
+    async fn update_proposal_status(
+        &self,
+        _message_id: &str,
+        _edit_id: Uuid,
+        _status: &str,
+    ) -> Result<(), SessionError> {
+        Ok(())
+    }
     async fn get_usage_summary(&self) -> Result<UsageSummary, SessionError>;
     /// Record a single embedding API call (tokens used, model name).
     async fn save_embedding_call(&self, call: &EmbeddingCall) -> Result<(), SessionError>;

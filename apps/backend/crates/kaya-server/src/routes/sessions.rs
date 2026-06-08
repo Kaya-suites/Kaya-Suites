@@ -29,6 +29,7 @@ pub async fn list_sessions(
 
 #[derive(Deserialize)]
 pub struct CreateSessionBody {
+    pub id: Option<Uuid>,
     pub title: Option<String>,
 }
 
@@ -37,7 +38,7 @@ pub async fn create_session(
     Json(body): Json<CreateSessionBody>,
 ) -> Result<(StatusCode, Json<kaya_core::Session>), ApiError> {
     let session = sessions
-        .create_session(body.title)
+        .create_session(body.id, body.title)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
     Ok((StatusCode::CREATED, Json(session)))
@@ -103,6 +104,7 @@ pub(crate) struct MessageResponse {
     role: String,
     content: String,
     citations: Value,
+    proposals: Value,
     created_at: i64,
 }
 
@@ -160,6 +162,7 @@ pub async fn get_session_messages(
             role: r.role,
             content: r.content,
             citations: serde_json::from_str(&r.citations_json).unwrap_or(Value::Array(vec![])),
+            proposals: serde_json::from_str(&r.proposals_json).unwrap_or(Value::Array(vec![])),
             created_at: r.created_at,
         })
         .collect();

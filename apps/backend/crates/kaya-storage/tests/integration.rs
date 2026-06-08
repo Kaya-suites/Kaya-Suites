@@ -45,6 +45,7 @@ fn make_doc() -> Document {
         related_docs: vec![],
         body: "# Hello\n\nThis is the body.\n".to_string(),
         folder_id: None,
+        sort_order: 0,
     }
 }
 
@@ -58,6 +59,7 @@ fn blank_doc() -> Document {
         related_docs: vec![],
         body: String::new(),
         folder_id: None,
+        sort_order: 0,
     }
 }
 

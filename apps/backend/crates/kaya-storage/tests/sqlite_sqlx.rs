@@ -20,6 +20,7 @@ fn make_doc() -> Document {
         related_docs: vec![],
         body: "First paragraph.\n\nSecond paragraph.".to_string(),
         folder_id: None,
+        sort_order: 0,
     }
 }
 

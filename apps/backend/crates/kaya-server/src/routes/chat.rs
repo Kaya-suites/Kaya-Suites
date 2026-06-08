@@ -182,6 +182,8 @@ async fn run_agent_stream(
     let mut doc_title_cache: HashMap<Uuid, String> = HashMap::new();
     let mut assistant_text = String::new();
     let mut assistant_citations: Vec<Value> = Vec::new();
+    let mut assistant_proposals: Vec<Value> = Vec::new();
+    let assistant_message_id = Uuid::new_v4().to_string();
     let mut turn_input_tokens: u32 = 0;
     let mut turn_output_tokens: u32 = 0;
     let mut turn_model = String::new();
@@ -246,10 +248,12 @@ async fn run_agent_stream(
                     &sessions,
                     &pending_edits,
                     session_id,
+                    &assistant_message_id,
                     &edit,
                 )
                 .await
                 {
+                    assistant_proposals.push(proposal_record(&sse_data));
                     send!(sse_data);
                 }
             }
@@ -319,7 +323,7 @@ async fn run_agent_stream(
         let _ = sessions
             .save_assistant_message(
                 session_id,
-                &Uuid::new_v4().to_string(),
+                &assistant_message_id,
                 &assistant_text,
                 &citations_json,
                 turn_input_tokens,
@@ -327,6 +331,14 @@ async fn run_agent_stream(
                 &turn_model,
             )
             .await;
+
+        if !assistant_proposals.is_empty() {
+            let proposals_json = serde_json::to_string(&assistant_proposals)
+                .unwrap_or_else(|_| "[]".to_string());
+            let _ = sessions
+                .update_message_proposals(&assistant_message_id, &proposals_json)
+                .await;
+        }
 
         let sessions_for_summary = sessions.clone();
         let router_for_summary = router.clone();
@@ -418,6 +430,7 @@ async fn build_edit_sse(
     sessions: &Arc<dyn SessionStorage>,
     pending_edits: &Arc<Mutex<HashMap<Uuid, StoredEdit>>>,
     session_id: Uuid,
+    message_id: &str,
     edit: &ProposedEdit,
 ) -> Option<Value> {
     let (doc_id, para_id, original, proposed) = match &edit.kind {
@@ -504,6 +517,7 @@ async fn build_edit_sse(
                 .unwrap_or_default();
             let stored = StoredEdit {
                 session_id,
+                message_id: message_id.to_string(),
                 edit: edit.clone(),
                 doc_title: doc_title.clone(),
                 first_paragraph_id: String::new(),
@@ -533,6 +547,7 @@ async fn build_edit_sse(
         ProposedEditKind::CreateFolder { name, parent_id } => {
             let stored = StoredEdit {
                 session_id,
+                message_id: message_id.to_string(),
                 edit: edit.clone(),
                 doc_title: String::new(),
                 first_paragraph_id: String::new(),
@@ -567,6 +582,7 @@ async fn build_edit_sse(
 
     let stored = StoredEdit {
         session_id,
+        message_id: message_id.to_string(),
         edit: edit.clone(),
         doc_title: doc_title.clone(),
         first_paragraph_id: para_id.clone(),
@@ -589,6 +605,41 @@ async fn build_edit_sse(
         "original": original,
         "proposed": proposed,
     }))
+}
+
+/// Convert an outgoing SSE event Value into the shape persisted in
+/// `chat_messages.proposals`. Adds `kind` and `status: "pending"`.
+fn proposal_record(sse: &Value) -> Value {
+    let event_type = sse.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    let kind = match event_type {
+        "ProposedEditEmitted" => "edit",
+        "ProposedDeleteEmitted" => "delete",
+        "ProposedFolderCreateEmitted" => "folderCreate",
+        _ => "unknown",
+    };
+    let mut obj = serde_json::Map::new();
+    obj.insert("kind".to_string(), Value::String(kind.to_string()));
+    if let Some(id) = sse.get("editId") {
+        obj.insert("id".to_string(), id.clone());
+    }
+    for key in [
+        "docId",
+        "paragraphId",
+        "original",
+        "proposed",
+        "docTitle",
+        "name",
+        "parentId",
+    ] {
+        if let Some(v) = sse.get(key) {
+            obj.insert(key.to_string(), v.clone());
+        }
+    }
+    obj.insert(
+        "status".to_string(),
+        Value::String("pending".to_string()),
+    );
+    Value::Object(obj)
 }
 
 fn build_turn_context(

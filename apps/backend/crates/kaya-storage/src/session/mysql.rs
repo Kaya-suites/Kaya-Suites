@@ -56,12 +56,17 @@ impl MySqlSessionStorage {
                 input_tokens  INT          NOT NULL DEFAULT 0,
                 output_tokens INT          NOT NULL DEFAULT 0,
                 model         VARCHAR(200) NOT NULL DEFAULT '',
+                proposals     JSON         NOT NULL,
                 PRIMARY KEY (id),
                 KEY idx_chat_messages_session (session_id, user_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
         )
         .execute(pool)
         .await?;
+
+        let _ = sqlx::query("ALTER TABLE chat_messages ADD COLUMN proposals JSON NOT NULL")
+            .execute(pool)
+            .await;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS embedding_calls (
@@ -251,8 +256,12 @@ impl SessionStorage for MySqlSessionStorage {
             .collect()
     }
 
-    async fn create_session(&self, title: Option<String>) -> Result<Session, SessionError> {
-        let id = Uuid::new_v4();
+    async fn create_session(
+        &self,
+        id: Option<Uuid>,
+        title: Option<String>,
+    ) -> Result<Session, SessionError> {
+        let id = id.unwrap_or_else(Uuid::new_v4);
         let title = title.unwrap_or_else(|| "New conversation".to_string());
         let now = Utc::now().timestamp_millis();
 
@@ -285,7 +294,7 @@ impl SessionStorage for MySqlSessionStorage {
     async fn get_messages(&self, session_id: Uuid) -> Result<Vec<MessageRecord>, SessionError> {
         let rows = sqlx::query(
             "SELECT id, role, content, citations, created_at,
-                    input_tokens, output_tokens, model
+                    input_tokens, output_tokens, model, proposals
              FROM chat_messages
              WHERE session_id = ? AND user_id = ?
              ORDER BY created_at ASC",
@@ -301,6 +310,9 @@ impl SessionStorage for MySqlSessionStorage {
                 let input: i32 = row.try_get("input_tokens").map_err(box_err)?;
                 let output: i32 = row.try_get("output_tokens").map_err(box_err)?;
                 let citations: serde_json::Value = row.try_get("citations").map_err(box_err)?;
+                let proposals: serde_json::Value = row
+                    .try_get("proposals")
+                    .unwrap_or_else(|_| serde_json::json!([]));
                 Ok(MessageRecord {
                     id: row.try_get("id").map_err(box_err)?,
                     role: row.try_get("role").map_err(box_err)?,
@@ -310,6 +322,7 @@ impl SessionStorage for MySqlSessionStorage {
                     input_tokens: input as u32,
                     output_tokens: output as u32,
                     model: row.try_get("model").map_err(box_err)?,
+                    proposals_json: proposals.to_string(),
                 })
             })
             .collect()
@@ -399,8 +412,8 @@ impl SessionStorage for MySqlSessionStorage {
         let now = Utc::now().timestamp_millis();
         sqlx::query(
             "INSERT INTO chat_messages
-                 (id, session_id, user_id, role, content, citations, created_at)
-             VALUES (?, ?, ?, 'user', ?, JSON_ARRAY(), ?)",
+                 (id, session_id, user_id, role, content, citations, created_at, proposals)
+             VALUES (?, ?, ?, 'user', ?, JSON_ARRAY(), ?, JSON_ARRAY())",
         )
         .bind(id)
         .bind(session_id.to_string())
@@ -430,8 +443,8 @@ impl SessionStorage for MySqlSessionStorage {
         sqlx::query(
             "INSERT INTO chat_messages
                  (id, session_id, user_id, role, content, citations, created_at,
-                  input_tokens, output_tokens, model)
-             VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?)",
+                  input_tokens, output_tokens, model, proposals)
+             VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?, JSON_ARRAY())",
         )
         .bind(id)
         .bind(session_id.to_string())
@@ -460,6 +473,68 @@ impl SessionStorage for MySqlSessionStorage {
         .await
         .map_err(box_err)?;
 
+        Ok(())
+    }
+
+    async fn update_message_proposals(
+        &self,
+        message_id: &str,
+        proposals_json: &str,
+    ) -> Result<(), SessionError> {
+        let value: serde_json::Value =
+            serde_json::from_str(proposals_json).unwrap_or_else(|_| serde_json::json!([]));
+        sqlx::query(
+            "UPDATE chat_messages SET proposals = ? WHERE id = ? AND user_id = ?",
+        )
+        .bind(&value)
+        .bind(message_id)
+        .bind(self.user_id.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn update_proposal_status(
+        &self,
+        message_id: &str,
+        edit_id: Uuid,
+        status: &str,
+    ) -> Result<(), SessionError> {
+        let row = sqlx::query(
+            "SELECT proposals FROM chat_messages WHERE id = ? AND user_id = ?",
+        )
+        .bind(message_id)
+        .bind(self.user_id.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(box_err)?;
+        let Some(row) = row else { return Ok(()) };
+        let json: serde_json::Value = row.try_get("proposals").map_err(box_err)?;
+        let mut arr: Vec<serde_json::Value> =
+            serde_json::from_value(json).unwrap_or_default();
+        let target = edit_id.to_string();
+        let mut changed = false;
+        for item in arr.iter_mut() {
+            if item.get("id").and_then(|v| v.as_str()) == Some(target.as_str()) {
+                item["status"] = serde_json::Value::String(status.to_string());
+                changed = true;
+                break;
+            }
+        }
+        if !changed {
+            return Ok(());
+        }
+        let new_value = serde_json::Value::Array(arr);
+        sqlx::query(
+            "UPDATE chat_messages SET proposals = ? WHERE id = ? AND user_id = ?",
+        )
+        .bind(&new_value)
+        .bind(message_id)
+        .bind(self.user_id.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
         Ok(())
     }
 

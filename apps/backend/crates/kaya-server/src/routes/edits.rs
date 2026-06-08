@@ -74,6 +74,9 @@ pub async fn approve_edit(
     let _ = sessions
         .upsert_edit_history_entry(stored.session_id, &history_entry)
         .await;
+    let _ = sessions
+        .update_proposal_status(&stored.message_id, edit_id, "approved")
+        .await;
 
     // Folder creates: return the new folder so the frontend can update its tree.
     if is_folder_create {
@@ -154,6 +157,9 @@ pub async fn reject_edit(
             stored.session_id,
             &build_edit_history_entry(&stored, "rejected", final_proposed),
         )
+        .await;
+    let _ = sessions
+        .update_proposal_status(&stored.message_id, edit_id, "rejected")
         .await;
 
     Ok(Json(json!({"ok": true})))

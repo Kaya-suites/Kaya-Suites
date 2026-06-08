@@ -148,8 +148,12 @@ impl SessionStorage for PostgresSessionStorage {
             .collect()
     }
 
-    async fn create_session(&self, title: Option<String>) -> Result<Session, SessionError> {
-        let id = Uuid::new_v4();
+    async fn create_session(
+        &self,
+        id: Option<Uuid>,
+        title: Option<String>,
+    ) -> Result<Session, SessionError> {
+        let id = id.unwrap_or_else(Uuid::new_v4);
         let title = title.unwrap_or_else(|| "New conversation".to_string());
         let now = chrono::Utc::now();
 
@@ -179,7 +183,7 @@ impl SessionStorage for PostgresSessionStorage {
 
     async fn get_messages(&self, session_id: Uuid) -> Result<Vec<MessageRecord>, SessionError> {
         let rows = sqlx::query(
-            "SELECT id::text, role, content, citations, created_at, input_tokens, output_tokens, model
+            "SELECT id::text, role, content, citations, created_at, input_tokens, output_tokens, model, proposals
              FROM chat_messages
              WHERE session_id = $1 AND user_id = $2
              ORDER BY created_at ASC",
@@ -201,6 +205,9 @@ impl SessionStorage for PostgresSessionStorage {
                 let input_tokens: i32 = row.try_get("input_tokens").map_err(box_err)?;
                 let output_tokens: i32 = row.try_get("output_tokens").map_err(box_err)?;
                 let model: String = row.try_get("model").map_err(box_err)?;
+                let proposals: serde_json::Value = row
+                    .try_get("proposals")
+                    .unwrap_or_else(|_| serde_json::json!([]));
                 Ok(MessageRecord {
                     id,
                     role,
@@ -210,6 +217,7 @@ impl SessionStorage for PostgresSessionStorage {
                     input_tokens: input_tokens as u32,
                     output_tokens: output_tokens as u32,
                     model,
+                    proposals_json: proposals.to_string(),
                 })
             })
             .collect()
@@ -361,6 +369,68 @@ impl SessionStorage for PostgresSessionStorage {
         .await
         .map_err(box_err)?;
 
+        Ok(())
+    }
+
+    async fn update_message_proposals(
+        &self,
+        message_id: &str,
+        proposals_json: &str,
+    ) -> Result<(), SessionError> {
+        let value: serde_json::Value =
+            serde_json::from_str(proposals_json).unwrap_or_else(|_| serde_json::json!([]));
+        sqlx::query(
+            "UPDATE chat_messages SET proposals = $1 WHERE id = $2 AND user_id = $3",
+        )
+        .bind(value)
+        .bind(message_id)
+        .bind(self.user_id.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn update_proposal_status(
+        &self,
+        message_id: &str,
+        edit_id: Uuid,
+        status: &str,
+    ) -> Result<(), SessionError> {
+        let row = sqlx::query(
+            "SELECT proposals FROM chat_messages WHERE id = $1 AND user_id = $2",
+        )
+        .bind(message_id)
+        .bind(self.user_id.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(box_err)?;
+        let Some(row) = row else { return Ok(()) };
+        let json: serde_json::Value = row.try_get("proposals").map_err(box_err)?;
+        let mut arr: Vec<serde_json::Value> =
+            serde_json::from_value(json).unwrap_or_default();
+        let target = edit_id.to_string();
+        let mut changed = false;
+        for item in arr.iter_mut() {
+            if item.get("id").and_then(|v| v.as_str()) == Some(target.as_str()) {
+                item["status"] = serde_json::Value::String(status.to_string());
+                changed = true;
+                break;
+            }
+        }
+        if !changed {
+            return Ok(());
+        }
+        let new_value = serde_json::Value::Array(arr);
+        sqlx::query(
+            "UPDATE chat_messages SET proposals = $1 WHERE id = $2 AND user_id = $3",
+        )
+        .bind(new_value)
+        .bind(message_id)
+        .bind(self.user_id.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
         Ok(())
     }
 

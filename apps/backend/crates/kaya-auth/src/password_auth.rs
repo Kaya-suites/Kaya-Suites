@@ -21,15 +21,49 @@ pub enum SeedError {
     Database(#[from] sqlx::Error),
 }
 
+/// Database backend dialect — controls placeholder syntax.
+///
+/// Postgres requires `$1, $2, ...`; SQLite and MySQL accept `?`.
+/// `sqlx::Any` in 0.8 does not translate placeholders, so callers
+/// must emit the correct form per backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    Postgres,
+    Sqlite,
+    Mysql,
+}
+
+impl Backend {
+    /// Rewrite a query string with `?` placeholders into `$1, $2, ...` for Postgres.
+    fn prepare(self, sql: &str) -> String {
+        if !matches!(self, Backend::Postgres) {
+            return sql.to_string();
+        }
+        let mut out = String::with_capacity(sql.len() + 8);
+        let mut n = 0usize;
+        for ch in sql.chars() {
+            if ch == '?' {
+                n += 1;
+                out.push('$');
+                out.push_str(&n.to_string());
+            } else {
+                out.push(ch);
+            }
+        }
+        out
+    }
+}
+
 /// Service for registering new users with a hashed password.
 #[derive(Clone)]
 pub struct PasswordAuthService {
     pool: AnyPool,
+    backend: Backend,
 }
 
 impl PasswordAuthService {
-    pub fn new(pool: AnyPool) -> Self {
-        Self { pool }
+    pub fn new(pool: AnyPool, backend: Backend) -> Self {
+        Self { pool, backend }
     }
 
     /// Create a new user record with a hashed password.
@@ -50,38 +84,44 @@ impl PasswordAuthService {
             .to_string();
 
         // Check if email already exists
-        let email_count: i64 =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE email = ?")
-                .bind(email)
-                .fetch_one(&self.pool)
-                .await
-                .unwrap_or(0);
+        let email_count: i64 = sqlx::query_scalar::<_, i64>(
+            &self.backend.prepare("SELECT COUNT(*) FROM users WHERE email = ?"),
+        )
+        .bind(email)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
         if email_count > 0 {
             return Err(RegisterError::EmailAlreadyExists);
         }
 
         // Check if username already exists
         if let Some(uname) = username {
-            let uname_count: i64 =
-                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE username = ?")
-                    .bind(uname)
-                    .fetch_one(&self.pool)
-                    .await
-                    .unwrap_or(0);
+            let uname_count: i64 = sqlx::query_scalar::<_, i64>(
+                &self.backend.prepare("SELECT COUNT(*) FROM users WHERE username = ?"),
+            )
+            .bind(uname)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
             if uname_count > 0 {
                 return Err(RegisterError::UsernameTaken);
             }
         }
 
         let id = Uuid::new_v4();
-        sqlx::query("INSERT INTO users (id, email, username, password_hash) VALUES (?, ?, ?, ?)")
-            .bind(id.to_string())
-            .bind(email)
-            .bind(username)
-            .bind(&hash)
-            .execute(&self.pool)
-            .await
-            .map_err(RegisterError::Database)?;
+        sqlx::query(
+            &self
+                .backend
+                .prepare("INSERT INTO users (id, email, username, password_hash) VALUES (?, ?, ?, ?)"),
+        )
+        .bind(id.to_string())
+        .bind(email)
+        .bind(username)
+        .bind(&hash)
+        .execute(&self.pool)
+        .await
+        .map_err(RegisterError::Database)?;
 
         Ok(AuthUser {
             id,
@@ -100,12 +140,13 @@ impl PasswordAuthService {
         username: &str,
         password: &str,
     ) -> Result<(), SeedError> {
-        let exists: i64 =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE username = ?")
-                .bind(username)
-                .fetch_one(&self.pool)
-                .await
-                .unwrap_or(0);
+        let exists: i64 = sqlx::query_scalar::<_, i64>(
+            &self.backend.prepare("SELECT COUNT(*) FROM users WHERE username = ?"),
+        )
+        .bind(username)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
 
         if exists > 0 {
             return Ok(());
@@ -119,7 +160,9 @@ impl PasswordAuthService {
 
         let id = Uuid::new_v4();
         sqlx::query(
-            "INSERT INTO users (id, email, username, password_hash, is_superadmin) VALUES (?, ?, ?, ?, ?)",
+            &self.backend.prepare(
+                "INSERT INTO users (id, email, username, password_hash, is_superadmin) VALUES (?, ?, ?, ?, ?)",
+            ),
         )
         .bind(id.to_string())
         .bind(email)

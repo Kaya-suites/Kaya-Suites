@@ -193,9 +193,13 @@ impl SessionStorage for NoopSessions {
     async fn list_sessions(&self) -> Result<Vec<Session>, SessionError> {
         Ok(vec![])
     }
-    async fn create_session(&self, _: Option<String>) -> Result<Session, SessionError> {
+    async fn create_session(
+        &self,
+        id: Option<Uuid>,
+        _: Option<String>,
+    ) -> Result<Session, SessionError> {
         Ok(Session {
-            id: Uuid::new_v4(),
+            id: id.unwrap_or_else(Uuid::new_v4),
             title: String::new(),
             created_at: 0,
             updated_at: 0,
