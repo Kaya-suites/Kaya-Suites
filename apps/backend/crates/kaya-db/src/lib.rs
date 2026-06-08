@@ -187,10 +187,12 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
             input_tokens  INTEGER      NOT NULL DEFAULT 0,
             output_tokens INTEGER      NOT NULL DEFAULT 0,
             model         TEXT         NOT NULL DEFAULT '',
+            proposals     JSONB        NOT NULL DEFAULT '[]',
             created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
             PRIMARY KEY (id)
         )
     ").await?;
+    exec(pool, "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS proposals JSONB NOT NULL DEFAULT '[]'").await?;
     exec(pool, "CREATE INDEX IF NOT EXISTS chat_messages_session ON chat_messages (session_id, user_id, created_at ASC)").await?;
 
     exec(pool, "
@@ -362,6 +364,75 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
     )
     .await?;
 
+    // oauth_clients — both DCR-issued and admin-registered clients.
+    // Note: a former `mcp_tokens` table is migrated and dropped at the end of
+    // this dialect block (see `rollover_mcp_tokens_postgres`).
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS oauth_clients (
+            id                              VARCHAR(36)  NOT NULL,
+            name                            TEXT         NOT NULL,
+            secret_hash                     TEXT,
+            redirect_uris                   TEXT         NOT NULL,
+            client_type                     VARCHAR(16)  NOT NULL,
+            registration_kind               VARCHAR(8)   NOT NULL,
+            owner_user_id                   VARCHAR(36)  REFERENCES users(id) ON DELETE CASCADE,
+            registration_access_token_hash  VARCHAR(64),
+            created_at                      BIGINT       NOT NULL,
+            updated_at                      BIGINT       NOT NULL,
+            PRIMARY KEY (id)
+        )
+    ",
+    )
+    .await?;
+    exec(pool, "CREATE INDEX IF NOT EXISTS oauth_clients_owner ON oauth_clients (owner_user_id)").await?;
+
+    // oauth_authorization_codes — short-lived, single-use.
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
+            code_hash             VARCHAR(64)  NOT NULL,
+            client_id             VARCHAR(36)  NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+            user_id               VARCHAR(36)  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            redirect_uri          TEXT         NOT NULL,
+            scope                 TEXT         NOT NULL,
+            code_challenge        TEXT         NOT NULL,
+            code_challenge_method VARCHAR(8)   NOT NULL,
+            expires_at            BIGINT       NOT NULL,
+            consumed_at           BIGINT,
+            PRIMARY KEY (code_hash)
+        )
+    ",
+    )
+    .await?;
+
+    // oauth_access_tokens — replaces mcp_tokens. Long-lived; revoked_at NULL = active.
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS oauth_access_tokens (
+            id           VARCHAR(36)  NOT NULL,
+            token_hash   VARCHAR(64)  NOT NULL UNIQUE,
+            client_id    VARCHAR(36)  NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+            user_id      VARCHAR(36)  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            scope        TEXT         NOT NULL,
+            kind         VARCHAR(8)   NOT NULL,
+            name         TEXT         NOT NULL DEFAULT '',
+            created_at   BIGINT       NOT NULL,
+            last_used_at BIGINT,
+            revoked_at   BIGINT,
+            PRIMARY KEY (id)
+        )
+    ",
+    )
+    .await?;
+    exec(pool, "CREATE INDEX IF NOT EXISTS oauth_access_tokens_user ON oauth_access_tokens (user_id)").await?;
+    exec(pool, "CREATE INDEX IF NOT EXISTS oauth_access_tokens_client ON oauth_access_tokens (client_id)").await?;
+
+    rollover_mcp_tokens_postgres(pool).await?;
+
     tracing::info!("Postgres migrations applied");
     Ok(())
 }
@@ -510,6 +581,69 @@ async fn run_sqlite(pool: &AnyPool) -> anyhow::Result<()> {
     ",
     )
     .await?;
+
+    // Note: a former `mcp_tokens` table is migrated and dropped at the end of
+    // this dialect block (see `rollover_mcp_tokens_sqlite`).
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS oauth_clients (
+            id                              TEXT    NOT NULL PRIMARY KEY,
+            name                            TEXT    NOT NULL,
+            secret_hash                     TEXT,
+            redirect_uris                   TEXT    NOT NULL,
+            client_type                     TEXT    NOT NULL,
+            registration_kind               TEXT    NOT NULL,
+            owner_user_id                   TEXT,
+            registration_access_token_hash  TEXT,
+            created_at                      INTEGER NOT NULL,
+            updated_at                      INTEGER NOT NULL
+        )
+    ",
+    )
+    .await?;
+    exec(pool, "CREATE INDEX IF NOT EXISTS oauth_clients_owner ON oauth_clients (owner_user_id)").await?;
+
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
+            code_hash             TEXT    NOT NULL PRIMARY KEY,
+            client_id             TEXT    NOT NULL,
+            user_id               TEXT    NOT NULL,
+            redirect_uri          TEXT    NOT NULL,
+            scope                 TEXT    NOT NULL,
+            code_challenge        TEXT    NOT NULL,
+            code_challenge_method TEXT    NOT NULL,
+            expires_at            INTEGER NOT NULL,
+            consumed_at           INTEGER
+        )
+    ",
+    )
+    .await?;
+
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS oauth_access_tokens (
+            id           TEXT    NOT NULL PRIMARY KEY,
+            token_hash   TEXT    NOT NULL UNIQUE,
+            client_id    TEXT    NOT NULL,
+            user_id      TEXT    NOT NULL,
+            scope        TEXT    NOT NULL,
+            kind         TEXT    NOT NULL,
+            name         TEXT    NOT NULL DEFAULT '',
+            created_at   INTEGER NOT NULL,
+            last_used_at INTEGER,
+            revoked_at   INTEGER
+        )
+    ",
+    )
+    .await?;
+    exec(pool, "CREATE INDEX IF NOT EXISTS oauth_access_tokens_user ON oauth_access_tokens (user_id)").await?;
+    exec(pool, "CREATE INDEX IF NOT EXISTS oauth_access_tokens_client ON oauth_access_tokens (client_id)").await?;
+
+    rollover_mcp_tokens_sqlite(pool).await?;
 
     tracing::info!("SQLite migrations applied");
     Ok(())
@@ -663,6 +797,204 @@ async fn run_mysql(pool: &AnyPool) -> anyhow::Result<()> {
     )
     .await?;
 
+    // Note: a former `mcp_tokens` table is migrated and dropped at the end of
+    // this dialect block (see `rollover_mcp_tokens_mysql`).
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS oauth_clients (
+            id                              VARCHAR(36)  NOT NULL,
+            name                            TEXT         NOT NULL,
+            secret_hash                     TEXT,
+            redirect_uris                   TEXT         NOT NULL,
+            client_type                     VARCHAR(16)  NOT NULL,
+            registration_kind               VARCHAR(8)   NOT NULL,
+            owner_user_id                   VARCHAR(36),
+            registration_access_token_hash  VARCHAR(64),
+            created_at                      BIGINT       NOT NULL,
+            updated_at                      BIGINT       NOT NULL,
+            PRIMARY KEY (id),
+            INDEX oauth_clients_owner (owner_user_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+    )
+    .await?;
+
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
+            code_hash             VARCHAR(64)  NOT NULL,
+            client_id             VARCHAR(36)  NOT NULL,
+            user_id               VARCHAR(36)  NOT NULL,
+            redirect_uri          TEXT         NOT NULL,
+            scope                 TEXT         NOT NULL,
+            code_challenge        TEXT         NOT NULL,
+            code_challenge_method VARCHAR(8)   NOT NULL,
+            expires_at            BIGINT       NOT NULL,
+            consumed_at           BIGINT,
+            PRIMARY KEY (code_hash)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+    )
+    .await?;
+
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS oauth_access_tokens (
+            id           VARCHAR(36)  NOT NULL,
+            token_hash   VARCHAR(64)  NOT NULL UNIQUE,
+            client_id    VARCHAR(36)  NOT NULL,
+            user_id      VARCHAR(36)  NOT NULL,
+            scope        TEXT         NOT NULL,
+            kind         VARCHAR(8)   NOT NULL,
+            name         TEXT         NOT NULL DEFAULT '',
+            created_at   BIGINT       NOT NULL,
+            last_used_at BIGINT,
+            revoked_at   BIGINT,
+            PRIMARY KEY (id),
+            INDEX oauth_access_tokens_user (user_id),
+            INDEX oauth_access_tokens_client (client_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+    )
+    .await?;
+
+    rollover_mcp_tokens_mysql(pool).await?;
+
     tracing::info!("MySQL migrations applied");
+    Ok(())
+}
+
+// ── mcp_tokens → oauth_access_tokens rollover ────────────────────────────────
+//
+// We replaced the standalone bearer-token system with OAuth-issued access
+// tokens. Existing mcp_tokens rows are migrated as PATs owned by the synthetic
+// PAT client. The PAT client UUID matches `kaya_oauth::clients::PAT_CLIENT_ID`.
+//
+// The rollover is idempotent — every step is `IF EXISTS` / `INSERT IGNORE` so
+// re-running the migrations on an upgraded database is a no-op.
+
+const PAT_CLIENT_ID_STR: &str = "00000000-0000-0000-0000-0000000a7100";
+
+async fn rollover_mcp_tokens_postgres(pool: &AnyPool) -> anyhow::Result<()> {
+    // Bail if mcp_tokens was never created (fresh database after upgrade).
+    let exists: (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'mcp_tokens')")
+            .fetch_one(pool)
+            .await?;
+    if !exists.0 {
+        return Ok(());
+    }
+
+    seed_pat_client(pool).await?;
+
+    sqlx::query(
+        "INSERT INTO oauth_access_tokens \
+         (id, token_hash, client_id, user_id, scope, kind, name, created_at, last_used_at) \
+         SELECT mt.id, mt.token_hash, ?, mt.user_id, 'mcp', 'pat', mt.name, \
+                mt.created_at, mt.last_used_at \
+         FROM mcp_tokens mt \
+         WHERE NOT EXISTS ( \
+             SELECT 1 FROM oauth_access_tokens t WHERE t.token_hash = mt.token_hash \
+         )",
+    )
+    .bind(PAT_CLIENT_ID_STR)
+    .execute(pool)
+    .await?;
+
+    exec(pool, "DROP TABLE IF EXISTS mcp_tokens").await?;
+    Ok(())
+}
+
+async fn rollover_mcp_tokens_sqlite(pool: &AnyPool) -> anyhow::Result<()> {
+    let exists: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'mcp_tokens'")
+            .fetch_optional(pool)
+            .await?;
+    if exists.is_none() {
+        return Ok(());
+    }
+
+    seed_pat_client(pool).await?;
+
+    sqlx::query(
+        "INSERT INTO oauth_access_tokens \
+         (id, token_hash, client_id, user_id, scope, kind, name, created_at, last_used_at) \
+         SELECT mt.id, mt.token_hash, ?, mt.user_id, 'mcp', 'pat', mt.name, \
+                mt.created_at, mt.last_used_at \
+         FROM mcp_tokens mt \
+         WHERE NOT EXISTS ( \
+             SELECT 1 FROM oauth_access_tokens t WHERE t.token_hash = mt.token_hash \
+         )",
+    )
+    .bind(PAT_CLIENT_ID_STR)
+    .execute(pool)
+    .await?;
+
+    exec(pool, "DROP TABLE IF EXISTS mcp_tokens").await?;
+    Ok(())
+}
+
+async fn rollover_mcp_tokens_mysql(pool: &AnyPool) -> anyhow::Result<()> {
+    let exists: Option<(String,)> = sqlx::query_as(
+        "SELECT table_name FROM information_schema.tables \
+         WHERE table_name = 'mcp_tokens' AND table_schema = DATABASE()",
+    )
+    .fetch_optional(pool)
+    .await?;
+    if exists.is_none() {
+        return Ok(());
+    }
+
+    seed_pat_client(pool).await?;
+
+    sqlx::query(
+        "INSERT INTO oauth_access_tokens \
+         (id, token_hash, client_id, user_id, scope, kind, name, created_at, last_used_at) \
+         SELECT mt.id, mt.token_hash, ?, mt.user_id, 'mcp', 'pat', mt.name, \
+                mt.created_at, mt.last_used_at \
+         FROM mcp_tokens mt \
+         WHERE NOT EXISTS ( \
+             SELECT 1 FROM oauth_access_tokens t WHERE t.token_hash = mt.token_hash \
+         )",
+    )
+    .bind(PAT_CLIENT_ID_STR)
+    .execute(pool)
+    .await?;
+
+    exec(pool, "DROP TABLE IF EXISTS mcp_tokens").await?;
+    Ok(())
+}
+
+/// Insert the singleton PAT client row if missing. Idempotent — uses an
+/// existence check rather than dialect-specific `ON CONFLICT` so the same code
+/// works across postgres / sqlite / mysql.
+async fn seed_pat_client(pool: &AnyPool) -> anyhow::Result<()> {
+    let exists: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM oauth_clients WHERE id = ?")
+            .bind(PAT_CLIENT_ID_STR)
+            .fetch_optional(pool)
+            .await?;
+    if exists.is_some() {
+        return Ok(());
+    }
+    let now = chrono::Utc::now().timestamp_millis();
+    sqlx::query(
+        "INSERT INTO oauth_clients \
+         (id, name, secret_hash, redirect_uris, client_type, registration_kind, \
+          owner_user_id, registration_access_token_hash, created_at, updated_at) \
+         VALUES (?, ?, NULL, ?, ?, ?, NULL, NULL, ?, ?)",
+    )
+    .bind(PAT_CLIENT_ID_STR)
+    .bind("Personal access tokens")
+    .bind(r#"["urn:kaya:pat"]"#)
+    .bind("public")
+    .bind("manual")
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await?;
     Ok(())
 }
