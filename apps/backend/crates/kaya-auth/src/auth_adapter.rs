@@ -22,6 +22,7 @@ use sqlx::{AnyPool, Row};
 use uuid::Uuid;
 
 use crate::error::AuthError;
+use crate::password_auth::Backend;
 
 // ── AuthUser ──────────────────────────────────────────────────────────────────
 
@@ -55,11 +56,12 @@ impl AxumAuthUser for AuthUser {
 #[derive(Clone)]
 pub struct KayaAuthBackend {
     pool: AnyPool,
+    backend: Backend,
 }
 
 impl KayaAuthBackend {
-    pub fn new(pool: AnyPool) -> Self {
-        Self { pool }
+    pub fn new(pool: AnyPool, backend: Backend) -> Self {
+        Self { pool, backend }
     }
 }
 
@@ -96,9 +98,9 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
         &self,
         creds: Self::Credentials,
     ) -> Result<Option<Self::User>, Self::Error> {
-        let row = sqlx::query(
+        let row = sqlx::query(&self.backend.prepare(
             "SELECT id, email, username, password_hash, is_superadmin FROM users WHERE email = ?",
-        )
+        ))
         .bind(&creds.email)
         .fetch_optional(&self.pool)
         .await?;
@@ -134,10 +136,12 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
         &self,
         user_id: &axum_login::UserId<Self>,
     ) -> Result<Option<Self::User>, Self::Error> {
-        let row = sqlx::query("SELECT id, email, username, is_superadmin FROM users WHERE id = ?")
-            .bind(user_id.to_string())
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(
+            &self.backend.prepare("SELECT id, email, username, is_superadmin FROM users WHERE id = ?"),
+        )
+        .bind(user_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
 
         Ok(row.map(|r| AuthUser {
             id: decode_uuid(&r, "id"),

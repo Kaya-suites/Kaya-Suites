@@ -326,7 +326,7 @@ async fn main() -> anyhow::Result<()> {
             tower_sessions::cookie::time::Duration::days(7),
         ));
 
-    let auth_backend = KayaAuthBackend::new(any_pool.clone());
+    let auth_backend = KayaAuthBackend::new(any_pool.clone(), auth_backend_kind);
     let auth_layer = axum_login::AuthManagerLayerBuilder::new(auth_backend, session_layer).build();
 
     // -- CORS ------------------------------------------------------------------

@@ -35,7 +35,7 @@ pub enum Backend {
 
 impl Backend {
     /// Rewrite a query string with `?` placeholders into `$1, $2, ...` for Postgres.
-    fn prepare(self, sql: &str) -> String {
+    pub fn prepare(self, sql: &str) -> String {
         if !matches!(self, Backend::Postgres) {
             return sql.to_string();
         }
