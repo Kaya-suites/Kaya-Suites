@@ -14,13 +14,14 @@ import type {
 } from "@/types/chat";
 import type { OnboardingStep } from "@/hooks/useOnboarding";
 
-async function createSession(title = "New conversation"): Promise<ChatSession | null> {
+async function createSession(id: string, title = "New conversation"): Promise<ChatSession | null> {
   try {
     const res = await fetch("/api/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ id, title }),
     });
+    if (!res.ok) return null;
     return (await res.json()) as ChatSession;
   } catch {
     return null;
@@ -30,7 +31,8 @@ import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
 
 type Props = {
-  sessionId: string | null;
+  sessionId: string;
+  isPersisted: boolean;
   onCitationClick: (ref: CitationRef) => void;
   onDocumentUpdated: (docId: string) => void;
   onFolderCreated?: (folder: Folder) => void;
@@ -62,7 +64,7 @@ const WELCOME: ChatMessageData = {
   timestamp: Date.now(),
 };
 
-export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFolderCreated, onStepComplete, onSessionRenamed, onSessionCreated, requestContext }: Props) {
+export function ChatPanel({ sessionId, isPersisted, onCitationClick, onDocumentUpdated, onFolderCreated, onStepComplete, onSessionRenamed, onSessionCreated, requestContext }: Props) {
   const [messages, setMessages] = useState<ChatMessageData[]>([WELCOME]);
   const [streamingId, setStreamingId] = useState<string | null>(null);
   // Tracks current text for each pending edit card so "Approve All" reads the right value
@@ -80,7 +82,10 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
 
   // Load message history when session changes
   useEffect(() => {
-    if (!sessionId) return;
+    if (!isPersisted) {
+      setMessages([WELCOME]);
+      return;
+    }
     let cancelled = false;
     fetch(`/api/sessions/${sessionId}/messages`)
       .then((res) => (res.ok ? res.json() : []))
@@ -91,6 +96,7 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
             role: string;
             content: string;
             citations: CitationRef[];
+            proposals?: Array<Record<string, unknown>>;
             createdAt: number;
           }>,
         ) => {
@@ -98,15 +104,59 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
           if (data.length === 0) {
             setMessages([WELCOME]);
           } else {
+            const restoredEditTexts: Record<string, string> = {};
             setMessages(
-              data.map((m) => ({
-                id: m.id,
-                role: m.role as Role,
-                content: m.content,
-                citations: m.citations ?? [],
-                timestamp: m.createdAt,
-              })),
+              data.map((m) => {
+                const edits: ProposedEdit[] = [];
+                const deletes: ProposedDelete[] = [];
+                const folderCreates: ProposedFolderCreate[] = [];
+                for (const p of m.proposals ?? []) {
+                  const status = (p.status as ProposedEdit["status"]) ?? "pending";
+                  const id = String(p.id ?? "");
+                  if (p.kind === "edit") {
+                    const proposed = String(p.proposed ?? "");
+                    edits.push({
+                      id,
+                      docId: String(p.docId ?? ""),
+                      paragraphId: String(p.paragraphId ?? ""),
+                      original: String(p.original ?? ""),
+                      proposed,
+                      status,
+                    });
+                    if (status === "pending") restoredEditTexts[id] = proposed;
+                  } else if (p.kind === "delete") {
+                    deletes.push({
+                      id,
+                      docId: String(p.docId ?? ""),
+                      docTitle: String(p.docTitle ?? ""),
+                      status,
+                    });
+                  } else if (p.kind === "folderCreate") {
+                    folderCreates.push({
+                      id,
+                      name: String(p.name ?? ""),
+                      parentId: (p.parentId as string | null) ?? null,
+                      status,
+                    });
+                  }
+                }
+                return {
+                  id: m.id,
+                  role: m.role as Role,
+                  content: m.content,
+                  citations: m.citations ?? [],
+                  timestamp: m.createdAt,
+                  ...(edits.length > 0 ? { proposedEdits: edits } : {}),
+                  ...(deletes.length > 0 ? { proposedDeletes: deletes } : {}),
+                  ...(folderCreates.length > 0
+                    ? { proposedFolderCreates: folderCreates }
+                    : {}),
+                };
+              }),
             );
+            if (Object.keys(restoredEditTexts).length > 0) {
+              setPendingEditTexts((prev) => ({ ...prev, ...restoredEditTexts }));
+            }
           }
         },
       )
@@ -116,16 +166,14 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, isPersisted]);
 
   async function sendMessage(content: string) {
     if (streamingId) return;
 
-    let sid = sessionId;
-    if (sid === null) {
-      const created = await createSession();
+    if (!isPersisted) {
+      const created = await createSession(sessionId);
       if (!created) return;
-      sid = created.id;
       onSessionCreated?.(created);
     }
 
@@ -158,7 +206,7 @@ export function ChatPanel({ sessionId, onCitationClick, onDocumentUpdated, onFol
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: sid, message: content, context: requestContext }),
+        body: JSON.stringify({ sessionId, message: content, context: requestContext }),
       });
 
       if (!res.ok) {

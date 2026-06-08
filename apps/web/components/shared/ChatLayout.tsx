@@ -21,7 +21,7 @@ async function fetchSessions(): Promise<ChatSession[]> {
 
 export function ChatLayout() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [openDocId, setOpenDocId] = useState<string | null>(null);
   const [scrollToParagraphId, setScrollToParagraphId] = useState<string | null>(null);
   const [docRefreshKey, setDocRefreshKey] = useState(0);
@@ -52,7 +52,7 @@ export function ChatLayout() {
   }
 
   function handleNewSession() {
-    setSessionId(null);
+    setSessionId(crypto.randomUUID());
     setOpenDocId(null);
   }
 
@@ -83,7 +83,7 @@ export function ChatLayout() {
     setSessions((prev) => prev.filter((s) => s.id !== id));
     if (sessionId === id) {
       const remaining = sessions.filter((s) => s.id !== id);
-      setSessionId(remaining.length > 0 ? remaining[0].id : null);
+      setSessionId(remaining.length > 0 ? remaining[0].id : crypto.randomUUID());
     }
     await fetch(`/api/sessions/${id}`, { method: "DELETE" }).catch(() => {});
   }, [sessionId, sessions]);
@@ -144,8 +144,9 @@ export function ChatLayout() {
         </div>
 
         <ChatPanel
-          key={sessionId ?? "pending"}
+          key={sessionId}
           sessionId={sessionId}
+          isPersisted={sessions.some((s) => s.id === sessionId)}
           onCitationClick={handleCitationClick}
           onDocumentUpdated={handleDocumentUpdated}
           onStepComplete={onboarding.markStepComplete}

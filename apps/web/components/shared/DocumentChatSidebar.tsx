@@ -20,7 +20,7 @@ async function fetchSessions(): Promise<ChatSession[]> {
 
 export function DocumentChatSidebar({ document, onDocumentUpdated }: Props) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [loadingSessions, setLoadingSessions] = useState(true);
   const requestContext = useMemo<DocumentContext>(
     () => ({
@@ -49,7 +49,7 @@ export function DocumentChatSidebar({ document, onDocumentUpdated }: Props) {
   }, []);
 
   const handleNewSession = useCallback(() => {
-    setSessionId(null);
+    setSessionId(crypto.randomUUID());
   }, []);
 
   const handleSessionCreated = useCallback((session: ChatSession) => {
@@ -102,8 +102,8 @@ export function DocumentChatSidebar({ document, onDocumentUpdated }: Props) {
             Conversation
           </label>
           <select
-            value={sessionId ?? ""}
-            onChange={(e) => setSessionId(e.target.value || null)}
+            value={sessions.some((s) => s.id === sessionId) ? sessionId : ""}
+            onChange={(e) => setSessionId(e.target.value || crypto.randomUUID())}
             disabled={loadingSessions}
             className="w-full border-2 border-black bg-white px-3 py-2 text-xs font-mono text-black outline-none"
             style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
@@ -120,8 +120,9 @@ export function DocumentChatSidebar({ document, onDocumentUpdated }: Props) {
 
       <div className="min-h-0 flex-1">
         <ChatPanel
-          key={sessionId ?? "pending"}
+          key={sessionId}
           sessionId={sessionId}
+          isPersisted={sessions.some((s) => s.id === sessionId)}
           onCitationClick={handleCitationClick}
           onDocumentUpdated={onDocumentUpdated}
           onSessionRenamed={handleSessionRenamed}
