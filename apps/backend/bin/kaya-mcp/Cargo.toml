@@ -1,0 +1,24 @@
+[package]
+name = "kaya-mcp-bin"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[[bin]]
+name = "kaya-mcp"
+path = "src/main.rs"
+
+[dependencies]
+kaya-mcp     = { path = "../../crates/kaya-mcp" }
+kaya-oauth   = { path = "../../crates/kaya-oauth" }
+kaya-core    = { path = "../../crates/kaya-core" }
+kaya-storage = { path = "../../crates/kaya-storage" }
+kaya-db      = { path = "../../crates/kaya-db" }
+
+tokio        = { workspace = true }
+anyhow       = { workspace = true }
+tracing      = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy      = { workspace = true }
+sqlx         = { version = "0.8", features = ["runtime-tokio", "any", "sqlite"] }
+rmcp         = { version = "1.7", features = ["server", "transport-io"] }

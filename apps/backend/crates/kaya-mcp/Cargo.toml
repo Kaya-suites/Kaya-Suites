@@ -1,0 +1,29 @@
+[package]
+name = "kaya-mcp"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+kaya-core    = { path = "../kaya-core" }
+kaya-storage = { path = "../kaya-storage" }
+
+tokio        = { workspace = true }
+async-trait  = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+thiserror    = { workspace = true }
+anyhow       = { workspace = true }
+uuid         = { workspace = true }
+chrono       = { workspace = true }
+futures      = { workspace = true }
+tracing      = "0.1"
+similar      = "2"
+
+# MCP protocol — official Rust SDK
+rmcp         = { version = "1.7", features = ["server", "transport-io", "transport-streamable-http-server"] }
+
+[dev-dependencies]
+tokio       = { workspace = true, features = ["full", "test-util"] }
+kaya-db     = { path = "../kaya-db" }
+tempfile    = "3"
