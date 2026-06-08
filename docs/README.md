@@ -13,5 +13,6 @@ This directory contains the documentation for Kaya Suites. The project is Apache
 | [LLM provider](llm-provider.md) | `LlmProvider` trait, `ModelRouter`, routing config, adding providers |
 | [API codegen](api-codegen.md) | OpenAPI schema → TypeScript client pipeline |
 | [Packages](packages.md) | Frontend workspace packages (`@kaya/*`) |
+| [MCP integration](mcp.md) | Exposing Kaya to Claude Desktop / Claude Code over MCP |
 | [Building](building.md) | Build commands for frontend, backend, and the embedded OSS binary |
 | [License](license.md) | Licensing notes |
