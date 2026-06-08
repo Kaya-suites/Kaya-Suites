@@ -28,7 +28,7 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use kaya_auth::{KayaAuthBackend, PasswordAuthService};
+use kaya_auth::{Backend as AuthBackend, KayaAuthBackend, PasswordAuthService};
 use kaya_core::UserContext;
 use kaya_core::{SessionStorage, StorageAdapter, model_router::ModelRouter};
 use kaya_db::Dialect;
@@ -141,6 +141,7 @@ async fn inject_storage(
     request.extensions_mut().insert(sessions);
     request.extensions_mut().insert(state.llm.clone());
     request.extensions_mut().insert(state.pending_edits.clone());
+    request.extensions_mut().insert(state.pool.clone());
 
     next.run(request).await
 }
@@ -261,7 +262,15 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // -- Services --------------------------------------------------------------
-    let password_auth_svc = Arc::new(PasswordAuthService::new(any_pool.clone()));
+    let auth_backend_kind = match dialect {
+        Dialect::Postgres => AuthBackend::Postgres,
+        Dialect::Sqlite => AuthBackend::Sqlite,
+        Dialect::Mysql => AuthBackend::Mysql,
+    };
+    let password_auth_svc = Arc::new(PasswordAuthService::new(
+        any_pool.clone(),
+        auth_backend_kind,
+    ));
     password_auth_svc
         .seed_superadmin(&superadmin_email, "KayaSuperAdmin", "KayaPassword")
         .await
@@ -309,6 +318,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let pending_edits = Arc::new(Mutex::new(HashMap::<Uuid, StoredEdit>::new()));
+    let mcp_cache: routes::mcp::McpCache = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
 
     // -- App state -------------------------------------------------------------
     let state = AppState {
@@ -360,13 +370,57 @@ async fn main() -> anyhow::Result<()> {
         inject_storage,
     ));
 
+    // -- OAuth routes (mounted OUTSIDE inject_storage) -------------------------
+    // The public ones (well-known, register, token) need no cookie auth.
+    // The authenticated ones (authorize, consent/*) use `AuthSession` directly
+    // — `/oauth/authorize` redirects signed-out users to sign-in, so we
+    // cannot let `inject_storage` 401 first.
+    let oauth_issuer = kaya_server::OAuthIssuer::new(
+        std::env::var("KAYA_PUBLIC_URL").unwrap_or_else(|_| format!("http://localhost:{port}")),
+    );
+    let consent_store = kaya_server::ConsentRequestStore::new();
+    let oauth_routes = kaya_server::oauth_public_router()
+        .merge(kaya_server::oauth_authenticated_router())
+        .layer(axum::Extension(any_pool.clone()))
+        .layer(axum::Extension(oauth_issuer.clone()))
+        .layer(axum::Extension(consent_store.clone()));
+
+    // -- /mcp HTTP route (sqlite + LLM only for now) --------------------------
+    let mcp_router = match (&state.db_backend, &state.llm) {
+        (DbBackend::Sqlite(sqlite), Some(llm)) => {
+            let mcp_state = routes::mcp::McpState {
+                pool: any_pool.clone(),
+                sqlite: sqlite.clone(),
+                router: llm.clone(),
+                cache: mcp_cache,
+                issuer: oauth_issuer.clone(),
+            };
+            Some(
+                axum::Router::<AppState>::new()
+                    .route("/mcp", axum::routing::any(routes::mcp::handle))
+                    .layer(axum::Extension(mcp_state)),
+            )
+        }
+        _ => {
+            tracing::warn!(
+                "/mcp HTTP route disabled — requires sqlite backend and a configured ModelRouter"
+            );
+            None
+        }
+    };
+
     // -- Full router ----------------------------------------------------------
-    let app = oa_router
+    let mut app = oa_router
         .merge(routes::auth::router())
         .merge(routes::account::router())
         .merge(routes::dashboard::router())
         .merge(routes::admin::router())
         .merge(shared_routes)
+        .merge(oauth_routes);
+    if let Some(r) = mcp_router {
+        app = app.merge(r);
+    }
+    let app = app
         .layer(auth_layer)
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http())

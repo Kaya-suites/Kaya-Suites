@@ -24,6 +24,7 @@ use axum::{
 };
 use kaya_auth::{AuthSession, AuthUser, KayaAuthBackend, PasswordAuthService};
 use kaya_metering::MeteringService;
+use kaya_oauth::{ClientType, RegistrationKind, clients as oauth_clients};
 use serde::{Deserialize, Serialize};
 use sqlx::{Column, Row, TypeInfo as _};
 use uuid::Uuid;
@@ -42,6 +43,145 @@ pub fn router() -> Router<AppState> {
         .route("/admin/tables", get(list_tables))
         .route("/admin/table/{name}", get(browse_table))
         .route("/admin/query", post(run_query))
+        .route("/admin/oauth/clients", get(list_oauth_clients).post(create_oauth_client))
+        .route("/admin/oauth/clients/{id}", delete(delete_oauth_client))
+}
+
+// ── OAuth client management (superadmin only) ───────────────────────────────
+
+#[derive(Serialize)]
+struct OAuthClientSummary {
+    id: String,
+    name: String,
+    client_type: String,
+    redirect_uris: Vec<String>,
+    created_at: i64,
+}
+
+#[derive(Deserialize)]
+struct CreateOAuthClientBody {
+    name: String,
+    redirect_uris: Vec<String>,
+    /// `"public"` or `"confidential"`. Public clients receive no secret.
+    client_type: String,
+}
+
+#[derive(Serialize)]
+struct CreatedOAuthClient {
+    client_id: String,
+    /// Present only for confidential clients. Shown once.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_secret: Option<String>,
+    name: String,
+    redirect_uris: Vec<String>,
+}
+
+async fn list_oauth_clients(
+    State(state): State<AppState>,
+    auth: AuthSession<KayaAuthBackend>,
+) -> Response {
+    let user = match auth.user {
+        Some(u) => u,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+    if let Err(r) = require_superadmin(&user) {
+        return r;
+    }
+
+    match oauth_clients::list_by_kind(&state.pool, RegistrationKind::Manual).await {
+        Ok(rows) => {
+            let body: Vec<OAuthClientSummary> = rows
+                .into_iter()
+                .map(|c| OAuthClientSummary {
+                    id: c.id.to_string(),
+                    name: c.name,
+                    client_type: c.client_type.as_str().to_owned(),
+                    redirect_uris: c.redirect_uris,
+                    created_at: c.created_at,
+                })
+                .collect();
+            (StatusCode::OK, Json(body)).into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "list_oauth_clients failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+async fn create_oauth_client(
+    State(state): State<AppState>,
+    auth: AuthSession<KayaAuthBackend>,
+    Json(body): Json<CreateOAuthClientBody>,
+) -> Response {
+    let user = match auth.user {
+        Some(u) => u,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+    if let Err(r) = require_superadmin(&user) {
+        return r;
+    }
+
+    if body.name.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST, "name required").into_response();
+    }
+    if body.redirect_uris.is_empty() {
+        return (StatusCode::BAD_REQUEST, "at least one redirect_uri required").into_response();
+    }
+    let client_type = match ClientType::parse(&body.client_type) {
+        Ok(t) => t,
+        Err(_) => return (StatusCode::BAD_REQUEST, "client_type must be 'public' or 'confidential'").into_response(),
+    };
+
+    let reg = match oauth_clients::register(
+        &state.pool,
+        oauth_clients::RegisterRequest {
+            name: body.name.clone(),
+            redirect_uris: body.redirect_uris.clone(),
+            client_type,
+            registration_kind: RegistrationKind::Manual,
+            owner_user_id: Some(user.id),
+        },
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error = %e, "create_oauth_client failed");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let resp = CreatedOAuthClient {
+        client_id: reg.client.id.to_string(),
+        client_secret: reg.client_secret,
+        name: reg.client.name,
+        redirect_uris: reg.client.redirect_uris,
+    };
+    (StatusCode::CREATED, Json(resp)).into_response()
+}
+
+async fn delete_oauth_client(
+    State(state): State<AppState>,
+    auth: AuthSession<KayaAuthBackend>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    let user = match auth.user {
+        Some(u) => u,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+    if let Err(r) = require_superadmin(&user) {
+        return r;
+    }
+
+    match oauth_clients::delete(&state.pool, id).await {
+        Ok(true) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Ok(false) => StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "delete_oauth_client failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 fn is_founder(user: &AuthUser, admin_email: &str) -> bool {

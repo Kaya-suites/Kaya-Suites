@@ -16,6 +16,8 @@ kaya-server   = { path = "../../crates/kaya-server" }
 kaya-auth     = { path = "../../crates/kaya-auth" }
 kaya-metering = { path = "../../crates/kaya-metering" }
 kaya-db       = { path = "../../crates/kaya-db" }
+kaya-mcp      = { path = "../../crates/kaya-mcp" }
+kaya-oauth    = { path = "../../crates/kaya-oauth" }
 
 axum         = { workspace = true, features = ["macros"] }
 tokio        = { workspace = true }
@@ -50,6 +52,10 @@ zip = "2"
 
 # Middleware
 tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-service = "0.3"
+
+# MCP (HTTP transport)
+rmcp = { version = "1.7", features = ["server", "transport-streamable-http-server"] }
 
 # Observability
 tracing            = "0.1"
