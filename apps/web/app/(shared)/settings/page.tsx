@@ -148,6 +148,10 @@ export default function SettingsPage() {
 
         <TokenUsageCard summary={tokenUsage} />
 
+        <ClaudeIntegrationCard />
+
+        <ConnectedAppsCard />
+
         {/* Data */}
         <div className={cardClass} style={cardStyle}>
           <h2 className={sectionHeading}>Your data</h2>
@@ -341,6 +345,344 @@ function TokenUsageCard({ summary }: { summary: UsageSummary | null }) {
           Chat token counts are estimates using BPE tokenization. Embedding tokens are reported by the provider API.
         </p>
       </div>
+    </div>
+  );
+}
+
+interface McpToken {
+  id: string;
+  name: string;
+  created_at: number;
+  last_used_at: number | null;
+}
+
+interface MintedToken {
+  id: string;
+  name: string;
+  token: string;
+}
+
+function ClaudeIntegrationCard() {
+  const [tokens, setTokens] = useState<McpToken[] | null>(null);
+  const [name, setName] = useState("");
+  const [minted, setMinted] = useState<MintedToken | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function refresh() {
+    const r = await fetch(`${API_URL}/oauth/personal-tokens`, { credentials: "include" });
+    if (r.ok) setTokens(await r.json());
+  }
+  useEffect(() => { refresh(); }, []);
+
+  async function mint() {
+    if (!name.trim()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch(`${API_URL}/oauth/personal-tokens`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      if (!r.ok) {
+        setErr(`Mint failed (${r.status})`);
+      } else {
+        setMinted(await r.json());
+        setName("");
+        await refresh();
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke(id: string) {
+    if (!confirm("Revoke this token? Clients using it will lose access.")) return;
+    const r = await fetch(`${API_URL}/oauth/personal-tokens/${id}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (r.ok) await refresh();
+  }
+
+  return (
+    <div className={cardClass} style={cardStyle}>
+      <h2 className={sectionHeading}>Personal access tokens (MCP)</h2>
+      <p className="text-xs text-[var(--color-muted)]">
+        Mint a long-lived OAuth token to connect Kaya as an MCP server in Claude Desktop or
+        Claude Code. Tokens are scoped to your user; the raw value is shown once. To revoke
+        a connection that did the browser-based OAuth handshake instead, use{" "}
+        <span className="font-bold">Connected apps</span> below.
+      </p>
+
+      <div className="space-y-2">
+        <label className="block text-xs font-bold uppercase tracking-wider text-black">
+          New token name
+        </label>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={busy}
+            placeholder="e.g. laptop-claude-desktop"
+            className="border-2 border-black px-3 py-2 text-xs flex-1 focus:outline-none bg-white text-black font-mono"
+            style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
+          />
+          <button
+            onClick={mint}
+            disabled={busy || !name.trim()}
+            className={btnSecondary}
+            style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
+          >
+            {busy ? "Minting…" : "Mint token"}
+          </button>
+        </div>
+        {err && <p className="text-xs text-[var(--color-danger)] font-bold">{err}</p>}
+      </div>
+
+      {minted && <MintedTokenView minted={minted} onDismiss={() => setMinted(null)} />}
+
+      {tokens && tokens.length > 0 && (
+        <table className="w-full text-xs border-2 border-black" style={{ borderRadius: "var(--border-radius)" }}>
+          <thead>
+            <tr className="border-b-2 border-black text-left" style={{ background: "var(--color-muted-bg)" }}>
+              <th className="font-bold px-3 py-2 uppercase">Name</th>
+              <th className="font-bold px-3 py-2 uppercase">Created</th>
+              <th className="font-bold px-3 py-2 uppercase">Last used</th>
+              <th className="font-bold px-3 py-2 uppercase text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y-2 divide-black">
+            {tokens.map((t) => (
+              <tr key={t.id}>
+                <td className="py-2 px-3">{t.name}</td>
+                <td className="py-2 px-3 text-[var(--color-muted)]">
+                  {new Date(t.created_at).toLocaleDateString()}
+                </td>
+                <td className="py-2 px-3 text-[var(--color-muted)]">
+                  {t.last_used_at ? new Date(t.last_used_at).toLocaleString() : "never"}
+                </td>
+                <td className="py-2 px-3 text-right">
+                  <button
+                    onClick={() => revoke(t.id)}
+                    className="text-xs font-bold uppercase tracking-wider text-[var(--color-danger)] hover:underline"
+                  >
+                    Revoke
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {tokens && tokens.length === 0 && (
+        <p className="text-xs text-[var(--color-muted)]">No tokens yet.</p>
+      )}
+    </div>
+  );
+}
+
+type Platform = "macos" | "windows" | "linux";
+
+function detectPlatform(): Platform {
+  if (typeof navigator === "undefined") return "macos";
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes("win")) return "windows";
+  if (ua.includes("mac")) return "macos";
+  return "linux";
+}
+
+const DESKTOP_CONFIG_PATH: Record<Platform, string> = {
+  macos: "~/Library/Application Support/Claude/claude_desktop_config.json",
+  windows: "%APPDATA%\\Claude\\claude_desktop_config.json",
+  linux: "~/.config/Claude/claude_desktop_config.json",
+};
+
+interface ConnectedApp {
+  client_id: string;
+  client_name: string;
+  token_count: number;
+  last_used_at: number | null;
+  first_authorized_at: number;
+}
+
+function ConnectedAppsCard() {
+  const [apps, setApps] = useState<ConnectedApp[] | null>(null);
+
+  async function refresh() {
+    const r = await fetch(`${API_URL}/oauth/connected-apps`, { credentials: "include" });
+    if (r.ok) setApps(await r.json());
+  }
+  useEffect(() => { refresh(); }, []);
+
+  async function revoke(client_id: string, name: string) {
+    if (!confirm(`Revoke all access for "${name}"? It will need to reconnect.`)) return;
+    const r = await fetch(`${API_URL}/oauth/connected-apps/${client_id}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (r.ok) await refresh();
+  }
+
+  if (!apps) return null;
+
+  return (
+    <div className={cardClass} style={cardStyle}>
+      <h2 className={sectionHeading}>Connected apps</h2>
+      <p className="text-xs text-[var(--color-muted)]">
+        OAuth clients you have granted access to via the browser consent screen
+        (e.g. Claude Desktop's remote MCP flow). Revoke at any time.
+      </p>
+
+      {apps.length === 0 ? (
+        <p className="text-xs text-[var(--color-muted)]">No connected apps yet.</p>
+      ) : (
+        <table className="w-full text-xs border-2 border-black" style={{ borderRadius: "var(--border-radius)" }}>
+          <thead>
+            <tr className="border-b-2 border-black text-left" style={{ background: "var(--color-muted-bg)" }}>
+              <th className="font-bold px-3 py-2 uppercase">App</th>
+              <th className="font-bold px-3 py-2 uppercase">Tokens</th>
+              <th className="font-bold px-3 py-2 uppercase">First authorized</th>
+              <th className="font-bold px-3 py-2 uppercase">Last used</th>
+              <th className="font-bold px-3 py-2 uppercase text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y-2 divide-black">
+            {apps.map((a) => (
+              <tr key={a.client_id}>
+                <td className="py-2 px-3 font-bold">{a.client_name}</td>
+                <td className="py-2 px-3 tabular-nums">{a.token_count}</td>
+                <td className="py-2 px-3 text-[var(--color-muted)]">
+                  {new Date(a.first_authorized_at).toLocaleDateString()}
+                </td>
+                <td className="py-2 px-3 text-[var(--color-muted)]">
+                  {a.last_used_at ? new Date(a.last_used_at).toLocaleString() : "never"}
+                </td>
+                <td className="py-2 px-3 text-right">
+                  <button
+                    onClick={() => revoke(a.client_id, a.client_name)}
+                    className="text-xs font-bold uppercase tracking-wider text-[var(--color-danger)] hover:underline"
+                  >
+                    Revoke
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function MintedTokenView({ minted, onDismiss }: { minted: MintedToken; onDismiss: () => void }) {
+  const [platform, setPlatform] = useState<Platform>("macos");
+  useEffect(() => { setPlatform(detectPlatform()); }, []);
+
+  const desktopJson = JSON.stringify(
+    {
+      mcpServers: {
+        kaya: {
+          command: "/absolute/path/to/kaya-mcp",
+          env: {
+            KAYA_API_TOKEN: minted.token,
+            DATABASE_URL: "sqlite:///absolute/path/to/kaya.db",
+          },
+        },
+      },
+    },
+    null,
+    2,
+  );
+  const codeCommand =
+    `claude mcp add kaya /absolute/path/to/kaya-mcp ` +
+    `-e KAYA_API_TOKEN=${minted.token} ` +
+    `-e DATABASE_URL=sqlite:///absolute/path/to/kaya.db`;
+
+  async function copy(text: string) {
+    try { await navigator.clipboard.writeText(text); } catch {}
+  }
+
+  const snippet =
+    "border-2 border-black p-3 text-xs font-mono whitespace-pre-wrap break-all bg-[var(--color-muted-bg)]";
+
+  return (
+    <div
+      className="border-2 border-[var(--color-accent)] p-4 space-y-3"
+      style={{ borderRadius: "var(--border-radius)", boxShadow: "4px 4px 0px var(--color-accent)" }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-bold text-xs uppercase tracking-wider text-black">
+            Token created — copy it now
+          </p>
+          <p className="text-xs text-[var(--color-muted)] mt-1">
+            You will not see this value again. Replace the placeholder paths with your local kaya-mcp binary and database file.
+          </p>
+        </div>
+        <button
+          onClick={onDismiss}
+          className="text-xs font-bold uppercase tracking-wider underline"
+        >
+          Dismiss
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-wider">Token</span>
+          <button onClick={() => copy(minted.token)} className="text-xs font-bold underline">Copy</button>
+        </div>
+        <div className={snippet} style={{ borderRadius: "var(--border-radius)" }}>{minted.token}</div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-wider">
+            Claude Desktop · paste into config
+          </span>
+          <div className="flex gap-2 items-center">
+            <PlatformPicker value={platform} onChange={setPlatform} />
+            <button onClick={() => copy(desktopJson)} className="text-xs font-bold underline">Copy</button>
+          </div>
+        </div>
+        <p className="text-xs text-[var(--color-muted)]">
+          Edit <code className="bg-[var(--color-muted-bg)] px-1 border border-black">{DESKTOP_CONFIG_PATH[platform]}</code>, then restart Claude Desktop.
+        </p>
+        <div className={snippet} style={{ borderRadius: "var(--border-radius)" }}>{desktopJson}</div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-wider">Claude Code · CLI</span>
+          <button onClick={() => copy(codeCommand)} className="text-xs font-bold underline">Copy</button>
+        </div>
+        <div className={snippet} style={{ borderRadius: "var(--border-radius)" }}>{codeCommand}</div>
+      </div>
+    </div>
+  );
+}
+
+function PlatformPicker({ value, onChange }: { value: Platform; onChange: (p: Platform) => void }) {
+  const opt = (p: Platform, label: string) => (
+    <button
+      key={p}
+      onClick={() => onChange(p)}
+      className={`px-2 py-1 text-xs font-bold uppercase tracking-wider border-2 border-black ${
+        value === p ? "bg-black text-white" : "bg-[var(--color-surface)] text-black"
+      }`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className="flex">
+      {opt("macos", "macOS")}
+      {opt("windows", "Win")}
+      {opt("linux", "Linux")}
     </div>
   );
 }

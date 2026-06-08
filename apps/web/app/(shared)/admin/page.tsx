@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
@@ -311,7 +312,15 @@ export default function AdminPage() {
   return (
     <main className="min-h-screen p-8 font-mono" style={{ background: "var(--color-background)" }}>
       <div className="max-w-6xl mx-auto space-y-10">
-        <h1 className="text-2xl font-black uppercase tracking-tight">Admin Dashboard</h1>
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <h1 className="text-2xl font-black uppercase tracking-tight">Admin Dashboard</h1>
+          <Link
+            href="/admin/oauth-clients"
+            className="text-xs font-bold uppercase tracking-wider underline"
+          >
+            OAuth clients →
+          </Link>
+        </div>
 
         {/* ── Stats ── */}
         <section className="space-y-4">

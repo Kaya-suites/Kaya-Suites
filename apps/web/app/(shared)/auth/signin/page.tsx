@@ -5,6 +5,20 @@ import { useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
+/// Return the `next=` query param if it's a same-origin path; otherwise the
+/// supplied default. Same-origin guard blocks open-redirect via `?next=//evil`.
+function safeNextOrDefault(fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  const raw = new URLSearchParams(window.location.search).get("next");
+  if (!raw) return fallback;
+  try {
+    const u = new URL(raw, window.location.origin);
+    return u.origin === window.location.origin ? u.pathname + u.search : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 type State = "idle" | "loading" | "error";
 
 const features = [
@@ -51,7 +65,7 @@ export default function SignInPage() {
       });
 
       if (r.ok) {
-        window.location.href = "/chat";
+        window.location.href = safeNextOrDefault("/chat");
       } else {
         const body = await r.json().catch(() => ({}));
         setErrorMsg(
