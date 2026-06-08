@@ -13,8 +13,8 @@
 //! same [`KayaService`] template share a [`PendingEditStore`] so propose-then-
 //! commit works across reconnects.
 //!
-//! Sqlite-only for now; the postgres / mysql wiring will land once
-//! `inject_storage` is factored out of `main.rs`.
+//! Per-user adapter construction is delegated to [`crate::build_user_adapters`]
+//! so postgres / sqlite / mysql all work uniformly.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,19 +26,16 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header::AUTHORIZATION},
     response::{IntoResponse, Response},
 };
-use kaya_core::{
-    SessionStorage, StorageAdapter, auth::UserSession, model_router::ModelRouter,
-};
+use kaya_core::{UserContext, auth::UserSession, model_router::ModelRouter};
 use kaya_mcp::KayaService;
 use kaya_oauth::tokens as oauth_tokens;
 use kaya_server::OAuthIssuer;
-use kaya_storage::{SqliteAdapter, SqliteSessionStorage};
+use kaya_storage::DbBackend;
 use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService,
     session::local::LocalSessionManager,
 };
 use sqlx::AnyPool;
-use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 use tower_service::Service as _;
 use uuid::Uuid;
@@ -50,7 +47,7 @@ pub type McpCache = Arc<RwLock<HashMap<Uuid, CachedService>>>;
 #[derive(Clone)]
 pub struct McpState {
     pub pool: AnyPool,
-    pub sqlite: SqlitePool,
+    pub db_backend: DbBackend,
     pub router: Arc<ModelRouter>,
     pub cache: McpCache,
     pub issuer: OAuthIssuer,
@@ -84,10 +81,9 @@ async fn build_service_for_user(
     state: &McpState,
     user_id: Uuid,
 ) -> anyhow::Result<KayaService> {
-    let storage: Arc<dyn StorageAdapter> =
-        Arc::new(SqliteAdapter::from_pool(state.sqlite.clone()).await?);
-    let sessions: Arc<dyn SessionStorage> =
-        Arc::new(SqliteSessionStorage::new(state.sqlite.clone()));
+    let user_ctx = UserContext { user_id, tenant_id: user_id };
+    let (storage, sessions) =
+        kaya_storage::build_user_adapters(&state.db_backend, user_ctx).await?;
     let session = UserSession { user_id };
     Ok(KayaService::new(storage, sessions, state.router.clone(), session))
 }

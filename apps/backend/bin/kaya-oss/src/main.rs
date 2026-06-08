@@ -30,14 +30,11 @@ use axum::{
 };
 use kaya_auth::{Backend as AuthBackend, KayaAuthBackend, PasswordAuthService};
 use kaya_core::UserContext;
-use kaya_core::{SessionStorage, StorageAdapter, model_router::ModelRouter};
+use kaya_core::model_router::ModelRouter;
 use kaya_db::Dialect;
 use kaya_metering::{MeteringService, pricing::PricingConfig, service::MeteringConfig};
 use kaya_server::state::StoredEdit;
-use kaya_storage::{
-    MySqlAdapter, MySqlSessionStorage, PostgresAdapter, PostgresSessionStorage, SqliteAdapter,
-    SqliteSessionStorage,
-};
+use kaya_storage::{MySqlAdapter, MySqlSessionStorage, SqliteAdapter, SqliteSessionStorage};
 use rust_embed::RustEmbed;
 use serde_json::{Value, json};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
@@ -117,23 +114,12 @@ async fn inject_storage(
         tenant_id: user.id,
     };
 
-    let (storage, sessions): (Arc<dyn StorageAdapter>, Arc<dyn SessionStorage>) =
-        match &state.db_backend {
-            DbBackend::Postgres(pg) => (
-                Arc::new(PostgresAdapter::new(pg.clone(), user_ctx.clone())),
-                Arc::new(PostgresSessionStorage::new(pg.clone(), user.id)),
-            ),
-            DbBackend::Sqlite(sqlite) => {
-                let adapter = SqliteAdapter::from_pool(sqlite.clone())
-                    .await
-                    .expect("sqlite adapter");
-                let sess = SqliteSessionStorage::new(sqlite.clone());
-                (Arc::new(adapter), Arc::new(sess))
-            }
-            DbBackend::Mysql(mysql) => {
-                let adapter = MySqlAdapter::new(mysql.clone(), user_ctx.clone());
-                let sess = MySqlSessionStorage::new(mysql.clone(), user.id);
-                (Arc::new(adapter), Arc::new(sess))
+    let (storage, sessions) =
+        match kaya_storage::build_user_adapters(&state.db_backend, user_ctx).await {
+            Ok(pair) => pair,
+            Err(e) => {
+                tracing::error!(error = %e, "build_user_adapters failed");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
         };
 
@@ -385,12 +371,12 @@ async fn main() -> anyhow::Result<()> {
         .layer(axum::Extension(oauth_issuer.clone()))
         .layer(axum::Extension(consent_store.clone()));
 
-    // -- /mcp HTTP route (sqlite + LLM only for now) --------------------------
-    let mcp_router = match (&state.db_backend, &state.llm) {
-        (DbBackend::Sqlite(sqlite), Some(llm)) => {
+    // -- /mcp HTTP route — needs a configured ModelRouter only ---------------
+    let mcp_router = match &state.llm {
+        Some(llm) => {
             let mcp_state = routes::mcp::McpState {
                 pool: any_pool.clone(),
-                sqlite: sqlite.clone(),
+                db_backend: state.db_backend.clone(),
                 router: llm.clone(),
                 cache: mcp_cache,
                 issuer: oauth_issuer.clone(),
@@ -401,10 +387,8 @@ async fn main() -> anyhow::Result<()> {
                     .layer(axum::Extension(mcp_state)),
             )
         }
-        _ => {
-            tracing::warn!(
-                "/mcp HTTP route disabled — requires sqlite backend and a configured ModelRouter"
-            );
+        None => {
+            tracing::warn!("/mcp HTTP route disabled — KAYA_CONFIG / ModelRouter not loaded");
             None
         }
     };

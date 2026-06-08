@@ -8,10 +8,13 @@
 //! Enable the `postgres` feature to include `PostgresAdapter` and
 //! `PostgresSessionStorage` (requires pgvector).
 
+pub mod backend;
 pub mod document;
 pub mod mysql;
 pub mod session;
 pub mod sqlite;
+
+pub use backend::{DbBackend, build_user_adapters};
 
 #[cfg(feature = "postgres")]
 pub mod postgres;

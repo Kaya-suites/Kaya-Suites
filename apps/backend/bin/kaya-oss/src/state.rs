@@ -8,17 +8,11 @@ use kaya_auth::PasswordAuthService;
 use kaya_core::model_router::ModelRouter;
 use kaya_metering::MeteringService;
 use kaya_server::state::StoredEdit;
-use sqlx::{AnyPool, MySqlPool, PgPool, SqlitePool};
+use sqlx::AnyPool;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-/// Which underlying DB pool is backing this instance.
-#[derive(Clone)]
-pub enum DbBackend {
-    Postgres(PgPool),
-    Sqlite(SqlitePool),
-    Mysql(MySqlPool),
-}
+pub use kaya_storage::DbBackend;
 
 #[derive(Clone)]
 pub struct AppState {

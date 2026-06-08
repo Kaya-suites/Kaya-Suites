@@ -109,7 +109,7 @@ cargo build --release -p kaya-mcp-bin
 | Variable         | Purpose |
 |---|---|
 | `KAYA_API_TOKEN` | OAuth-issued access token (a PAT in practice — mint one in the UI). Same bearer wire format. |
-| `DATABASE_URL`   | `sqlite:///absolute/path/to/kaya.db` (stdio is sqlite-only today) |
+| `DATABASE_URL`   | Connection string for your Kaya backend. Postgres / SQLite / MySQL all work; dialect is detected from the URL scheme (`postgres://`, `sqlite://`, `mysql://`). |
 | `KAYA_CONFIG`    | Optional — path to `kaya.yaml` for the LLM router; required by `search_documents` |
 | `KAYA_PUBLIC_URL` | Optional (HTTP transport only) — base URL clients see, used in the OAuth discovery docs and the `WWW-Authenticate` resource-metadata URL. Default `http://localhost:{port}`. |
 
@@ -147,12 +147,7 @@ Then `claude` — the server is available in any session.
 
 ## Transport 2 — Streamable HTTP (remote / hosted Kaya)
 
-For hosted multi-tenant Kaya. The `kaya-oss` binary mounts `/mcp` when both conditions hold:
-
-- The configured backend is sqlite. (Postgres/MySQL parity is tracked as a follow-up; the wiring needs `inject_storage` to be factored out of `bin/kaya-oss/src/main.rs`.)
-- A `ModelRouter` is loaded — `KAYA_CONFIG` points at a valid `kaya.yaml`.
-
-A startup warning is logged when the route is skipped.
+For hosted multi-tenant Kaya. The `kaya-oss` binary mounts `/mcp` whenever a `ModelRouter` is loaded (i.e. `KAYA_CONFIG` points at a valid `kaya.yaml`). Postgres / SQLite / MySQL backends are all supported — the dispatch is shared with the rest of the binary via `kaya_storage::build_user_adapters`. A startup warning is logged when the route is skipped because the router is missing.
 
 ### Per-user service cache
 
@@ -192,7 +187,6 @@ A startup warning is logged when the route is skipped.
 
 ## Known limitations
 
-- **HTTP transport is sqlite-only** in this release. Postgres / MySQL parity needs `inject_storage` to be factored out of `bin/kaya-oss/src/main.rs` so the `/mcp` handler can reuse the same per-dialect adapter logic.
 - **Re-indexing after `commit_edit`** is not yet wired on the MCP path. The HTTP route in `routes/edits.rs` spawns a background re-index after approval; the MCP equivalent will pick this up once the helper is factored out of the route into a shared `commit_and_reindex` in `kaya-core`.
 - **Search tools require an `LlmProvider`** with embeddings configured — the search request embeds the query. Without `KAYA_CONFIG`, `search_documents` and `find_stale_references` return errors at call time; the other tools still work.
 - **Refresh tokens not implemented.** Access tokens are long-lived; revoke via the UI to invalidate. The token endpoint only supports the `authorization_code` grant.
