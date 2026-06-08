@@ -7,7 +7,10 @@ mod chat;
 mod documents;
 mod edits;
 mod folders;
+pub mod oauth;
 mod sessions;
+
+pub use oauth::{ConsentRequest, ConsentRequestStore, OAuthIssuer};
 
 /// Build the shared API router, generic over the host binary's state type.
 ///
@@ -23,7 +26,7 @@ pub fn router<S>() -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-    Router::new()
+    let r = Router::new()
         .route(
             "/documents",
             get(documents::list_documents).post(documents::create_document),
@@ -76,5 +79,17 @@ where
         )
         .route("/sessions/{id}/chat", post(chat::chat_stream))
         .route("/edits/{id}/approve", post(edits::approve_edit))
-        .route("/edits/{id}/reject", post(edits::reject_edit))
+        .route("/edits/{id}/reject", post(edits::reject_edit));
+    r
+}
+
+/// Public OAuth router (no cookie auth required). Mount outside `inject_storage`.
+pub use oauth::public_router as oauth_public_router;
+
+/// Authenticated OAuth router. Uses cookie auth via `AuthSession` but does NOT
+/// require an authenticated user at the middleware level — `/oauth/authorize`
+/// handles signed-out users by redirecting to sign-in. Mount outside
+/// `inject_storage` (which would 401 before the handler ran).
+pub fn oauth_authenticated_router<S: Clone + Send + Sync + 'static>() -> axum::Router<S> {
+    oauth::authenticated_routes(axum::Router::new())
 }

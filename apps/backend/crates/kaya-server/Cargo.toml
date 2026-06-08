@@ -7,6 +7,15 @@ description = "Shared HTTP handlers for Kaya Suites — Apache 2.0 layer mounted
 
 [dependencies]
 kaya-core   = { path = "../kaya-core" }
+kaya-mcp    = { path = "../kaya-mcp" }
+kaya-oauth  = { path = "../kaya-oauth" }
+kaya-auth   = { path = "../kaya-auth" }
+sqlx        = { version = "0.8", features = ["runtime-tokio", "any"] }
+axum-login  = "0.17"
+url         = "2"
+urlencoding = "2"
+base64      = "0.22"
+serde_urlencoded = "0.7"
 
 axum         = { workspace = true }
 tokio        = { workspace = true }
@@ -18,3 +27,11 @@ bytes        = { workspace = true }
 futures      = { workspace = true }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tracing      = "0.1"
+
+[dev-dependencies]
+kaya-db      = { path = "../kaya-db" }
+tempfile     = "3"
+tower        = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tokio        = { workspace = true, features = ["full", "test-util"] }
+sha2         = "0.10"
