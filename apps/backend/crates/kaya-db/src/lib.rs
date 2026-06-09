@@ -46,6 +46,16 @@ impl Dialect {
 }
 
 pub async fn run_migrations(pool: &AnyPool, dialect: Dialect) -> anyhow::Result<()> {
+    // SQLite's pre-multi-user databases lack the `user_id` columns that the
+    // baseline migration's indexes reference. SQLite has no
+    // `ADD COLUMN IF NOT EXISTS`, so we can't express the upgrade as pure SQL
+    // inside the .sql file. Do the legacy-schema upgrade here, ignoring
+    // "duplicate column" errors (which mean the column was already added on a
+    // previous run or in a fresh-DB scenario).
+    if dialect == Dialect::Sqlite {
+        prepare_sqlite_legacy(pool).await?;
+    }
+
     let migrator = match dialect {
         Dialect::Postgres => &POSTGRES_MIGRATOR,
         Dialect::Sqlite => &SQLITE_MIGRATOR,
@@ -56,6 +66,60 @@ pub async fn run_migrations(pool: &AnyPool, dialect: Dialect) -> anyhow::Result<
         .await
         .with_context(|| format!("{dialect:?} migrations failed"))?;
     tracing::info!(?dialect, "migrations applied");
+    Ok(())
+}
+
+/// Adds `user_id` columns to any pre-existing SQLite tables that pre-date
+/// multi-user. Each `ALTER TABLE` is best-effort — a `duplicate column`
+/// failure means the column was already added and we move on.
+///
+/// Rows added before multi-user are attributed to the sentinel "local" user
+/// (`00000000-0000-0000-0000-000000000001`), preserving the data.
+async fn prepare_sqlite_legacy(pool: &AnyPool) -> anyhow::Result<()> {
+    const SENTINEL: &str = "00000000-0000-0000-0000-000000000001";
+    const TABLES: &[&str] = &[
+        "documents",
+        "folders",
+        "chunks",
+        "chunk_embeddings",
+        "chat_sessions",
+        "chat_messages",
+        "embedding_calls",
+        "document_embedding_status",
+        "ui_preferences",
+    ];
+
+    for table in TABLES {
+        // Skip tables that don't exist yet — fresh DBs hit this path too, and
+        // ALTER TABLE on a non-existent table is a hard error in SQLite.
+        let exists: Option<(String,)> = sqlx::query_as(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+        )
+        .bind(table)
+        .fetch_optional(pool)
+        .await?;
+        if exists.is_none() {
+            continue;
+        }
+
+        let sql = format!(
+            "ALTER TABLE {table} ADD COLUMN user_id TEXT NOT NULL DEFAULT '{SENTINEL}'"
+        );
+        // Ignore duplicate-column errors (column already present).
+        match sqlx::query(&sql).execute(pool).await {
+            Ok(_) => tracing::info!(table, "added user_id column to legacy SQLite table"),
+            Err(e) => {
+                let msg = e.to_string().to_lowercase();
+                if msg.contains("duplicate column") || msg.contains("already exists") {
+                    // expected on subsequent runs
+                } else {
+                    return Err(anyhow::Error::from(e)
+                        .context(format!("ALTER TABLE {table} ADD COLUMN user_id")));
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
