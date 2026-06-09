@@ -6,7 +6,7 @@ license = "Apache-2.0"
 description = "Universal database migrations for Kaya Suites (Apache 2.0)"
 
 [dependencies]
-sqlx  = { version = "0.8", features = ["any", "postgres", "sqlite", "mysql", "runtime-tokio", "chrono"] }
+sqlx  = { version = "0.8", features = ["any", "postgres", "sqlite", "mysql", "runtime-tokio", "chrono", "migrate"] }
 anyhow = "1"
 tracing = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

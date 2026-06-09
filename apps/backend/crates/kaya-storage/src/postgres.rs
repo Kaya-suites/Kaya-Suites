@@ -25,7 +25,9 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
+// Canonical Postgres migrations now live in the `kaya-db` crate.
+// Re-exported here so existing imports (`POSTGRES_MIGRATOR`) keep working.
+pub use kaya_db::POSTGRES_MIGRATOR as MIGRATOR;
 
 // ── Adapter ───────────────────────────────────────────────────────────────────
 

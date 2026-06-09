@@ -1791,6 +1791,7 @@ dependencies = [
  "chrono",
  "futures",
  "kaya-core",
+ "kaya-db",
  "pgvector",
  "serde",
  "serde_json",

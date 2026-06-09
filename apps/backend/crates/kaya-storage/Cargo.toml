@@ -10,6 +10,7 @@ postgres = ["sqlx/postgres", "dep:pgvector"]
 
 [dependencies]
 kaya-core   = { path = "../kaya-core" }
+kaya-db     = { path = "../kaya-db" }
 async-trait = { workspace = true }
 thiserror   = { workspace = true }
 uuid        = { workspace = true }
