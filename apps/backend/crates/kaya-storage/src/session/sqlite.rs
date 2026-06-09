@@ -19,7 +19,6 @@ pub struct SqliteSessionStorage {
 
 const FOLDER_SIDEBAR_STATE_KEY: &str = "folder_sidebar_state";
 const EDIT_HISTORY_LIMIT: usize = 5;
-const LEGACY_LOCAL_USER_ID: &str = "00000000-0000-0000-0000-000000000001";
 
 impl SqliteSessionStorage {
     pub fn new(pool: SqlitePool, user_id: Uuid) -> Self {

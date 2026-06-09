@@ -59,10 +59,9 @@ impl StorageAdapter for MySqlAdapter {
     async fn get_document(&self, id: Uuid) -> Result<Document, StorageError> {
         let row = sqlx::query(
             "SELECT frontmatter_json, body, deleted_at, folder_id, sort_order FROM documents
-             WHERE id = ? AND user_id = ?",
+             WHERE id = ?",
         )
         .bind(id.to_string())
-        .bind(self.user_id().to_string())
         .fetch_optional(&self.inner.pool)
         .await
         .map_err(box_err)?;
@@ -93,7 +92,7 @@ impl StorageAdapter for MySqlAdapter {
         let fm_json = serde_json::to_string(doc).map_err(box_err)?;
         let now = chrono::Utc::now().to_rfc3339();
         let folder_id_str = doc.folder_id.map(|id| id.to_string());
-        let sort_order = next_doc_sort_order_mysql(&self.inner.pool, self.user_id(), doc.folder_id).await?;
+        let sort_order = next_doc_sort_order_mysql(&self.inner.pool, doc.folder_id).await?;
 
         sqlx::query(
             "INSERT INTO documents
@@ -126,13 +125,11 @@ impl StorageAdapter for MySqlAdapter {
 
     async fn delete_document(&self, id: Uuid) -> Result<(), StorageError> {
         let id_str = id.to_string();
-        let user_id_str = self.user_id().to_string();
 
         let row = sqlx::query(
-            "SELECT folder_id FROM documents WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+            "SELECT folder_id FROM documents WHERE id = ? AND deleted_at IS NULL",
         )
         .bind(&id_str)
-        .bind(&user_id_str)
         .fetch_optional(&self.inner.pool)
         .await
         .map_err(box_err)?;
@@ -147,15 +144,14 @@ impl StorageAdapter for MySqlAdapter {
                 .map_err(box_err)?;
 
             let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
-            sqlx::query("UPDATE documents SET deleted_at = ? WHERE id = ? AND user_id = ?")
+            sqlx::query("UPDATE documents SET deleted_at = ? WHERE id = ?")
                 .bind(&now)
                 .bind(&id_str)
-                .bind(&user_id_str)
                 .execute(&mut *tx)
                 .await
                 .map_err(box_err)?;
             let sibling_ids =
-                list_doc_ids_mysql(&mut *tx, self.user_id(), folder_id, None).await?;
+                list_doc_ids_mysql(&mut *tx, folder_id, None).await?;
             write_doc_positions_mysql(&mut *tx, &sibling_ids, &now).await?;
             tx.commit().await.map_err(box_err)?;
         }
@@ -164,11 +160,9 @@ impl StorageAdapter for MySqlAdapter {
     }
 
     async fn cleanup_deleted_document(&self, id: Uuid) -> Result<(), StorageError> {
-        let user_id = self.user_id().to_string();
         self.delete_chunks_for_document(id).await?;
-        sqlx::query("DELETE FROM chunk_embeddings WHERE document_id = ? AND user_id = ?")
+        sqlx::query("DELETE FROM chunk_embeddings WHERE document_id = ?")
             .bind(id.to_string())
-            .bind(user_id)
             .execute(&self.inner.pool)
             .await
             .map_err(box_err)?;
@@ -178,10 +172,9 @@ impl StorageAdapter for MySqlAdapter {
     async fn list_documents(&self) -> Result<Vec<Document>, StorageError> {
         let rows = sqlx::query(
             "SELECT frontmatter_json, body, folder_id, sort_order FROM documents
-             WHERE user_id = ? AND deleted_at IS NULL
+             WHERE deleted_at IS NULL
              ORDER BY sort_order ASC, updated_at DESC",
         )
-        .bind(self.user_id().to_string())
         .fetch_all(&self.inner.pool)
         .await
         .map_err(box_err)?;
@@ -211,19 +204,17 @@ impl StorageAdapter for MySqlAdapter {
         let rows = match folder_id {
             None => sqlx::query(
                 "SELECT frontmatter_json, body, folder_id, sort_order FROM documents
-                     WHERE user_id = ? AND deleted_at IS NULL AND folder_id IS NULL
+                     WHERE deleted_at IS NULL AND folder_id IS NULL
                      ORDER BY sort_order ASC, updated_at DESC",
             )
-            .bind(self.user_id().to_string())
             .fetch_all(&self.inner.pool)
             .await
             .map_err(box_err)?,
             Some(fid) => sqlx::query(
                 "SELECT frontmatter_json, body, folder_id, sort_order FROM documents
-                     WHERE user_id = ? AND deleted_at IS NULL AND folder_id = ?
+                     WHERE deleted_at IS NULL AND folder_id = ?
                      ORDER BY sort_order ASC, updated_at DESC",
             )
-            .bind(self.user_id().to_string())
             .bind(fid.to_string())
             .fetch_all(&self.inner.pool)
             .await
@@ -254,15 +245,13 @@ impl StorageAdapter for MySqlAdapter {
         folder_id: Option<Uuid>,
     ) -> Result<(), StorageError> {
         let doc_id_str = doc_id.to_string();
-        let user_id_str = self.user_id().to_string();
         let now = chrono::Utc::now().to_rfc3339();
 
         // Read source folder before the transaction.
         let row = sqlx::query(
-            "SELECT folder_id FROM documents WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+            "SELECT folder_id FROM documents WHERE id = ? AND deleted_at IS NULL",
         )
         .bind(&doc_id_str)
-        .bind(&user_id_str)
         .fetch_optional(&self.inner.pool)
         .await
         .map_err(box_err)?
@@ -279,32 +268,31 @@ impl StorageAdapter for MySqlAdapter {
         }
 
         let dest_sort_order =
-            next_doc_sort_order_mysql(&self.inner.pool, self.user_id(), folder_id).await?;
+            next_doc_sort_order_mysql(&self.inner.pool, folder_id).await?;
         let folder_id_str = folder_id.map(|id| id.to_string());
 
         let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
 
         sqlx::query(
             "UPDATE documents SET folder_id = ?, sort_order = ?, updated_at = ? \
-             WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+             WHERE id = ? AND deleted_at IS NULL",
         )
         .bind(&folder_id_str)
         .bind(dest_sort_order)
         .bind(&now)
         .bind(&doc_id_str)
-        .bind(&user_id_str)
         .execute(&mut *tx)
         .await
         .map_err(box_err)?;
 
         // Compact source folder (close the gap left by the removed document).
         let src_ids =
-            list_doc_ids_mysql(&mut *tx, self.user_id(), src_folder_id, None).await?;
+            list_doc_ids_mysql(&mut *tx, src_folder_id, None).await?;
         write_doc_positions_mysql(&mut *tx, &src_ids, &now).await?;
 
         // Compact destination folder (ensures 0, 1, 2, … with no collisions).
         let dest_ids =
-            list_doc_ids_mysql(&mut *tx, self.user_id(), folder_id, None).await?;
+            list_doc_ids_mysql(&mut *tx, folder_id, None).await?;
         write_doc_positions_mysql(&mut *tx, &dest_ids, &now).await?;
 
         tx.commit().await.map_err(box_err)?;
@@ -317,14 +305,12 @@ impl StorageAdapter for MySqlAdapter {
         new_index: usize,
     ) -> Result<(), StorageError> {
         let doc_id_str = doc_id.to_string();
-        let user_id_str = self.user_id().to_string();
         let now = chrono::Utc::now().to_rfc3339();
 
         let folder_id_str: Option<String> = sqlx::query(
-            "SELECT folder_id FROM documents WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+            "SELECT folder_id FROM documents WHERE id = ? AND deleted_at IS NULL",
         )
         .bind(&doc_id_str)
-        .bind(&user_id_str)
         .fetch_optional(&self.inner.pool)
         .await
         .map_err(box_err)?
@@ -339,7 +325,7 @@ impl StorageAdapter for MySqlAdapter {
             .map_err(box_err)?;
 
         let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
-        let mut sibling_ids = list_doc_ids_mysql(&mut *tx, self.user_id(), folder_id, Some(doc_id)).await?;
+        let mut sibling_ids = list_doc_ids_mysql(&mut *tx, folder_id, Some(doc_id)).await?;
         let insert_at = new_index.min(sibling_ids.len());
         sibling_ids.insert(insert_at, doc_id_str);
         write_doc_positions_mysql(&mut *tx, &sibling_ids, &now).await?;
@@ -362,7 +348,7 @@ impl StorageAdapter for MySqlAdapter {
         let parent_id_str = parent_id.map(|p| p.to_string());
         let now = chrono::Utc::now().to_rfc3339();
         let sort_order =
-            next_folder_sort_order_mysql(&self.inner.pool, self.user_id(), parent_id).await?;
+            next_folder_sort_order_mysql(&self.inner.pool, parent_id).await?;
 
         sqlx::query(
             "INSERT INTO folders (id, user_id, name, parent_id, sort_order, created_at, updated_at)
@@ -393,10 +379,9 @@ impl StorageAdapter for MySqlAdapter {
         let id_str = id.to_string();
         let row = sqlx::query(
             "SELECT id, name, parent_id, sort_order, created_at, updated_at FROM folders
-             WHERE id = ? AND user_id = ?",
+             WHERE id = ?",
         )
         .bind(&id_str)
-        .bind(self.user_id().to_string())
         .fetch_optional(&self.inner.pool)
         .await
         .map_err(box_err)?
@@ -408,10 +393,8 @@ impl StorageAdapter for MySqlAdapter {
     async fn list_folders(&self) -> Result<Vec<Folder>, StorageError> {
         let rows = sqlx::query(
             "SELECT id, name, parent_id, sort_order, created_at, updated_at FROM folders
-             WHERE user_id = ?
              ORDER BY COALESCE(parent_id, ''), sort_order ASC, name ASC, created_at ASC",
         )
-        .bind(self.user_id().to_string())
         .fetch_all(&self.inner.pool)
         .await
         .map_err(box_err)?;
@@ -424,11 +407,10 @@ impl StorageAdapter for MySqlAdapter {
     async fn rename_folder(&self, id: Uuid, name: &str) -> Result<Folder, StorageError> {
         let now = chrono::Utc::now().to_rfc3339();
         let affected =
-            sqlx::query("UPDATE folders SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?")
+            sqlx::query("UPDATE folders SET name = ?, updated_at = ? WHERE id = ?")
                 .bind(name)
                 .bind(&now)
                 .bind(id.to_string())
-                .bind(self.user_id().to_string())
                 .execute(&self.inner.pool)
                 .await
                 .map_err(box_err)?
@@ -456,18 +438,17 @@ impl StorageAdapter for MySqlAdapter {
         let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
 
         let mut target_ids =
-            list_folder_ids_mysql(&mut tx, self.user_id(), new_parent_id, Some(id)).await?;
+            list_folder_ids_mysql(&mut tx, new_parent_id, Some(id)).await?;
         let insert_at = new_index.unwrap_or(target_ids.len()).min(target_ids.len());
         target_ids.insert(insert_at, id.to_string());
-        write_folder_positions_mysql(&mut tx, self.user_id(), new_parent_id, &target_ids, &now)
+        write_folder_positions_mysql(&mut tx, new_parent_id, &target_ids, &now)
             .await?;
 
         if current_parent != new_parent_id {
             let previous_ids =
-                list_folder_ids_mysql(&mut tx, self.user_id(), current_parent, Some(id)).await?;
+                list_folder_ids_mysql(&mut tx, current_parent, Some(id)).await?;
             write_folder_positions_mysql(
                 &mut tx,
-                self.user_id(),
                 current_parent,
                 &previous_ids,
                 &now,
@@ -481,18 +462,16 @@ impl StorageAdapter for MySqlAdapter {
 
     async fn delete_folder(&self, id: Uuid) -> Result<(), StorageError> {
         let id_str = id.to_string();
-        let uid_str = self.user_id().to_string();
         let now = chrono::Utc::now().to_rfc3339();
         let folder = self.get_folder(id).await?;
         let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
 
         let mut parent_children =
-            list_folder_ids_mysql(&mut tx, self.user_id(), folder.parent_id, Some(id)).await?;
-        let child_ids = list_folder_ids_mysql(&mut tx, self.user_id(), Some(id), None).await?;
+            list_folder_ids_mysql(&mut tx, folder.parent_id, Some(id)).await?;
+        let child_ids = list_folder_ids_mysql(&mut tx, Some(id), None).await?;
         parent_children.extend(child_ids);
         write_folder_positions_mysql(
             &mut tx,
-            self.user_id(),
             folder.parent_id,
             &parent_children,
             &now,
@@ -504,9 +483,8 @@ impl StorageAdapter for MySqlAdapter {
         // to the end before the compaction step re-sequences everything.
         let root_max: i64 = sqlx::query_scalar(
             "SELECT COALESCE(MAX(sort_order), -1) \
-             FROM documents WHERE user_id = ? AND deleted_at IS NULL AND folder_id IS NULL",
+             FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL",
         )
-        .bind(&uid_str)
         .fetch_one(&mut *tx)
         .await
         .map_err(box_err)?;
@@ -514,23 +492,21 @@ impl StorageAdapter for MySqlAdapter {
         sqlx::query(
             "UPDATE documents \
              SET folder_id = NULL, sort_order = sort_order + ?, updated_at = ? \
-             WHERE folder_id = ? AND user_id = ?",
+             WHERE folder_id = ?",
         )
         .bind(root_max + 1)
         .bind(&now)
         .bind(&id_str)
-        .bind(&uid_str)
         .execute(&mut *tx)
         .await
         .map_err(box_err)?;
 
         // Compact root documents to 0, 1, 2, … (no gaps or duplicate values).
-        let root_ids = list_doc_ids_mysql(&mut *tx, self.user_id(), None, None).await?;
+        let root_ids = list_doc_ids_mysql(&mut *tx, None, None).await?;
         write_doc_positions_mysql(&mut *tx, &root_ids, &now).await?;
 
-        let affected = sqlx::query("DELETE FROM folders WHERE id = ? AND user_id = ?")
+        let affected = sqlx::query("DELETE FROM folders WHERE id = ?")
             .bind(&id_str)
-            .bind(&uid_str)
             .execute(&mut *tx)
             .await
             .map_err(box_err)?
@@ -569,8 +545,7 @@ impl StorageAdapter for MySqlAdapter {
     }
 
     async fn delete_chunks_for_document(&self, document_id: Uuid) -> Result<(), StorageError> {
-        sqlx::query("DELETE FROM chunks WHERE user_id = ? AND document_id = ?")
-            .bind(self.user_id().to_string())
+        sqlx::query("DELETE FROM chunks WHERE document_id = ?")
             .bind(document_id.to_string())
             .execute(&self.inner.pool)
             .await
@@ -584,9 +559,8 @@ impl StorageAdapter for MySqlAdapter {
     ) -> Result<Vec<(String, String)>, StorageError> {
         let rows = sqlx::query(
             "SELECT paragraph_id, content_hash FROM chunks
-             WHERE user_id = ? AND document_id = ?",
+             WHERE document_id = ?",
         )
-        .bind(self.user_id().to_string())
         .bind(document_id.to_string())
         .fetch_all(&self.inner.pool)
         .await
@@ -612,15 +586,11 @@ impl StorageAdapter for MySqlAdapter {
         let rows = sqlx::query(
             "SELECT c.document_id, c.paragraph_id, c.content, c.ordinal
              FROM chunks c
-             JOIN documents d
-               ON d.id = c.document_id
-              AND d.user_id = c.user_id
-             WHERE c.user_id = ?
-               AND d.deleted_at IS NULL
+             JOIN documents d ON d.id = c.document_id
+             WHERE d.deleted_at IS NULL
                AND c.content LIKE ?
              LIMIT ?",
         )
-        .bind(self.user_id().to_string())
         .bind(&pattern)
         .bind(limit as i64)
         .fetch_all(&self.inner.pool)
@@ -676,9 +646,8 @@ impl StorageAdapter for MySqlAdapter {
         for para_id in paragraph_ids {
             sqlx::query(
                 "DELETE FROM chunk_embeddings
-                 WHERE user_id = ? AND document_id = ? AND paragraph_id = ?",
+                 WHERE document_id = ? AND paragraph_id = ?",
             )
-            .bind(self.user_id().to_string())
             .bind(&doc_id)
             .bind(para_id)
             .execute(&self.inner.pool)
@@ -702,16 +671,11 @@ impl StorageAdapter for MySqlAdapter {
             "SELECT ce.document_id, ce.paragraph_id, ce.vector, c.content, c.ordinal
              FROM chunk_embeddings ce
              JOIN chunks c
-               ON c.user_id      = ce.user_id
-              AND c.document_id  = ce.document_id
+               ON c.document_id  = ce.document_id
               AND c.paragraph_id = ce.paragraph_id
-             JOIN documents d
-               ON d.id      = ce.document_id
-              AND d.user_id = ce.user_id
-             WHERE ce.user_id = ?
-               AND d.deleted_at IS NULL",
+             JOIN documents d ON d.id = ce.document_id
+             WHERE d.deleted_at IS NULL",
         )
-        .bind(self.user_id().to_string())
         .fetch_all(&self.inner.pool)
         .await
         .map_err(box_err)?;
@@ -751,24 +715,21 @@ impl StorageAdapter for MySqlAdapter {
 
 async fn next_doc_sort_order_mysql(
     pool: &MySqlPool,
-    user_id: Uuid,
     folder_id: Option<Uuid>,
 ) -> Result<i64, StorageError> {
     let row = match folder_id {
         Some(fid) => sqlx::query(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort \
-             FROM documents WHERE user_id = ? AND deleted_at IS NULL AND folder_id = ?",
+             FROM documents WHERE deleted_at IS NULL AND folder_id = ?",
         )
-        .bind(user_id.to_string())
         .bind(fid.to_string())
         .fetch_one(pool)
         .await
         .map_err(box_err)?,
         None => sqlx::query(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort \
-             FROM documents WHERE user_id = ? AND deleted_at IS NULL AND folder_id IS NULL",
+             FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL",
         )
-        .bind(user_id.to_string())
         .fetch_one(pool)
         .await
         .map_err(box_err)?,
@@ -778,44 +739,39 @@ async fn next_doc_sort_order_mysql(
 
 async fn list_doc_ids_mysql(
     executor: &mut sqlx::MySqlConnection,
-    user_id: Uuid,
     folder_id: Option<Uuid>,
     exclude_id: Option<Uuid>,
 ) -> Result<Vec<String>, StorageError> {
     let rows = match (folder_id, exclude_id) {
         (Some(fid), Some(excl)) => sqlx::query(
-            "SELECT id FROM documents WHERE user_id = ? AND deleted_at IS NULL \
+            "SELECT id FROM documents WHERE deleted_at IS NULL \
              AND folder_id = ? AND id != ? ORDER BY sort_order ASC, updated_at DESC",
         )
-        .bind(user_id.to_string())
         .bind(fid.to_string())
         .bind(excl.to_string())
         .fetch_all(&mut *executor)
         .await
         .map_err(box_err)?,
         (Some(fid), None) => sqlx::query(
-            "SELECT id FROM documents WHERE user_id = ? AND deleted_at IS NULL \
+            "SELECT id FROM documents WHERE deleted_at IS NULL \
              AND folder_id = ? ORDER BY sort_order ASC, updated_at DESC",
         )
-        .bind(user_id.to_string())
         .bind(fid.to_string())
         .fetch_all(&mut *executor)
         .await
         .map_err(box_err)?,
         (None, Some(excl)) => sqlx::query(
-            "SELECT id FROM documents WHERE user_id = ? AND deleted_at IS NULL \
+            "SELECT id FROM documents WHERE deleted_at IS NULL \
              AND folder_id IS NULL AND id != ? ORDER BY sort_order ASC, updated_at DESC",
         )
-        .bind(user_id.to_string())
         .bind(excl.to_string())
         .fetch_all(&mut *executor)
         .await
         .map_err(box_err)?,
         (None, None) => sqlx::query(
-            "SELECT id FROM documents WHERE user_id = ? AND deleted_at IS NULL \
+            "SELECT id FROM documents WHERE deleted_at IS NULL \
              AND folder_id IS NULL ORDER BY sort_order ASC, updated_at DESC",
         )
-        .bind(user_id.to_string())
         .fetch_all(&mut *executor)
         .await
         .map_err(box_err)?,
@@ -845,16 +801,14 @@ async fn write_doc_positions_mysql(
 
 async fn next_folder_sort_order_mysql(
     pool: &MySqlPool,
-    user_id: Uuid,
     parent_id: Option<Uuid>,
 ) -> Result<i64, StorageError> {
     let row = match parent_id {
         Some(parent_id) => sqlx::query(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort
              FROM folders
-             WHERE user_id = ? AND parent_id = ?",
+             WHERE parent_id = ?",
         )
-        .bind(user_id.to_string())
         .bind(parent_id.to_string())
         .fetch_one(pool)
         .await
@@ -862,9 +816,8 @@ async fn next_folder_sort_order_mysql(
         None => sqlx::query(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort
              FROM folders
-             WHERE user_id = ? AND parent_id IS NULL",
+             WHERE parent_id IS NULL",
         )
-        .bind(user_id.to_string())
         .fetch_one(pool)
         .await
         .map_err(box_err)?,
@@ -875,7 +828,6 @@ async fn next_folder_sort_order_mysql(
 
 async fn list_folder_ids_mysql(
     tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
-    user_id: Uuid,
     parent_id: Option<Uuid>,
     exclude_id: Option<Uuid>,
 ) -> Result<Vec<String>, StorageError> {
@@ -883,10 +835,9 @@ async fn list_folder_ids_mysql(
         (Some(parent_id), Some(exclude_id)) => sqlx::query(
             "SELECT id
              FROM folders
-             WHERE user_id = ? AND parent_id = ? AND id != ?
+             WHERE parent_id = ? AND id != ?
              ORDER BY sort_order ASC, name ASC, created_at ASC",
         )
-        .bind(user_id.to_string())
         .bind(parent_id.to_string())
         .bind(exclude_id.to_string())
         .fetch_all(&mut **tx)
@@ -895,10 +846,9 @@ async fn list_folder_ids_mysql(
         (Some(parent_id), None) => sqlx::query(
             "SELECT id
              FROM folders
-             WHERE user_id = ? AND parent_id = ?
+             WHERE parent_id = ?
              ORDER BY sort_order ASC, name ASC, created_at ASC",
         )
-        .bind(user_id.to_string())
         .bind(parent_id.to_string())
         .fetch_all(&mut **tx)
         .await
@@ -906,10 +856,9 @@ async fn list_folder_ids_mysql(
         (None, Some(exclude_id)) => sqlx::query(
             "SELECT id
              FROM folders
-             WHERE user_id = ? AND parent_id IS NULL AND id != ?
+             WHERE parent_id IS NULL AND id != ?
              ORDER BY sort_order ASC, name ASC, created_at ASC",
         )
-        .bind(user_id.to_string())
         .bind(exclude_id.to_string())
         .fetch_all(&mut **tx)
         .await
@@ -917,10 +866,9 @@ async fn list_folder_ids_mysql(
         (None, None) => sqlx::query(
             "SELECT id
              FROM folders
-             WHERE user_id = ? AND parent_id IS NULL
+             WHERE parent_id IS NULL
              ORDER BY sort_order ASC, name ASC, created_at ASC",
         )
-        .bind(user_id.to_string())
         .fetch_all(&mut **tx)
         .await
         .map_err(box_err)?,
@@ -933,7 +881,6 @@ async fn list_folder_ids_mysql(
 
 async fn write_folder_positions_mysql(
     tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
-    user_id: Uuid,
     parent_id: Option<Uuid>,
     folder_ids: &[String],
     now: &str,
@@ -944,13 +891,12 @@ async fn write_folder_positions_mysql(
         sqlx::query(
             "UPDATE folders
              SET parent_id = ?, sort_order = ?, updated_at = ?
-             WHERE id = ? AND user_id = ?",
+             WHERE id = ?",
         )
         .bind(&parent_id_str)
         .bind(index as i64)
         .bind(now)
         .bind(folder_id)
-        .bind(user_id.to_string())
         .execute(&mut **tx)
         .await
         .map_err(box_err)?;
