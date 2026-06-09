@@ -126,18 +126,25 @@ async fn csrf_guard(
     }
 
     let headers = request.headers();
-    let origin_match = headers
-        .get(header::ORIGIN)
-        .and_then(|v| v.to_str().ok())
-        .map(|o| origins.allowed.iter().any(|a| a == o));
-    if origin_match == Some(true) {
-        return next.run(request).await;
+    // Accept the real browser Origin either directly (when the browser hit us
+    // straight) or via `X-Forwarded-Origin` (when the request came through the
+    // Next.js BFF — Node's undici fetch does not propagate Origin itself, so
+    // the BFF forwards the browser's value under this header). Same fallback
+    // for Referer.
+    let origin_header = headers
+        .get("x-forwarded-origin")
+        .or_else(|| headers.get(header::ORIGIN))
+        .and_then(|v| v.to_str().ok());
+    if let Some(o) = origin_header {
+        if origins.allowed.iter().any(|a| a == o) {
+            return next.run(request).await;
+        }
     }
-    // Some browsers strip Origin (e.g. on redirects, same-origin same-method
-    // navigations). Accept Referer with a matching origin as a fallback.
-    let referer_match = headers
-        .get(header::REFERER)
-        .and_then(|v| v.to_str().ok())
+    let referer_header = headers
+        .get("x-forwarded-referer")
+        .or_else(|| headers.get(header::REFERER))
+        .and_then(|v| v.to_str().ok());
+    let referer_match = referer_header
         .and_then(referer_origin)
         .map(|origin| origins.allowed.iter().any(|a| a == &origin));
     if referer_match == Some(true) {
@@ -148,10 +155,16 @@ async fn csrf_guard(
         method = %m,
         path = %request.uri().path(),
         origin = ?headers.get(header::ORIGIN),
+        x_forwarded_origin = ?headers.get("x-forwarded-origin"),
         referer = ?headers.get(header::REFERER),
+        x_forwarded_referer = ?headers.get("x-forwarded-referer"),
         "CSRF guard rejected state-changing request",
     );
-    (StatusCode::FORBIDDEN, "origin not allowed").into_response()
+    (
+        StatusCode::FORBIDDEN,
+        axum::Json(serde_json::json!({ "error": "origin_not_allowed" })),
+    )
+        .into_response()
 }
 
 /// Extract `scheme://host[:port]` from a Referer URL. Returns `None` for any

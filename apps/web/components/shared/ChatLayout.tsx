@@ -12,7 +12,9 @@ import { Plus } from "lucide-react";
 async function fetchSessions(): Promise<ChatSession[]> {
   try {
     const res = await fetch("/api/sessions");
-    return (await res.json()) as ChatSession[];
+    if (!res.ok) return [];
+    const data = (await res.json()) as unknown;
+    return Array.isArray(data) ? (data as ChatSession[]) : [];
   } catch {
     return [];
   }

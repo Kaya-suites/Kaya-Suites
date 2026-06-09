@@ -1,7 +1,6 @@
 import type { NextRequest } from "next/server";
-import { proxyError } from "@/lib/bff";
+import { proxyError, forwardHeaders , BACKEND_URL } from "@/lib/bff";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 // Proxies the SSE stream from the Rust backend so the browser doesn't need to
 // handle cross-origin streaming. Session cookie forwarding happens here too.
@@ -15,15 +14,11 @@ export async function POST(request: NextRequest): Promise<Response> {
   const message = body.message ?? "";
   const context = body.context;
 
-  const cookie = request.headers.get("cookie") ?? "";
   let upstream: globalThis.Response;
   try {
-    upstream = await fetch(`${API_URL}/sessions/${sessionId}/chat`, {
+    upstream = await fetch(`${BACKEND_URL}/sessions/${sessionId}/chat`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(cookie && { cookie }),
-      },
+      headers: forwardHeaders(request, { "Content-Type": "application/json" }),
       body: JSON.stringify({ message, context }),
     });
   } catch (err) {
