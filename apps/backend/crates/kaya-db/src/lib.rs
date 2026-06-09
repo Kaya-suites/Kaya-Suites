@@ -96,6 +96,30 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
     .await?;
     exec(pool, "CREATE INDEX IF NOT EXISTS documents_user_active ON documents (user_id, updated_at DESC) WHERE deleted_at IS NULL").await?;
 
+    // folders — referenced by documents.folder_id below
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS folders (
+            id          VARCHAR(36)  NOT NULL,
+            user_id     VARCHAR(36)  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name        TEXT         NOT NULL,
+            parent_id   VARCHAR(36)  REFERENCES folders(id) ON DELETE CASCADE,
+            sort_order  INTEGER      NOT NULL DEFAULT 0,
+            created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+            updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+            PRIMARY KEY (id)
+        )
+    ",
+    )
+    .await?;
+    exec(pool, "CREATE INDEX IF NOT EXISTS folders_user ON folders (user_id, parent_id, sort_order)").await?;
+
+    // Backfill columns added after the initial documents schema shipped.
+    exec(pool, "ALTER TABLE documents ADD COLUMN IF NOT EXISTS folder_id VARCHAR(36) REFERENCES folders(id) ON DELETE SET NULL").await?;
+    exec(pool, "ALTER TABLE documents ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0").await?;
+    exec(pool, "CREATE INDEX IF NOT EXISTS documents_user_folder_order ON documents (user_id, folder_id, sort_order)").await?;
+
     // document_versions
     exec(
         pool,
@@ -172,6 +196,11 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
     exec(
         pool,
         "CREATE INDEX IF NOT EXISTS chat_sessions_user ON chat_sessions (user_id, updated_at DESC)",
+    )
+    .await?;
+    exec(
+        pool,
+        "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE",
     )
     .await?;
 
