@@ -13,6 +13,7 @@ use sqlx::{
 use std::path::Path;
 use uuid::Uuid;
 
+use kaya_core::UserContext;
 use kaya_core::storage::{
     Chunk, ChunkHit, Document, Embedding, Folder, StorageAdapter, StorageError,
 };
@@ -25,6 +26,7 @@ use crate::document::sha256_hex;
 
 struct Inner {
     pool: SqlitePool,
+    user_context: UserContext,
 }
 
 // ── Adapter ───────────────────────────────────────────────────────────────────
@@ -38,8 +40,8 @@ pub struct SqliteAdapter {
 }
 
 impl SqliteAdapter {
-    /// Open (or create) the SQLite database at `db_path`.
-    pub async fn new(db_path: &Path) -> Result<Self, StorageError> {
+    /// Open (or create) the SQLite database at `db_path`, scoped to `user_context`.
+    pub async fn new(db_path: &Path, user_context: UserContext) -> Result<Self, StorageError> {
         let opts = SqliteConnectOptions::new()
             .filename(db_path)
             .create_if_missing(true)
@@ -53,17 +55,17 @@ impl SqliteAdapter {
         run_migrations(&pool).await?;
 
         Ok(Self {
-            inner: Arc::new(Inner { pool }),
+            inner: Arc::new(Inner { pool, user_context }),
         })
     }
 
-    /// Construct from an existing `SqlitePool`.
+    /// Construct from an existing `SqlitePool`, scoped to `user_context`.
     ///
     /// Migrations are run immediately (idempotent).
-    pub async fn from_pool(pool: SqlitePool) -> Result<Self, StorageError> {
+    pub async fn from_pool(pool: SqlitePool, user_context: UserContext) -> Result<Self, StorageError> {
         run_migrations(&pool).await?;
         Ok(Self {
-            inner: Arc::new(Inner { pool }),
+            inner: Arc::new(Inner { pool, user_context }),
         })
     }
 
@@ -72,6 +74,14 @@ impl SqliteAdapter {
     /// Idempotent — safe to call on every startup.
     pub async fn run_migrations(pool: &SqlitePool) -> Result<(), StorageError> {
         run_migrations(pool).await
+    }
+
+    fn user_id(&self) -> Uuid {
+        self.inner.user_context.user_id
+    }
+
+    fn user_id_str(&self) -> String {
+        self.user_id().to_string()
     }
 }
 
@@ -84,9 +94,10 @@ impl StorageAdapter for SqliteAdapter {
     async fn get_document(&self, id: Uuid) -> Result<Document, StorageError> {
         let id_str = id.to_string();
         let row = sqlx::query(
-            "SELECT frontmatter_json, body, deleted_at, folder_id, sort_order FROM documents WHERE id = ?",
+            "SELECT frontmatter_json, body, deleted_at, folder_id, sort_order FROM documents WHERE id = ? AND user_id = ?",
         )
         .bind(&id_str)
+        .bind(self.user_id_str())
         .fetch_optional(&self.inner.pool)
         .await
         .map_err(box_err)?;
@@ -115,15 +126,17 @@ impl StorageAdapter for SqliteAdapter {
 
     async fn save_document(&self, doc: &Document) -> Result<(), StorageError> {
         let hash = sha256_hex(doc.body.as_bytes());
-        upsert_document(&self.inner.pool, doc, &hash).await
+        upsert_document(&self.inner.pool, self.user_id(), doc, &hash).await
     }
 
     async fn delete_document(&self, id: Uuid) -> Result<(), StorageError> {
         let id_str = id.to_string();
+        let user_id_str = self.user_id_str();
         let row = sqlx::query(
-            "SELECT folder_id FROM documents WHERE id = ? AND deleted_at IS NULL",
+            "SELECT folder_id FROM documents WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
         )
         .bind(&id_str)
+        .bind(&user_id_str)
         .fetch_optional(&self.inner.pool)
         .await
         .map_err(box_err)?;
@@ -138,15 +151,16 @@ impl StorageAdapter for SqliteAdapter {
                 .map_err(box_err)?;
 
             let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
-            sqlx::query("UPDATE documents SET deleted_at = ? WHERE id = ?")
+            sqlx::query("UPDATE documents SET deleted_at = ? WHERE id = ? AND user_id = ?")
                 .bind(&now)
                 .bind(&id_str)
+                .bind(&user_id_str)
                 .execute(&mut *tx)
                 .await
                 .map_err(box_err)?;
             // Compact remaining siblings so no gaps accumulate.
-            let sibling_ids = list_doc_ids_sqlite(&mut *tx, folder_id, None).await?;
-            write_doc_positions_sqlite(&mut *tx, &sibling_ids, &now).await?;
+            let sibling_ids = list_doc_ids_sqlite(&mut *tx, self.user_id(), folder_id, None).await?;
+            write_doc_positions_sqlite(&mut *tx, self.user_id(), &sibling_ids, &now).await?;
             tx.commit().await.map_err(box_err)?;
         }
 
@@ -155,8 +169,9 @@ impl StorageAdapter for SqliteAdapter {
 
     async fn cleanup_deleted_document(&self, id: Uuid) -> Result<(), StorageError> {
         self.delete_chunks_for_document(id).await?;
-        sqlx::query("DELETE FROM chunk_embeddings WHERE document_id = ?")
+        sqlx::query("DELETE FROM chunk_embeddings WHERE document_id = ? AND user_id = ?")
             .bind(id.to_string())
+            .bind(self.user_id_str())
             .execute(&self.inner.pool)
             .await
             .map_err(box_err)?;
@@ -166,9 +181,10 @@ impl StorageAdapter for SqliteAdapter {
     async fn list_documents(&self) -> Result<Vec<Document>, StorageError> {
         let rows = sqlx::query(
             "SELECT frontmatter_json, body, folder_id, sort_order \
-             FROM documents WHERE deleted_at IS NULL \
+             FROM documents WHERE user_id = ? AND deleted_at IS NULL \
              ORDER BY sort_order ASC, updated_at DESC",
         )
+        .bind(self.user_id_str())
         .fetch_all(&self.inner.pool)
         .await
         .map_err(box_err)?;
@@ -195,12 +211,14 @@ impl StorageAdapter for SqliteAdapter {
         &self,
         folder_id: Option<Uuid>,
     ) -> Result<Vec<Document>, StorageError> {
+        let user_id_str = self.user_id_str();
         let rows = match folder_id {
             None => sqlx::query(
                 "SELECT frontmatter_json, body, folder_id, sort_order \
-                     FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL \
+                     FROM documents WHERE user_id = ? AND deleted_at IS NULL AND folder_id IS NULL \
                      ORDER BY sort_order ASC, updated_at DESC",
             )
+            .bind(&user_id_str)
             .fetch_all(&self.inner.pool)
             .await
             .map_err(box_err)?,
@@ -208,9 +226,10 @@ impl StorageAdapter for SqliteAdapter {
                 let fid_str = fid.to_string();
                 sqlx::query(
                     "SELECT frontmatter_json, body, folder_id, sort_order \
-                     FROM documents WHERE deleted_at IS NULL AND folder_id = ? \
+                     FROM documents WHERE user_id = ? AND deleted_at IS NULL AND folder_id = ? \
                      ORDER BY sort_order ASC, updated_at DESC",
                 )
+                .bind(&user_id_str)
                 .bind(&fid_str)
                 .fetch_all(&self.inner.pool)
                 .await
@@ -240,7 +259,7 @@ impl StorageAdapter for SqliteAdapter {
         &self,
         folder_id: Option<Uuid>,
     ) -> Result<i64, StorageError> {
-        next_doc_sort_order_sqlite(&self.inner.pool, folder_id).await
+        next_doc_sort_order_sqlite(&self.inner.pool, self.user_id(), folder_id).await
     }
 
     async fn move_document_to_folder(
@@ -249,13 +268,15 @@ impl StorageAdapter for SqliteAdapter {
         folder_id: Option<Uuid>,
     ) -> Result<(), StorageError> {
         let doc_id_str = doc_id.to_string();
+        let user_id_str = self.user_id_str();
         let now = chrono::Utc::now().to_rfc3339();
 
         // Read source folder before the transaction.
         let row = sqlx::query(
-            "SELECT folder_id FROM documents WHERE id = ? AND deleted_at IS NULL",
+            "SELECT folder_id FROM documents WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
         )
         .bind(&doc_id_str)
+        .bind(&user_id_str)
         .fetch_optional(&self.inner.pool)
         .await
         .map_err(box_err)?
@@ -272,30 +293,31 @@ impl StorageAdapter for SqliteAdapter {
         }
 
         // Place doc at the end of the destination (safe under SQLite's serialized writes).
-        let dest_sort_order = next_doc_sort_order_sqlite(&self.inner.pool, folder_id).await?;
+        let dest_sort_order = next_doc_sort_order_sqlite(&self.inner.pool, self.user_id(), folder_id).await?;
         let folder_id_str = folder_id.map(|id| id.to_string());
 
         let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
 
         sqlx::query(
             "UPDATE documents SET folder_id = ?, sort_order = ?, updated_at = ? \
-             WHERE id = ? AND deleted_at IS NULL",
+             WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
         )
         .bind(&folder_id_str)
         .bind(dest_sort_order)
         .bind(&now)
         .bind(&doc_id_str)
+        .bind(&user_id_str)
         .execute(&mut *tx)
         .await
         .map_err(box_err)?;
 
         // Compact the source folder (close the gap left by the removed document).
-        let src_ids = list_doc_ids_sqlite(&mut *tx, src_folder_id, None).await?;
-        write_doc_positions_sqlite(&mut *tx, &src_ids, &now).await?;
+        let src_ids = list_doc_ids_sqlite(&mut *tx, self.user_id(), src_folder_id, None).await?;
+        write_doc_positions_sqlite(&mut *tx, self.user_id(), &src_ids, &now).await?;
 
         // Compact the destination folder (ensures 0, 1, 2, … with no collisions).
-        let dest_ids = list_doc_ids_sqlite(&mut *tx, folder_id, None).await?;
-        write_doc_positions_sqlite(&mut *tx, &dest_ids, &now).await?;
+        let dest_ids = list_doc_ids_sqlite(&mut *tx, self.user_id(), folder_id, None).await?;
+        write_doc_positions_sqlite(&mut *tx, self.user_id(), &dest_ids, &now).await?;
 
         tx.commit().await.map_err(box_err)?;
         Ok(())
@@ -310,9 +332,10 @@ impl StorageAdapter for SqliteAdapter {
         let now = chrono::Utc::now().to_rfc3339();
 
         let folder_id_str: Option<String> = sqlx::query(
-            "SELECT folder_id FROM documents WHERE id = ? AND deleted_at IS NULL",
+            "SELECT folder_id FROM documents WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
         )
         .bind(&doc_id_str)
+        .bind(self.user_id_str())
         .fetch_optional(&self.inner.pool)
         .await
         .map_err(box_err)?
@@ -327,10 +350,10 @@ impl StorageAdapter for SqliteAdapter {
             .map_err(box_err)?;
 
         let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
-        let mut sibling_ids = list_doc_ids_sqlite(&mut *tx, folder_id, Some(doc_id)).await?;
+        let mut sibling_ids = list_doc_ids_sqlite(&mut *tx, self.user_id(), folder_id, Some(doc_id)).await?;
         let insert_at = new_index.min(sibling_ids.len());
         sibling_ids.insert(insert_at, doc_id_str);
-        write_doc_positions_sqlite(&mut *tx, &sibling_ids, &now).await?;
+        write_doc_positions_sqlite(&mut *tx, self.user_id(), &sibling_ids, &now).await?;
         tx.commit().await.map_err(box_err)?;
 
         Ok(())
@@ -349,13 +372,14 @@ impl StorageAdapter for SqliteAdapter {
         let id_str = id.to_string();
         let parent_id_str = parent_id.map(|p| p.to_string());
         let now = chrono::Utc::now().to_rfc3339();
-        let sort_order = next_folder_sort_order_sqlite(&self.inner.pool, parent_id).await?;
+        let sort_order = next_folder_sort_order_sqlite(&self.inner.pool, self.user_id(), parent_id).await?;
 
         sqlx::query(
-            "INSERT INTO folders (id, name, parent_id, sort_order, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO folders (id, user_id, name, parent_id, sort_order, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id_str)
+        .bind(self.user_id_str())
         .bind(name)
         .bind(&parent_id_str)
         .bind(sort_order)
@@ -378,9 +402,10 @@ impl StorageAdapter for SqliteAdapter {
     async fn get_folder(&self, id: Uuid) -> Result<Folder, StorageError> {
         let id_str = id.to_string();
         let row = sqlx::query(
-            "SELECT id, name, parent_id, sort_order, created_at, updated_at FROM folders WHERE id = ?",
+            "SELECT id, name, parent_id, sort_order, created_at, updated_at FROM folders WHERE id = ? AND user_id = ?",
         )
         .bind(&id_str)
+        .bind(self.user_id_str())
         .fetch_optional(&self.inner.pool)
         .await
         .map_err(box_err)?;
@@ -393,8 +418,10 @@ impl StorageAdapter for SqliteAdapter {
         let rows = sqlx::query(
             "SELECT id, name, parent_id, sort_order, created_at, updated_at
              FROM folders
+             WHERE user_id = ?
              ORDER BY COALESCE(parent_id, ''), sort_order ASC, name ASC, created_at ASC",
         )
+        .bind(self.user_id_str())
         .fetch_all(&self.inner.pool)
         .await
         .map_err(box_err)?;
@@ -408,10 +435,11 @@ impl StorageAdapter for SqliteAdapter {
         let id_str = id.to_string();
         let now = chrono::Utc::now().to_rfc3339();
 
-        let affected = sqlx::query("UPDATE folders SET name = ?, updated_at = ? WHERE id = ?")
+        let affected = sqlx::query("UPDATE folders SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?")
             .bind(name)
             .bind(&now)
             .bind(&id_str)
+            .bind(self.user_id_str())
             .execute(&self.inner.pool)
             .await
             .map_err(box_err)?
@@ -440,14 +468,14 @@ impl StorageAdapter for SqliteAdapter {
         let now = chrono::Utc::now().to_rfc3339();
         let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
 
-        let mut target_ids = list_folder_ids_sqlite(&mut *tx, new_parent_id, Some(id)).await?;
+        let mut target_ids = list_folder_ids_sqlite(&mut *tx, self.user_id(), new_parent_id, Some(id)).await?;
         let insert_at = new_index.unwrap_or(target_ids.len()).min(target_ids.len());
         target_ids.insert(insert_at, id_str.clone());
-        write_folder_positions_sqlite(&mut *tx, new_parent_id, &target_ids, &now).await?;
+        write_folder_positions_sqlite(&mut *tx, self.user_id(), new_parent_id, &target_ids, &now).await?;
 
         if current_parent != new_parent_id {
-            let previous_ids = list_folder_ids_sqlite(&mut *tx, current_parent, Some(id)).await?;
-            write_folder_positions_sqlite(&mut *tx, current_parent, &previous_ids, &now).await?;
+            let previous_ids = list_folder_ids_sqlite(&mut *tx, self.user_id(), current_parent, Some(id)).await?;
+            write_folder_positions_sqlite(&mut *tx, self.user_id(), current_parent, &previous_ids, &now).await?;
         }
 
         tx.commit().await.map_err(box_err)?;
@@ -456,6 +484,7 @@ impl StorageAdapter for SqliteAdapter {
 
     async fn delete_folder(&self, id: Uuid) -> Result<(), StorageError> {
         let id_str = id.to_string();
+        let user_id_str = self.user_id_str();
         let now = chrono::Utc::now().to_rfc3339();
         let folder = self.get_folder(id).await?;
         let mut tx = self.inner.pool.begin().await.map_err(box_err)?;
@@ -465,8 +494,9 @@ impl StorageAdapter for SqliteAdapter {
         // to the end before the compaction step re-sequences everything.
         let root_max: i64 = sqlx::query_scalar(
             "SELECT COALESCE(MAX(sort_order), -1) \
-             FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL",
+             FROM documents WHERE user_id = ? AND deleted_at IS NULL AND folder_id IS NULL",
         )
+        .bind(&user_id_str)
         .fetch_one(&mut *tx)
         .await
         .map_err(box_err)?;
@@ -474,27 +504,29 @@ impl StorageAdapter for SqliteAdapter {
         sqlx::query(
             "UPDATE documents \
              SET folder_id = NULL, sort_order = sort_order + ?, updated_at = ? \
-             WHERE folder_id = ? AND deleted_at IS NULL",
+             WHERE folder_id = ? AND user_id = ? AND deleted_at IS NULL",
         )
         .bind(root_max + 1)
         .bind(&now)
         .bind(&id_str)
+        .bind(&user_id_str)
         .execute(&mut *tx)
         .await
         .map_err(box_err)?;
 
         // Compact root documents to 0, 1, 2, … (no gaps or duplicate values).
-        let root_ids = list_doc_ids_sqlite(&mut *tx, None, None).await?;
-        write_doc_positions_sqlite(&mut *tx, &root_ids, &now).await?;
+        let root_ids = list_doc_ids_sqlite(&mut *tx, self.user_id(), None, None).await?;
+        write_doc_positions_sqlite(&mut *tx, self.user_id(), &root_ids, &now).await?;
 
         let mut parent_children =
-            list_folder_ids_sqlite(&mut *tx, folder.parent_id, Some(id)).await?;
-        let child_ids = list_folder_ids_sqlite(&mut *tx, Some(id), None).await?;
+            list_folder_ids_sqlite(&mut *tx, self.user_id(), folder.parent_id, Some(id)).await?;
+        let child_ids = list_folder_ids_sqlite(&mut *tx, self.user_id(), Some(id), None).await?;
         parent_children.extend(child_ids);
-        write_folder_positions_sqlite(&mut *tx, folder.parent_id, &parent_children, &now).await?;
+        write_folder_positions_sqlite(&mut *tx, self.user_id(), folder.parent_id, &parent_children, &now).await?;
 
-        let affected = sqlx::query("DELETE FROM folders WHERE id = ?")
+        let affected = sqlx::query("DELETE FROM folders WHERE id = ? AND user_id = ?")
             .bind(&id_str)
+            .bind(&user_id_str)
             .execute(&mut *tx)
             .await
             .map_err(box_err)?
@@ -512,13 +544,15 @@ impl StorageAdapter for SqliteAdapter {
 
     async fn save_chunk(&self, chunk: &Chunk) -> Result<(), StorageError> {
         let doc_id = chunk.document_id.to_string();
+        let user_id_str = self.user_id_str();
         let content_hash = sha256_hex(chunk.content.as_bytes());
 
         sqlx::query(
             "INSERT OR REPLACE INTO chunks
-             (document_id, paragraph_id, ordinal, content, content_hash)
-             VALUES (?, ?, ?, ?, ?)",
+             (user_id, document_id, paragraph_id, ordinal, content, content_hash)
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
+        .bind(&user_id_str)
         .bind(&doc_id)
         .bind(&chunk.paragraph_id)
         .bind(chunk.ordinal as i64)
@@ -529,7 +563,9 @@ impl StorageAdapter for SqliteAdapter {
         .map_err(box_err)?;
 
         // FTS5 does not support UPSERT; we rely on delete_chunks_for_document
-        // being called before save_chunk when re-indexing.
+        // being called before save_chunk when re-indexing. The FTS table is
+        // intentionally user-id-free (no isolation needed — JOINs to chunks
+        // filter on user_id).
         sqlx::query(
             "INSERT INTO chunk_fts (content, document_id, paragraph_id, ordinal)
              VALUES (?, ?, ?, ?)",
@@ -547,9 +583,11 @@ impl StorageAdapter for SqliteAdapter {
 
     async fn delete_chunks_for_document(&self, document_id: Uuid) -> Result<(), StorageError> {
         let doc_id = document_id.to_string();
+        let user_id_str = self.user_id_str();
 
-        sqlx::query("DELETE FROM chunks WHERE document_id = ?")
+        sqlx::query("DELETE FROM chunks WHERE document_id = ? AND user_id = ?")
             .bind(&doc_id)
+            .bind(&user_id_str)
             .execute(&self.inner.pool)
             .await
             .map_err(box_err)?;
@@ -569,8 +607,9 @@ impl StorageAdapter for SqliteAdapter {
     ) -> Result<Vec<(String, String)>, StorageError> {
         let doc_id = document_id.to_string();
         let rows =
-            sqlx::query("SELECT paragraph_id, content_hash FROM chunks WHERE document_id = ?")
+            sqlx::query("SELECT paragraph_id, content_hash FROM chunks WHERE document_id = ? AND user_id = ?")
                 .bind(&doc_id)
+                .bind(self.user_id_str())
                 .fetch_all(&self.inner.pool)
                 .await
                 .map_err(box_err)?;
@@ -594,11 +633,13 @@ impl StorageAdapter for SqliteAdapter {
              FROM chunk_fts fts
              JOIN documents d ON d.id = fts.document_id
              WHERE chunk_fts MATCH ?
+               AND d.user_id = ?
                AND d.deleted_at IS NULL
              ORDER BY rank
              LIMIT ?",
         )
         .bind(query)
+        .bind(self.user_id_str())
         .bind(limit as i64)
         .fetch_all(&self.inner.pool)
         .await
@@ -628,9 +669,10 @@ impl StorageAdapter for SqliteAdapter {
         let blob = encode_f32(&embedding.vector);
 
         sqlx::query(
-            "INSERT OR REPLACE INTO chunk_embeddings (document_id, paragraph_id, vector)
-             VALUES (?, ?, ?)",
+            "INSERT OR REPLACE INTO chunk_embeddings (user_id, document_id, paragraph_id, vector)
+             VALUES (?, ?, ?, ?)",
         )
+        .bind(self.user_id_str())
         .bind(&doc_id)
         .bind(&embedding.paragraph_id)
         .bind(&blob)
@@ -650,10 +692,12 @@ impl StorageAdapter for SqliteAdapter {
             return Ok(());
         }
         let doc_id = document_id.to_string();
+        let user_id_str = self.user_id_str();
         for para_id in paragraph_ids {
-            sqlx::query("DELETE FROM chunk_embeddings WHERE document_id = ? AND paragraph_id = ?")
+            sqlx::query("DELETE FROM chunk_embeddings WHERE document_id = ? AND paragraph_id = ? AND user_id = ?")
                 .bind(&doc_id)
                 .bind(para_id)
+                .bind(&user_id_str)
                 .execute(&self.inner.pool)
                 .await
                 .map_err(box_err)?;
@@ -677,10 +721,13 @@ impl StorageAdapter for SqliteAdapter {
              JOIN chunks c
                ON c.document_id = ce.document_id
               AND c.paragraph_id = ce.paragraph_id
+              AND c.user_id = ce.user_id
              JOIN documents d
                ON d.id = ce.document_id
-             WHERE d.deleted_at IS NULL",
+              AND d.user_id = ce.user_id
+             WHERE ce.user_id = ? AND d.deleted_at IS NULL",
         )
+        .bind(self.user_id_str())
         .fetch_all(&self.inner.pool)
         .await
         .map_err(box_err)?;
@@ -718,178 +765,130 @@ impl StorageAdapter for SqliteAdapter {
 
 // ── Migrations ────────────────────────────────────────────────────────────────
 
+/// Sentinel "local" user used to backfill rows from legacy single-user SQLite
+/// databases that pre-date the user_id column. New deploys never see this user
+/// because rows are always written with the authenticated session's user_id.
+const LEGACY_LOCAL_USER_ID: &str = "00000000-0000-0000-0000-000000000001";
+
 async fn run_migrations(pool: &SqlitePool) -> Result<(), StorageError> {
-    // Document store — body is the source of truth; no path column.
+    // ── documents ──────────────────────────────────────────────────────────────
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS documents (
-            id               TEXT PRIMARY KEY,
+            id               TEXT NOT NULL,
+            user_id          TEXT NOT NULL,
             title            TEXT NOT NULL,
             frontmatter_json TEXT NOT NULL,
             content_hash     TEXT NOT NULL,
             updated_at       TEXT NOT NULL,
             deleted_at       TEXT,
-            body             TEXT NOT NULL DEFAULT ''
+            body             TEXT NOT NULL DEFAULT '',
+            folder_id        TEXT,
+            sort_order       INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (id)
         )",
     )
     .execute(pool)
     .await
     .map_err(box_err)?;
-
-    // If the table was created by the old schema (which had `path NOT NULL UNIQUE`),
-    // migrate to the new schema by recreating the table without the path column.
-    let has_path: bool = sqlx::query_scalar::<_, i32>(
-        "SELECT COUNT(*) FROM pragma_table_info('documents') WHERE name='path'",
-    )
-    .fetch_one(pool)
-    .await
-    .unwrap_or(0)
-        > 0;
-
-    if has_path {
-        sqlx::query("ALTER TABLE documents RENAME TO _documents_old")
-            .execute(pool)
-            .await
-            .map_err(box_err)?;
-        sqlx::query(
-            "CREATE TABLE documents (
-                id               TEXT PRIMARY KEY,
-                title            TEXT NOT NULL,
-                frontmatter_json TEXT NOT NULL,
-                content_hash     TEXT NOT NULL,
-                updated_at       TEXT NOT NULL,
-                deleted_at       TEXT,
-                body             TEXT NOT NULL DEFAULT ''
-            )",
-        )
-        .execute(pool)
-        .await
-        .map_err(box_err)?;
-        sqlx::query(
-            "INSERT INTO documents (id, title, frontmatter_json, content_hash, updated_at, deleted_at, body)
-             SELECT id, title, frontmatter_json, content_hash, updated_at, deleted_at,
-                    COALESCE(body, '') FROM _documents_old",
-        )
-        .execute(pool)
-        .await
-        .map_err(box_err)?;
-        sqlx::query("DROP TABLE _documents_old")
-            .execute(pool)
-            .await
-            .map_err(box_err)?;
-    }
-
-    // Add body column to databases that pre-date this migration (no-op if exists).
+    // Backfill columns on databases that pre-date them. ADD COLUMN is idempotent
+    // when the column already exists (we ignore the error).
     let _ = sqlx::query("ALTER TABLE documents ADD COLUMN body TEXT NOT NULL DEFAULT ''")
-        .execute(pool)
-        .await;
-
-    // Add folder_id column to databases that pre-date this migration (no-op if exists).
+        .execute(pool).await;
     let _ = sqlx::query("ALTER TABLE documents ADD COLUMN folder_id TEXT")
-        .execute(pool)
-        .await;
+        .execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE documents ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        .execute(pool).await;
+    // Legacy single-user DBs lack user_id entirely. Add it and backfill with the
+    // sentinel local user. New deploys are no-ops here.
+    let _ = sqlx::query(&format!(
+        "ALTER TABLE documents ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LEGACY_LOCAL_USER_ID}'"
+    ))
+    .execute(pool)
+    .await;
 
-    // Folders table for hierarchical document grouping.
+    // ── folders ────────────────────────────────────────────────────────────────
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS folders (
-            id         TEXT PRIMARY KEY,
+            id         TEXT NOT NULL,
+            user_id    TEXT NOT NULL,
             name       TEXT NOT NULL,
             parent_id  TEXT,
             sort_order INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
+            PRIMARY KEY (id),
             FOREIGN KEY (parent_id) REFERENCES folders(id)
         )",
     )
     .execute(pool)
     .await
     .map_err(box_err)?;
-
     let _ = sqlx::query("ALTER TABLE folders ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
-        .execute(pool)
-        .await;
+        .execute(pool).await;
+    let _ = sqlx::query(&format!(
+        "ALTER TABLE folders ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LEGACY_LOCAL_USER_ID}'"
+    ))
+    .execute(pool)
+    .await;
 
     sqlx::query(
-        "CREATE INDEX IF NOT EXISTS folders_parent_sort_idx
-         ON folders (parent_id, sort_order)",
+        "CREATE INDEX IF NOT EXISTS folders_user_parent_sort_idx \
+         ON folders (user_id, parent_id, sort_order)",
     )
-    .execute(pool)
-    .await
-    .map_err(box_err)?;
+    .execute(pool).await.map_err(box_err)?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS documents_user_folder_sort_idx \
+         ON documents (user_id, folder_id, sort_order)",
+    )
+    .execute(pool).await.map_err(box_err)?;
 
+    // ── Sort-order normalization (per user) ────────────────────────────────────
+    // Idempotent: repairs gaps/collisions left by older code that didn't compact.
     sqlx::query(
         "WITH ranked AS (
-            SELECT
-                id,
-                ROW_NUMBER() OVER (
-                    PARTITION BY COALESCE(parent_id, '__root__')
-                    ORDER BY sort_order ASC, name ASC, created_at ASC, id ASC
-                ) - 1 AS rn
+            SELECT id, ROW_NUMBER() OVER (
+                PARTITION BY user_id, COALESCE(parent_id, '__root__')
+                ORDER BY sort_order ASC, name ASC, created_at ASC, id ASC
+            ) - 1 AS rn
             FROM folders
         )
-        UPDATE folders
-        SET sort_order = (
-            SELECT ranked.rn
-            FROM ranked
-            WHERE ranked.id = folders.id
-        )",
+        UPDATE folders SET sort_order = (SELECT ranked.rn FROM ranked WHERE ranked.id = folders.id)",
     )
-    .execute(pool)
-    .await
-    .map_err(box_err)?;
-
-    // ── Documents: sort_order column ──────────────────────────────────────────
-
-    // Add column if this DB pre-dates the sort_order feature (no-op if exists).
-    let _ = sqlx::query("ALTER TABLE documents ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
-        .execute(pool)
-        .await;
-
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS documents_folder_sort_idx
-         ON documents (folder_id, sort_order)",
-    )
-    .execute(pool)
-    .await
-    .map_err(box_err)?;
-
-    // Normalize document sort_orders on every startup. This is idempotent when
-    // orders are already sequential; it repairs gaps and collisions caused by
-    // pre-migration data or the old move_document_to_folder that didn't compact.
+    .execute(pool).await.map_err(box_err)?;
     sqlx::query(
         "WITH ranked AS (
-            SELECT
-                id,
-                ROW_NUMBER() OVER (
-                    PARTITION BY COALESCE(folder_id, '__root__')
-                    ORDER BY sort_order ASC, updated_at DESC, id ASC
-                ) - 1 AS rn
-            FROM documents
-            WHERE deleted_at IS NULL
+            SELECT id, ROW_NUMBER() OVER (
+                PARTITION BY user_id, COALESCE(folder_id, '__root__')
+                ORDER BY sort_order ASC, updated_at DESC, id ASC
+            ) - 1 AS rn
+            FROM documents WHERE deleted_at IS NULL
         )
-        UPDATE documents
-        SET sort_order = (SELECT ranked.rn FROM ranked WHERE ranked.id = documents.id)
+        UPDATE documents SET sort_order = (SELECT ranked.rn FROM ranked WHERE ranked.id = documents.id)
         WHERE deleted_at IS NULL",
     )
-    .execute(pool)
-    .await
-    .map_err(box_err)?;
+    .execute(pool).await.map_err(box_err)?;
 
-    // Chunk metadata + content hashes (FR-6)
+    // ── chunks ─────────────────────────────────────────────────────────────────
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS chunks (
+            user_id      TEXT NOT NULL,
             document_id  TEXT NOT NULL,
             paragraph_id TEXT NOT NULL,
             ordinal      INTEGER NOT NULL,
             content      TEXT NOT NULL,
             content_hash TEXT NOT NULL,
-            PRIMARY KEY (document_id, paragraph_id)
+            PRIMARY KEY (user_id, document_id, paragraph_id)
         )",
     )
-    .execute(pool)
-    .await
-    .map_err(box_err)?;
+    .execute(pool).await.map_err(box_err)?;
+    let _ = sqlx::query(&format!(
+        "ALTER TABLE chunks ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LEGACY_LOCAL_USER_ID}'"
+    ))
+    .execute(pool).await;
 
-    // FTS5 full-text index for BM25 retrieval (FR-7)
+    // ── chunk_fts ──────────────────────────────────────────────────────────────
+    // FTS5 stays user-id-less; isolation comes from JOINs against `chunks` /
+    // `documents` which carry user_id.
     sqlx::query(
         "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
             content,
@@ -899,42 +898,47 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), StorageError> {
             tokenize     = 'unicode61'
         )",
     )
-    .execute(pool)
-    .await
-    .map_err(box_err)?;
+    .execute(pool).await.map_err(box_err)?;
 
-    // Vector embeddings stored as packed-f32 BLOBs (little-endian).
+    // ── chunk_embeddings ───────────────────────────────────────────────────────
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS chunk_embeddings (
+            user_id      TEXT NOT NULL,
             document_id  TEXT NOT NULL,
             paragraph_id TEXT NOT NULL,
             vector       BLOB NOT NULL,
-            PRIMARY KEY (document_id, paragraph_id)
+            PRIMARY KEY (user_id, document_id, paragraph_id)
         )",
     )
-    .execute(pool)
-    .await
-    .map_err(box_err)?;
+    .execute(pool).await.map_err(box_err)?;
+    let _ = sqlx::query(&format!(
+        "ALTER TABLE chunk_embeddings ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LEGACY_LOCAL_USER_ID}'"
+    ))
+    .execute(pool).await;
 
     Ok(())
 }
 
 async fn next_doc_sort_order_sqlite(
     pool: &SqlitePool,
+    user_id: Uuid,
     folder_id: Option<Uuid>,
 ) -> Result<i64, StorageError> {
+    let user_id_str = user_id.to_string();
     let row = match folder_id {
         None => sqlx::query(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort \
-             FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL",
+             FROM documents WHERE user_id = ? AND deleted_at IS NULL AND folder_id IS NULL",
         )
+        .bind(&user_id_str)
         .fetch_one(pool)
         .await
         .map_err(box_err)?,
         Some(fid) => sqlx::query(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort \
-             FROM documents WHERE deleted_at IS NULL AND folder_id = ?",
+             FROM documents WHERE user_id = ? AND deleted_at IS NULL AND folder_id = ?",
         )
+        .bind(&user_id_str)
         .bind(fid.to_string())
         .fetch_one(pool)
         .await
@@ -945,39 +949,45 @@ async fn next_doc_sort_order_sqlite(
 
 async fn list_doc_ids_sqlite(
     executor: &mut sqlx::SqliteConnection,
+    user_id: Uuid,
     folder_id: Option<Uuid>,
     exclude_id: Option<Uuid>,
 ) -> Result<Vec<String>, StorageError> {
+    let user_id_str = user_id.to_string();
     let rows = match (folder_id, exclude_id) {
         (Some(fid), Some(excl)) => sqlx::query(
-            "SELECT id FROM documents WHERE deleted_at IS NULL AND folder_id = ? AND id != ? \
+            "SELECT id FROM documents WHERE user_id = ? AND deleted_at IS NULL AND folder_id = ? AND id != ? \
              ORDER BY sort_order ASC, updated_at DESC",
         )
+        .bind(&user_id_str)
         .bind(fid.to_string())
         .bind(excl.to_string())
         .fetch_all(&mut *executor)
         .await
         .map_err(box_err)?,
         (Some(fid), None) => sqlx::query(
-            "SELECT id FROM documents WHERE deleted_at IS NULL AND folder_id = ? \
+            "SELECT id FROM documents WHERE user_id = ? AND deleted_at IS NULL AND folder_id = ? \
              ORDER BY sort_order ASC, updated_at DESC",
         )
+        .bind(&user_id_str)
         .bind(fid.to_string())
         .fetch_all(&mut *executor)
         .await
         .map_err(box_err)?,
         (None, Some(excl)) => sqlx::query(
-            "SELECT id FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL AND id != ? \
+            "SELECT id FROM documents WHERE user_id = ? AND deleted_at IS NULL AND folder_id IS NULL AND id != ? \
              ORDER BY sort_order ASC, updated_at DESC",
         )
+        .bind(&user_id_str)
         .bind(excl.to_string())
         .fetch_all(&mut *executor)
         .await
         .map_err(box_err)?,
         (None, None) => sqlx::query(
-            "SELECT id FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL \
+            "SELECT id FROM documents WHERE user_id = ? AND deleted_at IS NULL AND folder_id IS NULL \
              ORDER BY sort_order ASC, updated_at DESC",
         )
+        .bind(&user_id_str)
         .fetch_all(&mut *executor)
         .await
         .map_err(box_err)?,
@@ -990,14 +1000,17 @@ async fn list_doc_ids_sqlite(
 
 async fn write_doc_positions_sqlite(
     executor: &mut sqlx::SqliteConnection,
+    user_id: Uuid,
     doc_ids: &[String],
     now: &str,
 ) -> Result<(), StorageError> {
+    let user_id_str = user_id.to_string();
     for (index, doc_id) in doc_ids.iter().enumerate() {
-        sqlx::query("UPDATE documents SET sort_order = ?, updated_at = ? WHERE id = ?")
+        sqlx::query("UPDATE documents SET sort_order = ?, updated_at = ? WHERE id = ? AND user_id = ?")
             .bind(index as i64)
             .bind(now)
             .bind(doc_id)
+            .bind(&user_id_str)
             .execute(&mut *executor)
             .await
             .map_err(box_err)?;
@@ -1007,14 +1020,17 @@ async fn write_doc_positions_sqlite(
 
 async fn next_folder_sort_order_sqlite(
     pool: &SqlitePool,
+    user_id: Uuid,
     parent_id: Option<Uuid>,
 ) -> Result<i64, StorageError> {
+    let user_id_str = user_id.to_string();
     let row = match parent_id {
         Some(parent_id) => sqlx::query(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort
              FROM folders
-             WHERE parent_id = ?",
+             WHERE user_id = ? AND parent_id = ?",
         )
+        .bind(&user_id_str)
         .bind(parent_id.to_string())
         .fetch_one(pool)
         .await
@@ -1022,8 +1038,9 @@ async fn next_folder_sort_order_sqlite(
         None => sqlx::query(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort
              FROM folders
-             WHERE parent_id IS NULL",
+             WHERE user_id = ? AND parent_id IS NULL",
         )
+        .bind(&user_id_str)
         .fetch_one(pool)
         .await
         .map_err(box_err)?,
@@ -1034,16 +1051,19 @@ async fn next_folder_sort_order_sqlite(
 
 async fn list_folder_ids_sqlite(
     executor: &mut sqlx::SqliteConnection,
+    user_id: Uuid,
     parent_id: Option<Uuid>,
     exclude_id: Option<Uuid>,
 ) -> Result<Vec<String>, StorageError> {
+    let user_id_str = user_id.to_string();
     let rows = match (parent_id, exclude_id) {
         (Some(parent_id), Some(exclude_id)) => sqlx::query(
             "SELECT id
              FROM folders
-             WHERE parent_id = ? AND id != ?
+             WHERE user_id = ? AND parent_id = ? AND id != ?
              ORDER BY sort_order ASC, name ASC, created_at ASC",
         )
+        .bind(&user_id_str)
         .bind(parent_id.to_string())
         .bind(exclude_id.to_string())
         .fetch_all(&mut *executor)
@@ -1052,9 +1072,10 @@ async fn list_folder_ids_sqlite(
         (Some(parent_id), None) => sqlx::query(
             "SELECT id
              FROM folders
-             WHERE parent_id = ?
+             WHERE user_id = ? AND parent_id = ?
              ORDER BY sort_order ASC, name ASC, created_at ASC",
         )
+        .bind(&user_id_str)
         .bind(parent_id.to_string())
         .fetch_all(&mut *executor)
         .await
@@ -1062,9 +1083,10 @@ async fn list_folder_ids_sqlite(
         (None, Some(exclude_id)) => sqlx::query(
             "SELECT id
              FROM folders
-             WHERE parent_id IS NULL AND id != ?
+             WHERE user_id = ? AND parent_id IS NULL AND id != ?
              ORDER BY sort_order ASC, name ASC, created_at ASC",
         )
+        .bind(&user_id_str)
         .bind(exclude_id.to_string())
         .fetch_all(&mut *executor)
         .await
@@ -1072,9 +1094,10 @@ async fn list_folder_ids_sqlite(
         (None, None) => sqlx::query(
             "SELECT id
              FROM folders
-             WHERE parent_id IS NULL
+             WHERE user_id = ? AND parent_id IS NULL
              ORDER BY sort_order ASC, name ASC, created_at ASC",
         )
+        .bind(&user_id_str)
         .fetch_all(&mut *executor)
         .await
         .map_err(box_err)?,
@@ -1087,22 +1110,25 @@ async fn list_folder_ids_sqlite(
 
 async fn write_folder_positions_sqlite(
     executor: &mut sqlx::SqliteConnection,
+    user_id: Uuid,
     parent_id: Option<Uuid>,
     folder_ids: &[String],
     now: &str,
 ) -> Result<(), StorageError> {
     let parent_id_str = parent_id.map(|id| id.to_string());
+    let user_id_str = user_id.to_string();
 
     for (index, folder_id) in folder_ids.iter().enumerate() {
         sqlx::query(
             "UPDATE folders
              SET parent_id = ?, sort_order = ?, updated_at = ?
-             WHERE id = ?",
+             WHERE id = ? AND user_id = ?",
         )
         .bind(&parent_id_str)
         .bind(index as i64)
         .bind(now)
         .bind(folder_id)
+        .bind(&user_id_str)
         .execute(&mut *executor)
         .await
         .map_err(box_err)?;
@@ -1115,18 +1141,20 @@ async fn write_folder_positions_sqlite(
 
 async fn upsert_document(
     pool: &SqlitePool,
+    user_id: Uuid,
     doc: &Document,
     hash: &str,
 ) -> Result<(), StorageError> {
     let id_str = doc.id.to_string();
+    let user_id_str = user_id.to_string();
     let fm_json = serde_json::to_string(&doc).map_err(box_err)?;
     let now = chrono::Utc::now().to_rfc3339();
     let folder_id_str = doc.folder_id.map(|id| id.to_string());
-    let sort_order = next_doc_sort_order_sqlite(pool, doc.folder_id).await?;
+    let sort_order = next_doc_sort_order_sqlite(pool, user_id, doc.folder_id).await?;
 
     sqlx::query(
-        "INSERT INTO documents (id, title, frontmatter_json, content_hash, updated_at, deleted_at, body, folder_id, sort_order)
-         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
+        "INSERT INTO documents (id, user_id, title, frontmatter_json, content_hash, updated_at, deleted_at, body, folder_id, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            title            = excluded.title,
            frontmatter_json = excluded.frontmatter_json,
@@ -1137,6 +1165,7 @@ async fn upsert_document(
            folder_id        = excluded.folder_id",
     )
     .bind(&id_str)
+    .bind(&user_id_str)
     .bind(&doc.title)
     .bind(&fm_json)
     .bind(hash)

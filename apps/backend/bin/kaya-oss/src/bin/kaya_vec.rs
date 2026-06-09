@@ -109,7 +109,15 @@ async fn main() -> anyhow::Result<()> {
         Command::Inspect => run_inspect(&pool).await,
         Command::Reindex { doc } => {
             let router = load_router(&cli.config)?;
-            let storage = SqliteAdapter::from_pool(pool.clone())
+            // CLI utility runs as the local sentinel user — the same id used by
+            // legacy single-user databases — so it can see all rows.
+            let sentinel = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001")
+                .expect("static UUID");
+            let user_ctx = kaya_core::UserContext {
+                tenant_id: sentinel,
+                user_id: sentinel,
+            };
+            let storage = SqliteAdapter::from_pool(pool.clone(), user_ctx)
                 .await
                 .context("failed to create storage adapter")?;
             run_reindex(Arc::new(storage), Arc::new(router), doc).await

@@ -45,8 +45,8 @@ pub async fn build_user_adapters(
             Arc::new(PostgresSessionStorage::new(pg.clone(), user_ctx.user_id)),
         )),
         DbBackend::Sqlite(sqlite) => {
-            let adapter = SqliteAdapter::from_pool(sqlite.clone()).await?;
-            let sess = SqliteSessionStorage::new(sqlite.clone());
+            let adapter = SqliteAdapter::from_pool(sqlite.clone(), user_ctx.clone()).await?;
+            let sess = SqliteSessionStorage::new(sqlite.clone(), user_ctx.user_id);
             Ok((Arc::new(adapter), Arc::new(sess)))
         }
         DbBackend::Mysql(mysql) => Ok((

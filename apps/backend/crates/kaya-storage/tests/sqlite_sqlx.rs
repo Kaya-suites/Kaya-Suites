@@ -3,12 +3,18 @@
 // sqlx::test creates a fresh SQLite database per test and applies the migration
 // automatically — no DATABASE_URL required.
 
+use kaya_core::UserContext;
 use kaya_core::storage::{Chunk, Document, Embedding, StorageAdapter, StorageError};
 use kaya_storage::{SQLITE_MIGRATOR, SqliteAdapter};
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn test_user_ctx() -> UserContext {
+    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    UserContext { tenant_id: id, user_id: id }
+}
 
 fn make_doc() -> Document {
     Document {
@@ -29,7 +35,7 @@ fn make_doc() -> Document {
 /// save_document + get_document round-trip preserves all fields.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn round_trip(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
     let doc = make_doc();
     adapter.save_document(&doc).await.unwrap();
 
@@ -44,7 +50,7 @@ async fn round_trip(pool: SqlitePool) {
 /// list_documents returns saved documents and excludes deleted ones.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn list_excludes_deleted(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
 
     let doc_a = make_doc();
     let doc_b = make_doc();
@@ -60,7 +66,7 @@ async fn list_excludes_deleted(pool: SqlitePool) {
 /// get_document on a deleted ID returns NotFound.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn get_deleted_returns_not_found(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
     let doc = make_doc();
     adapter.save_document(&doc).await.unwrap();
     adapter.delete_document(doc.id).await.unwrap();
@@ -74,7 +80,7 @@ async fn get_deleted_returns_not_found(pool: SqlitePool) {
 /// save_document is idempotent — re-saving updates the record without duplication.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn save_is_idempotent(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
     let doc = make_doc();
     adapter.save_document(&doc).await.unwrap();
 
@@ -95,7 +101,7 @@ async fn save_is_idempotent(pool: SqlitePool) {
 /// create_folder + list_folders round-trip.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn folder_create_and_list(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
 
     let folder = adapter.create_folder("Notes", None).await.unwrap();
     assert_eq!(folder.name, "Notes");
@@ -110,7 +116,7 @@ async fn folder_create_and_list(pool: SqlitePool) {
 /// rename_folder changes the name returned by get_folder.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn folder_rename(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
     let folder = adapter.create_folder("Old name", None).await.unwrap();
 
     let renamed = adapter.rename_folder(folder.id, "New name").await.unwrap();
@@ -123,7 +129,7 @@ async fn folder_rename(pool: SqlitePool) {
 /// move_document_to_folder scopes it to that folder in list_documents_in_folder.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn move_document_to_folder(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
 
     let folder = adapter.create_folder("Archive", None).await.unwrap();
     let doc = make_doc();
@@ -157,7 +163,7 @@ async fn move_document_to_folder(pool: SqlitePool) {
 /// move_folder can reorder siblings without changing parents.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn move_folder_reorders_siblings(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
 
     let first = adapter.create_folder("First", None).await.unwrap();
     let second = adapter.create_folder("Second", None).await.unwrap();
@@ -184,7 +190,7 @@ async fn move_folder_reorders_siblings(pool: SqlitePool) {
 /// save_chunk makes content findable via search_text.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn fts_finds_saved_chunk(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
     let doc = make_doc();
     adapter.save_document(&doc).await.unwrap();
 
@@ -208,7 +214,7 @@ async fn fts_finds_saved_chunk(pool: SqlitePool) {
 /// Deleted document's chunks do not appear in search_text.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn fts_excludes_deleted_document_chunks(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
     let doc = make_doc();
     adapter.save_document(&doc).await.unwrap();
 
@@ -237,7 +243,7 @@ async fn fts_excludes_deleted_document_chunks(pool: SqlitePool) {
 /// get_chunk_hashes returns one entry per saved chunk.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn chunk_hashes_round_trip(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
     let doc = make_doc();
     adapter.save_document(&doc).await.unwrap();
 
@@ -266,7 +272,7 @@ async fn chunk_hashes_round_trip(pool: SqlitePool) {
 /// save_embeddings + search_embeddings round-trip.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn embedding_round_trip(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
     let doc = make_doc();
     adapter.save_document(&doc).await.unwrap();
 
@@ -300,7 +306,7 @@ async fn embedding_round_trip(pool: SqlitePool) {
 /// Deleted document's embeddings do not appear in vector search.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn embeddings_exclude_deleted_document(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
     let doc = make_doc();
     adapter.save_document(&doc).await.unwrap();
 
@@ -336,7 +342,7 @@ async fn embeddings_exclude_deleted_document(pool: SqlitePool) {
 /// Nearest-neighbour ordering: the most similar vector ranks first.
 #[sqlx::test(migrator = "SQLITE_MIGRATOR")]
 async fn embedding_cosine_order(pool: SqlitePool) {
-    let adapter = SqliteAdapter::from_pool(pool).await.unwrap();
+    let adapter = SqliteAdapter::from_pool(pool, test_user_ctx()).await.unwrap();
 
     let doc_a = make_doc();
     let doc_b = Document {

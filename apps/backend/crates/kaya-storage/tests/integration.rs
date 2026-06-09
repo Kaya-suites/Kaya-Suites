@@ -17,7 +17,7 @@ use futures::stream::BoxStream;
 use uuid::Uuid;
 
 use kaya_core::{
-    KayaError, OperationType,
+    KayaError, OperationType, UserContext,
     model_router::{
         CompletionRequest, CompletionResponse, EmbeddingRequest, EmbeddingResponse, LlmProvider,
         ModelRouter, StreamItem, ToolCallRequest, ToolCallResponse, meter::TokenUsage,
@@ -26,6 +26,11 @@ use kaya_core::{
     storage::{Document, StorageAdapter},
 };
 use kaya_storage::SqliteAdapter;
+
+fn test_user_ctx() -> UserContext {
+    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    UserContext { tenant_id: id, user_id: id }
+}
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
@@ -140,7 +145,7 @@ fn make_router(embedder: Arc<dyn LlmProvider>) -> ModelRouter {
 #[tokio::test]
 async fn test_round_trip() {
     let (_dir, db) = temp_db();
-    let adapter = SqliteAdapter::new(&db).await.unwrap();
+    let adapter = SqliteAdapter::new(&db, test_user_ctx()).await.unwrap();
 
     let doc = make_doc();
     adapter.save_document(&doc).await.unwrap();
@@ -160,7 +165,7 @@ async fn test_round_trip() {
 #[tokio::test]
 async fn test_delete_document() {
     let (_dir, db) = temp_db();
-    let adapter = SqliteAdapter::new(&db).await.unwrap();
+    let adapter = SqliteAdapter::new(&db, test_user_ctx()).await.unwrap();
 
     let doc = make_doc();
     adapter.save_document(&doc).await.unwrap();
@@ -181,7 +186,7 @@ async fn test_delete_document() {
 #[tokio::test]
 async fn test_retrieval_seed_corpus() {
     let (_dir, db) = temp_db();
-    let adapter = Arc::new(SqliteAdapter::new(&db).await.unwrap());
+    let adapter = Arc::new(SqliteAdapter::new(&db, test_user_ctx()).await.unwrap());
 
     let (embedder, _count) = TopicEmbedder::new();
     let router = make_router(embedder);
@@ -233,7 +238,7 @@ async fn test_retrieval_seed_corpus() {
 #[tokio::test]
 async fn test_citation_round_trip() {
     let (_dir, db) = temp_db();
-    let adapter = Arc::new(SqliteAdapter::new(&db).await.unwrap());
+    let adapter = Arc::new(SqliteAdapter::new(&db, test_user_ctx()).await.unwrap());
 
     let (embedder, _) = TopicEmbedder::new();
     let router = make_router(embedder);
@@ -277,7 +282,7 @@ async fn test_citation_round_trip() {
 #[tokio::test]
 async fn test_reembedding_efficiency() {
     let (_dir, db) = temp_db();
-    let adapter = Arc::new(SqliteAdapter::new(&db).await.unwrap());
+    let adapter = Arc::new(SqliteAdapter::new(&db, test_user_ctx()).await.unwrap());
 
     let (embedder, call_count) = TopicEmbedder::new();
     let router = make_router(embedder);
@@ -331,7 +336,7 @@ async fn test_reembedding_efficiency() {
 #[tokio::test]
 async fn test_performance_smoke() {
     let (_dir, db) = temp_db();
-    let adapter = Arc::new(SqliteAdapter::new(&db).await.unwrap());
+    let adapter = Arc::new(SqliteAdapter::new(&db, test_user_ctx()).await.unwrap());
 
     let (embedder, _) = TopicEmbedder::new();
     let router = make_router(embedder);

@@ -10,35 +10,40 @@ use kaya_core::session::{
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
-/// SQLite session storage for the OSS single-user binary.
+/// SQLite session storage. Scoped to a single `user_id` per instance, the same
+/// way [`crate::PostgresSessionStorage`] and [`crate::MySqlSessionStorage`] are.
 pub struct SqliteSessionStorage {
     pool: SqlitePool,
+    user_id: Uuid,
 }
 
 const FOLDER_SIDEBAR_STATE_KEY: &str = "folder_sidebar_state";
 const EDIT_HISTORY_LIMIT: usize = 5;
+const LEGACY_LOCAL_USER_ID: &str = "00000000-0000-0000-0000-000000000001";
 
 impl SqliteSessionStorage {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    pub fn new(pool: SqlitePool, user_id: Uuid) -> Self {
+        Self { pool, user_id }
     }
 
-    /// Create (or upgrade) the `chat_sessions` and `chat_messages` tables.
+    fn user_id_str(&self) -> String {
+        self.user_id.to_string()
+    }
+
+    /// Create (or upgrade) the chat/embedding/preference tables.
     ///
-    /// Idempotent. Handles databases that were created under the old
-    /// `sessions`/`messages` table names by renaming them first.
+    /// Idempotent. Adds `user_id` columns with the [`LEGACY_LOCAL_USER_ID`]
+    /// default so single-user databases that pre-date multi-user are upgraded
+    /// in place without losing rows.
     pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         // Rename legacy tables if they still exist under the old names.
-        let _ = sqlx::query("ALTER TABLE sessions RENAME TO chat_sessions")
-            .execute(pool)
-            .await;
-        let _ = sqlx::query("ALTER TABLE messages RENAME TO chat_messages")
-            .execute(pool)
-            .await;
+        let _ = sqlx::query("ALTER TABLE sessions RENAME TO chat_sessions").execute(pool).await;
+        let _ = sqlx::query("ALTER TABLE messages RENAME TO chat_messages").execute(pool).await;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS chat_sessions (
                 id                  TEXT    PRIMARY KEY,
+                user_id             TEXT    NOT NULL,
                 title               TEXT    NOT NULL,
                 created_at          INTEGER NOT NULL,
                 updated_at          INTEGER NOT NULL,
@@ -55,6 +60,7 @@ impl SqliteSessionStorage {
             "CREATE TABLE IF NOT EXISTS chat_messages (
                 id            TEXT    PRIMARY KEY,
                 session_id    TEXT    NOT NULL,
+                user_id       TEXT    NOT NULL,
                 role          TEXT    NOT NULL,
                 content       TEXT    NOT NULL,
                 citations     TEXT    NOT NULL DEFAULT '[]',
@@ -68,7 +74,7 @@ impl SqliteSessionStorage {
         .execute(pool)
         .await?;
 
-        // Add columns to databases that predate the token/pin features.
+        // Backfill columns on databases that pre-date them.
         for stmt in [
             "ALTER TABLE chat_sessions ADD COLUMN total_input_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE chat_sessions ADD COLUMN total_output_tokens INTEGER NOT NULL DEFAULT 0",
@@ -80,18 +86,26 @@ impl SqliteSessionStorage {
         ] {
             let _ = sqlx::query(stmt).execute(pool).await;
         }
+        // Legacy single-user backfill: add user_id with sentinel default.
+        let _ = sqlx::query(&format!(
+            "ALTER TABLE chat_sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LEGACY_LOCAL_USER_ID}'"
+        )).execute(pool).await;
+        let _ = sqlx::query(&format!(
+            "ALTER TABLE chat_messages ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LEGACY_LOCAL_USER_ID}'"
+        )).execute(pool).await;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS embedding_calls (
-                id          TEXT    PRIMARY KEY,
-                model       TEXT    NOT NULL,
-                tokens      INTEGER NOT NULL DEFAULT 0,
-                task_id     TEXT,
-                task_type   TEXT    NOT NULL DEFAULT 'unknown',
-                session_id  TEXT,
-                document_id TEXT,
+                id           TEXT    PRIMARY KEY,
+                user_id      TEXT    NOT NULL,
+                model        TEXT    NOT NULL,
+                tokens       INTEGER NOT NULL DEFAULT 0,
+                task_id      TEXT,
+                task_type    TEXT    NOT NULL DEFAULT 'unknown',
+                session_id   TEXT,
+                document_id  TEXT,
                 paragraph_id TEXT,
-                created_at  INTEGER NOT NULL
+                created_at   INTEGER NOT NULL
             )",
         )
         .execute(pool)
@@ -106,17 +120,22 @@ impl SqliteSessionStorage {
         ] {
             let _ = sqlx::query(stmt).execute(pool).await;
         }
+        let _ = sqlx::query(&format!(
+            "ALTER TABLE embedding_calls ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LEGACY_LOCAL_USER_ID}'"
+        )).execute(pool).await;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS document_embedding_status (
-                document_id      TEXT    PRIMARY KEY,
+                user_id          TEXT    NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',
+                document_id      TEXT    NOT NULL,
                 task_id          TEXT,
                 status           TEXT    NOT NULL DEFAULT 'pending',
                 expected_chunks  INTEGER NOT NULL DEFAULT 0,
                 embedded_chunks  INTEGER NOT NULL DEFAULT 0,
                 last_error       TEXT,
                 updated_at       INTEGER NOT NULL,
-                last_indexed_at  INTEGER
+                last_indexed_at  INTEGER,
+                PRIMARY KEY (user_id, document_id)
             )",
         )
         .execute(pool)
@@ -133,16 +152,24 @@ impl SqliteSessionStorage {
         ] {
             let _ = sqlx::query(stmt).execute(pool).await;
         }
+        let _ = sqlx::query(&format!(
+            "ALTER TABLE document_embedding_status ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LEGACY_LOCAL_USER_ID}'"
+        )).execute(pool).await;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS ui_preferences (
-                key        TEXT    PRIMARY KEY,
+                user_id    TEXT    NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',
+                key        TEXT    NOT NULL,
                 value      TEXT    NOT NULL,
-                updated_at INTEGER NOT NULL
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, key)
             )",
         )
         .execute(pool)
         .await?;
+        let _ = sqlx::query(&format!(
+            "ALTER TABLE ui_preferences ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LEGACY_LOCAL_USER_ID}'"
+        )).execute(pool).await;
 
         Ok(())
     }
@@ -160,11 +187,12 @@ fn edit_history_key(session_id: Uuid) -> String {
     format!("edit_history:{session_id}")
 }
 
-async fn get_pref_json<T>(pool: &SqlitePool, key: &str) -> Result<Option<T>, SessionError>
+async fn get_pref_json<T>(pool: &SqlitePool, user_id: Uuid, key: &str) -> Result<Option<T>, SessionError>
 where
     T: serde::de::DeserializeOwned,
 {
-    let row = sqlx::query("SELECT value FROM ui_preferences WHERE key = ?")
+    let row = sqlx::query("SELECT value FROM ui_preferences WHERE user_id = ? AND key = ?")
+        .bind(user_id.to_string())
         .bind(key)
         .fetch_optional(pool)
         .await
@@ -179,7 +207,7 @@ where
     Ok(Some(parsed))
 }
 
-async fn set_pref_json<T>(pool: &SqlitePool, key: &str, value: &T) -> Result<(), SessionError>
+async fn set_pref_json<T>(pool: &SqlitePool, user_id: Uuid, key: &str, value: &T) -> Result<(), SessionError>
 where
     T: serde::Serialize,
 {
@@ -187,12 +215,13 @@ where
     let value = serde_json::to_string(value).map_err(box_err)?;
 
     sqlx::query(
-        "INSERT INTO ui_preferences (key, value, updated_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT(key) DO UPDATE SET
+        "INSERT INTO ui_preferences (user_id, key, value, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET
             value = excluded.value,
             updated_at = excluded.updated_at",
     )
+    .bind(user_id.to_string())
     .bind(key)
     .bind(value)
     .bind(now)
@@ -209,8 +238,9 @@ impl SessionStorage for SqliteSessionStorage {
         let rows = sqlx::query(
             "SELECT id, title, created_at, updated_at, message_count,
                     total_input_tokens, total_output_tokens, pinned
-             FROM chat_sessions ORDER BY pinned DESC, updated_at DESC",
+             FROM chat_sessions WHERE user_id = ? ORDER BY pinned DESC, updated_at DESC",
         )
+        .bind(self.user_id_str())
         .fetch_all(&self.pool)
         .await
         .map_err(box_err)?;
@@ -246,10 +276,11 @@ impl SessionStorage for SqliteSessionStorage {
         let title = title.unwrap_or_else(|| "New conversation".to_string());
 
         sqlx::query(
-            "INSERT INTO chat_sessions (id, title, created_at, updated_at, message_count)
-             VALUES (?, ?, ?, ?, 0)",
+            "INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at, message_count)
+             VALUES (?, ?, ?, ?, ?, 0)",
         )
         .bind(id.to_string())
+        .bind(self.user_id_str())
         .bind(&title)
         .bind(now)
         .bind(now)
@@ -272,9 +303,10 @@ impl SessionStorage for SqliteSessionStorage {
     async fn get_messages(&self, session_id: Uuid) -> Result<Vec<MessageRecord>, SessionError> {
         let rows = sqlx::query(
             "SELECT id, role, content, citations, created_at, input_tokens, output_tokens, model, proposals
-             FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC",
+             FROM chat_messages WHERE session_id = ? AND user_id = ? ORDER BY created_at ASC",
         )
         .bind(session_id.to_string())
+        .bind(self.user_id_str())
         .fetch_all(&self.pool)
         .await
         .map_err(box_err)?;
@@ -301,9 +333,10 @@ impl SessionStorage for SqliteSessionStorage {
         session_id: Uuid,
     ) -> Result<Vec<(String, String)>, SessionError> {
         let rows = sqlx::query(
-            "SELECT role, content FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC",
+            "SELECT role, content FROM chat_messages WHERE session_id = ? AND user_id = ? ORDER BY created_at ASC",
         )
         .bind(session_id.to_string())
+        .bind(self.user_id_str())
         .fetch_all(&self.pool)
         .await
         .map_err(box_err)?;
@@ -322,7 +355,7 @@ impl SessionStorage for SqliteSessionStorage {
         &self,
         session_id: Uuid,
     ) -> Result<Option<ChatHistorySummary>, SessionError> {
-        get_pref_json(&self.pool, &chat_summary_key(session_id)).await
+        get_pref_json(&self.pool, self.user_id, &chat_summary_key(session_id)).await
     }
 
     async fn save_chat_summary(
@@ -330,7 +363,7 @@ impl SessionStorage for SqliteSessionStorage {
         session_id: Uuid,
         summary: &ChatHistorySummary,
     ) -> Result<(), SessionError> {
-        set_pref_json(&self.pool, &chat_summary_key(session_id), summary).await
+        set_pref_json(&self.pool, self.user_id, &chat_summary_key(session_id), summary).await
     }
 
     async fn get_recent_edit_history(
@@ -339,7 +372,7 @@ impl SessionStorage for SqliteSessionStorage {
         limit: usize,
     ) -> Result<Vec<EditHistoryEntry>, SessionError> {
         let mut entries: Vec<EditHistoryEntry> =
-            get_pref_json(&self.pool, &edit_history_key(session_id))
+            get_pref_json(&self.pool, self.user_id, &edit_history_key(session_id))
                 .await?
                 .unwrap_or_default();
         entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -354,7 +387,7 @@ impl SessionStorage for SqliteSessionStorage {
     ) -> Result<(), SessionError> {
         let key = edit_history_key(session_id);
         let mut entries: Vec<EditHistoryEntry> =
-            get_pref_json(&self.pool, &key).await?.unwrap_or_default();
+            get_pref_json(&self.pool, self.user_id, &key).await?.unwrap_or_default();
 
         if let Some(existing) = entries.iter_mut().find(|e| e.edit_id == entry.edit_id) {
             *existing = entry.clone();
@@ -364,7 +397,7 @@ impl SessionStorage for SqliteSessionStorage {
 
         entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         entries.truncate(EDIT_HISTORY_LIMIT);
-        set_pref_json(&self.pool, &key, &entries).await
+        set_pref_json(&self.pool, self.user_id, &key, &entries).await
     }
 
     async fn save_user_message(
@@ -375,11 +408,12 @@ impl SessionStorage for SqliteSessionStorage {
     ) -> Result<(), SessionError> {
         let now = Utc::now().timestamp_millis();
         sqlx::query(
-            "INSERT INTO chat_messages (id, session_id, role, content, citations, created_at)
-             VALUES (?, ?, 'user', ?, '[]', ?)",
+            "INSERT INTO chat_messages (id, session_id, user_id, role, content, citations, created_at)
+             VALUES (?, ?, ?, 'user', ?, '[]', ?)",
         )
         .bind(id)
         .bind(session_id.to_string())
+        .bind(self.user_id_str())
         .bind(content)
         .bind(now)
         .execute(&self.pool)
@@ -401,12 +435,13 @@ impl SessionStorage for SqliteSessionStorage {
         let now = Utc::now().timestamp_millis();
         sqlx::query(
             "INSERT INTO chat_messages
-                 (id, session_id, role, content, citations, created_at,
+                 (id, session_id, user_id, role, content, citations, created_at,
                   input_tokens, output_tokens, model)
-             VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)",
+             VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?)",
         )
         .bind(id)
         .bind(session_id.to_string())
+        .bind(self.user_id_str())
         .bind(content)
         .bind(citations_json)
         .bind(now)
@@ -421,11 +456,12 @@ impl SessionStorage for SqliteSessionStorage {
             "UPDATE chat_sessions
              SET total_input_tokens  = total_input_tokens  + ?,
                  total_output_tokens = total_output_tokens + ?
-             WHERE id = ?",
+             WHERE id = ? AND user_id = ?",
         )
         .bind(input_tokens as i64)
         .bind(output_tokens as i64)
         .bind(session_id.to_string())
+        .bind(self.user_id_str())
         .execute(&self.pool)
         .await
         .map_err(box_err)?;
@@ -438,9 +474,10 @@ impl SessionStorage for SqliteSessionStorage {
         message_id: &str,
         proposals_json: &str,
     ) -> Result<(), SessionError> {
-        sqlx::query("UPDATE chat_messages SET proposals = ? WHERE id = ?")
+        sqlx::query("UPDATE chat_messages SET proposals = ? WHERE id = ? AND user_id = ?")
             .bind(proposals_json)
             .bind(message_id)
+            .bind(self.user_id_str())
             .execute(&self.pool)
             .await
             .map_err(box_err)?;
@@ -492,8 +529,9 @@ impl SessionStorage for SqliteSessionStorage {
     ) -> Result<Option<kaya_core::ProposalLookup>, SessionError> {
         let needle = format!("%\"id\":\"{}\"%", edit_id);
         let rows: Vec<(String, String, String)> = sqlx::query_as(
-            "SELECT id, session_id, proposals FROM chat_messages WHERE proposals LIKE ? LIMIT 5",
+            "SELECT id, session_id, proposals FROM chat_messages WHERE user_id = ? AND proposals LIKE ? LIMIT 5",
         )
+        .bind(self.user_id_str())
         .bind(&needle)
         .fetch_all(&self.pool)
         .await
@@ -507,8 +545,9 @@ impl SessionStorage for SqliteSessionStorage {
         edit_id: Uuid,
         status: &str,
     ) -> Result<(), SessionError> {
-        let row = sqlx::query("SELECT proposals FROM chat_messages WHERE id = ?")
+        let row = sqlx::query("SELECT proposals FROM chat_messages WHERE id = ? AND user_id = ?")
             .bind(message_id)
+            .bind(self.user_id_str())
             .fetch_optional(&self.pool)
             .await
             .map_err(box_err)?;
@@ -528,9 +567,10 @@ impl SessionStorage for SqliteSessionStorage {
             return Ok(());
         }
         let new_json = serde_json::to_string(&arr).map_err(box_err)?;
-        sqlx::query("UPDATE chat_messages SET proposals = ? WHERE id = ?")
+        sqlx::query("UPDATE chat_messages SET proposals = ? WHERE id = ? AND user_id = ?")
             .bind(new_json)
             .bind(message_id)
+            .bind(self.user_id_str())
             .execute(&self.pool)
             .await
             .map_err(box_err)?;
@@ -542,10 +582,11 @@ impl SessionStorage for SqliteSessionStorage {
         sqlx::query(
             "UPDATE chat_sessions
              SET message_count = message_count + 1, updated_at = ?
-             WHERE id = ?",
+             WHERE id = ? AND user_id = ?",
         )
         .bind(now)
         .bind(session_id.to_string())
+        .bind(self.user_id_str())
         .execute(&self.pool)
         .await
         .map_err(box_err)?;
@@ -553,9 +594,10 @@ impl SessionStorage for SqliteSessionStorage {
     }
 
     async fn rename_session(&self, session_id: Uuid, title: String) -> Result<(), SessionError> {
-        sqlx::query("UPDATE chat_sessions SET title = ? WHERE id = ?")
+        sqlx::query("UPDATE chat_sessions SET title = ? WHERE id = ? AND user_id = ?")
             .bind(&title)
             .bind(session_id.to_string())
+            .bind(self.user_id_str())
             .execute(&self.pool)
             .await
             .map_err(box_err)?;
@@ -564,19 +606,23 @@ impl SessionStorage for SqliteSessionStorage {
 
     async fn delete_session(&self, session_id: Uuid) -> Result<(), SessionError> {
         let id = session_id.to_string();
-        sqlx::query("DELETE FROM chat_messages WHERE session_id = ?")
+        let user_id_str = self.user_id_str();
+        sqlx::query("DELETE FROM chat_messages WHERE session_id = ? AND user_id = ?")
             .bind(&id)
+            .bind(&user_id_str)
             .execute(&self.pool)
             .await
             .map_err(box_err)?;
-        sqlx::query("DELETE FROM ui_preferences WHERE key IN (?, ?)")
+        sqlx::query("DELETE FROM ui_preferences WHERE user_id = ? AND key IN (?, ?)")
+            .bind(&user_id_str)
             .bind(chat_summary_key(session_id))
             .bind(edit_history_key(session_id))
             .execute(&self.pool)
             .await
             .map_err(box_err)?;
-        sqlx::query("DELETE FROM chat_sessions WHERE id = ?")
+        sqlx::query("DELETE FROM chat_sessions WHERE id = ? AND user_id = ?")
             .bind(&id)
+            .bind(&user_id_str)
             .execute(&self.pool)
             .await
             .map_err(box_err)?;
@@ -584,9 +630,10 @@ impl SessionStorage for SqliteSessionStorage {
     }
 
     async fn pin_session(&self, session_id: Uuid, pinned: bool) -> Result<(), SessionError> {
-        sqlx::query("UPDATE chat_sessions SET pinned = ? WHERE id = ?")
+        sqlx::query("UPDATE chat_sessions SET pinned = ? WHERE id = ? AND user_id = ?")
             .bind(pinned as i64)
             .bind(session_id.to_string())
+            .bind(self.user_id_str())
             .execute(&self.pool)
             .await
             .map_err(box_err)?;
@@ -597,10 +644,11 @@ impl SessionStorage for SqliteSessionStorage {
         let now = chrono::Utc::now().timestamp_millis();
         sqlx::query(
             "INSERT INTO embedding_calls
-                 (id, model, tokens, task_id, task_type, session_id, document_id, paragraph_id, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 (id, user_id, model, tokens, task_id, task_type, session_id, document_id, paragraph_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(uuid::Uuid::new_v4().to_string())
+        .bind(self.user_id_str())
         .bind(&call.model)
         .bind(call.tokens as i64)
         .bind(call.task_id.as_deref())
@@ -621,9 +669,9 @@ impl SessionStorage for SqliteSessionStorage {
     ) -> Result<(), SessionError> {
         sqlx::query(
             "INSERT INTO document_embedding_status
-                 (document_id, task_id, status, expected_chunks, embedded_chunks, last_error, updated_at, last_indexed_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(document_id) DO UPDATE SET
+                 (user_id, document_id, task_id, status, expected_chunks, embedded_chunks, last_error, updated_at, last_indexed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(user_id, document_id) DO UPDATE SET
                  task_id = excluded.task_id,
                  status = excluded.status,
                  expected_chunks = excluded.expected_chunks,
@@ -632,6 +680,7 @@ impl SessionStorage for SqliteSessionStorage {
                  updated_at = excluded.updated_at,
                  last_indexed_at = excluded.last_indexed_at",
         )
+        .bind(self.user_id_str())
         .bind(status.document_id.to_string())
         .bind(status.task_id.as_deref())
         .bind(&status.status)
@@ -647,24 +696,25 @@ impl SessionStorage for SqliteSessionStorage {
     }
 
     async fn get_folder_sidebar_state(&self) -> Result<Option<FolderSidebarState>, SessionError> {
-        get_pref_json(&self.pool, FOLDER_SIDEBAR_STATE_KEY).await
+        get_pref_json(&self.pool, self.user_id, FOLDER_SIDEBAR_STATE_KEY).await
     }
 
     async fn save_folder_sidebar_state(
         &self,
         state: &FolderSidebarState,
     ) -> Result<(), SessionError> {
-        set_pref_json(&self.pool, FOLDER_SIDEBAR_STATE_KEY, state).await
+        set_pref_json(&self.pool, self.user_id, FOLDER_SIDEBAR_STATE_KEY, state).await
     }
 
     async fn get_usage_summary(&self) -> Result<UsageSummary, SessionError> {
         let model_rows = sqlx::query(
             "SELECT model, SUM(input_tokens) AS total_in, SUM(output_tokens) AS total_out
              FROM chat_messages
-             WHERE role = 'assistant' AND model != ''
+             WHERE user_id = ? AND role = 'assistant' AND model != ''
              GROUP BY model
              ORDER BY total_in DESC",
         )
+        .bind(self.user_id_str())
         .fetch_all(&self.pool)
         .await
         .map_err(box_err)?;
@@ -686,9 +736,10 @@ impl SessionStorage for SqliteSessionStorage {
         let session_rows = sqlx::query(
             "SELECT id, title, total_input_tokens, total_output_tokens, updated_at
              FROM chat_sessions
-             WHERE total_input_tokens > 0 OR total_output_tokens > 0
+             WHERE user_id = ? AND (total_input_tokens > 0 OR total_output_tokens > 0)
              ORDER BY updated_at DESC",
         )
+        .bind(self.user_id_str())
         .fetch_all(&self.pool)
         .await
         .map_err(box_err)?;
@@ -713,10 +764,11 @@ impl SessionStorage for SqliteSessionStorage {
         let emb_rows = sqlx::query(
             "SELECT model, SUM(tokens) AS total_tokens
              FROM embedding_calls
-             WHERE model != ''
+             WHERE user_id = ? AND model != ''
              GROUP BY model
              ORDER BY total_tokens DESC",
         )
+        .bind(self.user_id_str())
         .fetch_all(&self.pool)
         .await
         .map_err(box_err)?;
