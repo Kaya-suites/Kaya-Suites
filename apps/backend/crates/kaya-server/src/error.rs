@@ -33,6 +33,9 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        if self.status.is_server_error() {
+            tracing::error!(status = %self.status, error = %self.message, "handler returned 5xx");
+        }
         (self.status, Json(json!({"error": self.message}))).into_response()
     }
 }

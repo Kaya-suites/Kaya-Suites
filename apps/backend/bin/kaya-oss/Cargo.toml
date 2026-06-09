@@ -51,7 +51,7 @@ clap = { version = "4", features = ["derive", "env"] }
 zip = "2"
 
 # Middleware
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "catch-panic"] }
 tower-service = "0.3"
 
 # MCP (HTTP transport)

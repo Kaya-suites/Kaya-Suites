@@ -203,7 +203,13 @@ async fn inject_storage(
             Ok(pair) => pair,
             Err(e) => {
                 tracing::error!(error = %e, "build_user_adapters failed");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    axum::Json(serde_json::json!({
+                        "error": format!("build_user_adapters: {e}"),
+                    })),
+                )
+                    .into_response();
             }
         };
 
@@ -583,6 +589,25 @@ async fn main() -> anyhow::Result<()> {
         .layer(auth_layer)
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(tower_http::catch_panic::CatchPanicLayer::custom(
+            |err: Box<dyn std::any::Any + Send + 'static>| {
+                let detail = if let Some(s) = err.downcast_ref::<String>() {
+                    s.clone()
+                } else if let Some(s) = err.downcast_ref::<&'static str>() {
+                    (*s).to_string()
+                } else {
+                    "unknown panic payload".to_string()
+                };
+                tracing::error!(panic = %detail, "handler panicked");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    axum::Json(serde_json::json!({
+                        "error": format!("panic: {detail}"),
+                    })),
+                )
+                    .into_response()
+            },
+        ))
         .with_state(state)
         .fallback(static_handler);
 
