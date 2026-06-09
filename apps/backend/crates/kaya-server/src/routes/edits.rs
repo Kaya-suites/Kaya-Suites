@@ -11,9 +11,10 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use kaya_core::{
-    DocumentEmbeddingStatus, EmbeddingTaskContext, ProposedEditKind, SessionStorage,
-    StorageAdapter,
+    DocumentEmbeddingStatus, EmbeddingTaskContext, ProposedEdit, ProposedEditKind,
+    SessionStorage, StorageAdapter,
     auth::UserSession,
+    diff::{ParagraphChange, ParagraphDiff},
     edit::commit_edit,
     model_router::ModelRouter,
     retrieval::{chunk_document, index_document_chunks},
@@ -24,28 +25,199 @@ use kaya_core::{
 use crate::error::ApiError;
 use crate::state::StoredEdit;
 
-/// Drain the pending edit either from the in-memory map (hot path) or — if
-/// the process restarted since the proposal — from `pending_edits` storage,
-/// where `chat::save_stored_edit` mirrors every insert. Returns 404 only when
-/// neither source has it (already consumed, double-click, or unknown id).
+/// Drain the pending edit from the first available source:
+/// 1. the in-memory map (hot path during a single backend lifetime),
+/// 2. the `pending_edits` table (mirrored on insert; survives a restart),
+/// 3. as a last resort, reconstructed from `chat_messages.proposals` (the
+///    display projection persisted long before pending_edits existed).
+///
+/// (3) handles edits proposed by an older build that never wrote the full
+/// `StoredEdit` payload anywhere — we have enough information in the
+/// display projection (kind/docId/paragraphId/original/proposed) to rebuild
+/// a `ProposedEdit` that `commit_edit` will accept. Returns 404 only when
+/// no source has it.
 async fn take_pending_edit(
     pending_edits: &Arc<Mutex<HashMap<Uuid, StoredEdit>>>,
+    storage: &Arc<dyn StorageAdapter>,
     sessions: &Arc<dyn SessionStorage>,
     edit_id: Uuid,
 ) -> Result<StoredEdit, ApiError> {
     if let Some(stored) = pending_edits.lock().await.remove(&edit_id) {
-        // The DB row may still exist (write-through, not write-back) — clear it
-        // so a future bogus approve can't resurrect a consumed edit.
         let _ = sessions.take_pending_edit(edit_id).await;
         return Ok(stored);
     }
-    let payload = sessions
+
+    if let Some(payload) = sessions
         .take_pending_edit(edit_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found(format!("edit {edit_id}")))?;
-    serde_json::from_str::<StoredEdit>(&payload)
-        .map_err(|e| ApiError::internal(format!("deserialize pending edit: {e}")))
+    {
+        return serde_json::from_str::<StoredEdit>(&payload)
+            .map_err(|e| ApiError::internal(format!("deserialize pending edit: {e}")));
+    }
+
+    if let Some(stored) = reconstruct_from_proposal(storage, sessions, edit_id).await? {
+        tracing::info!(%edit_id, "reconstructed pending edit from chat_messages.proposals");
+        return Ok(stored);
+    }
+
+    Err(ApiError::not_found(format!("edit {edit_id}")))
+}
+
+/// Recovery path for proposals that predate the `pending_edits` table.
+/// Reads the display-projection record (`{kind, docId, paragraphId, original,
+/// proposed, ...}`) out of `chat_messages.proposals`, and rebuilds the
+/// `StoredEdit` the approve handler needs. `kind` covers `edit` (Modify when
+/// docId is set, Create when null), `delete`, and `folderCreate`.
+async fn reconstruct_from_proposal(
+    storage: &Arc<dyn StorageAdapter>,
+    sessions: &Arc<dyn SessionStorage>,
+    edit_id: Uuid,
+) -> Result<Option<StoredEdit>, ApiError> {
+    let Some(lookup) = sessions
+        .find_proposal_by_edit_id(edit_id)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+    else {
+        return Ok(None);
+    };
+
+    let proposal: serde_json::Value = serde_json::from_str(&lookup.proposal_json)
+        .map_err(|e| ApiError::internal(format!("parse proposal: {e}")))?;
+    let kind = proposal.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+    let doc_id_str = proposal.get("docId").and_then(|v| v.as_str());
+    let paragraph_id = proposal
+        .get("paragraphId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("p0")
+        .to_string();
+    let original = proposal
+        .get("original")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let proposed = proposal
+        .get("proposed")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let (edit, doc_title) = match kind {
+        "edit" => match doc_id_str {
+            Some(s) => {
+                let document_id = Uuid::parse_str(s)
+                    .map_err(|e| ApiError::internal(format!("docId: {e}")))?;
+                let doc = storage
+                    .get_document(document_id)
+                    .await
+                    .map_err(|e| ApiError::internal(format!("get_document for reconstruct: {e}")))?;
+                let new_body = if original.is_empty() {
+                    proposed.clone()
+                } else {
+                    doc.body.replacen(&original, &proposed, 1)
+                };
+                let diff = ParagraphDiff {
+                    changes: vec![ParagraphChange::Modify {
+                        paragraph_id: paragraph_id.clone(),
+                        old_text: original.clone(),
+                        new_text: proposed.clone(),
+                    }],
+                };
+                let pe = ProposedEdit {
+                    id: edit_id,
+                    kind: ProposedEditKind::Modify {
+                        document_id,
+                        diff,
+                        new_body,
+                    },
+                };
+                (pe, doc.title)
+            }
+            None => {
+                let title = extract_title(&proposed);
+                let pe = ProposedEdit {
+                    id: edit_id,
+                    kind: ProposedEditKind::Create {
+                        title: title.clone(),
+                        body: proposed.clone(),
+                        folder_id: None,
+                    },
+                };
+                (pe, title)
+            }
+        },
+        "delete" => {
+            let s = doc_id_str.ok_or_else(|| {
+                ApiError::internal("delete proposal missing docId for reconstruct")
+            })?;
+            let document_id = Uuid::parse_str(s)
+                .map_err(|e| ApiError::internal(format!("docId: {e}")))?;
+            let doc_title = proposal
+                .get("docTitle")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let pe = ProposedEdit {
+                id: edit_id,
+                kind: ProposedEditKind::DeleteDocument { document_id },
+            };
+            (pe, doc_title)
+        }
+        "folderCreate" => {
+            let name = proposal
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Untitled folder")
+                .to_string();
+            let parent_id = proposal
+                .get("parentId")
+                .and_then(|v| v.as_str())
+                .and_then(|s| Uuid::parse_str(s).ok());
+            let pe = ProposedEdit {
+                id: edit_id,
+                kind: ProposedEditKind::CreateFolder {
+                    name: name.clone(),
+                    parent_id,
+                },
+            };
+            (pe, String::new())
+        }
+        other => {
+            tracing::warn!(%edit_id, kind = %other, "unknown proposal kind in reconstruct");
+            return Ok(None);
+        }
+    };
+
+    Ok(Some(StoredEdit {
+        session_id: lookup.session_id,
+        message_id: lookup.message_id,
+        edit,
+        doc_title,
+        first_paragraph_id: paragraph_id,
+        original_paragraph: original,
+        proposed_paragraph: proposed,
+    }))
+}
+
+/// Pick a title for a reconstructed Create: first `# ` heading line, else
+/// the first non-empty line, else `"Untitled"`.
+fn extract_title(body: &str) -> String {
+    for line in body.lines() {
+        let l = line.trim();
+        if let Some(rest) = l.strip_prefix("# ") {
+            let t = rest.trim();
+            if !t.is_empty() {
+                return t.to_string();
+            }
+        }
+    }
+    for line in body.lines() {
+        let l = line.trim();
+        if !l.is_empty() {
+            return truncate_text(l, 80);
+        }
+    }
+    "Untitled".to_string()
 }
 
 #[derive(Deserialize)]
@@ -66,7 +238,7 @@ pub async fn approve_edit(
     Path(edit_id): Path<Uuid>,
     Json(body): Json<ApproveBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let stored = take_pending_edit(&pending_edits, &sessions, edit_id).await?;
+    let stored = take_pending_edit(&pending_edits, &storage, &sessions, edit_id).await?;
 
     let final_proposed = body
         .proposed
@@ -156,12 +328,13 @@ pub async fn approve_edit(
 }
 
 pub async fn reject_edit(
+    Extension(storage): Extension<Arc<dyn StorageAdapter>>,
     Extension(sessions): Extension<Arc<dyn SessionStorage>>,
     Extension(pending_edits): Extension<Arc<Mutex<HashMap<Uuid, StoredEdit>>>>,
     Path(edit_id): Path<Uuid>,
     Json(body): Json<RejectBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let stored = take_pending_edit(&pending_edits, &sessions, edit_id).await?;
+    let stored = take_pending_edit(&pending_edits, &storage, &sessions, edit_id).await?;
 
     let final_proposed = body
         .proposed

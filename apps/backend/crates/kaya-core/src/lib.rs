@@ -22,7 +22,7 @@ pub use retrieval::{
 };
 pub use session::{
     DocumentEmbeddingStatus, EmbeddingCall, EmbeddingModelUsage, FolderSidebarState,
-    MessageRecord, ModelUsage, Session, SessionError, SessionStorage, SessionTokenUsage,
-    UsageSummary,
+    MessageRecord, ModelUsage, ProposalLookup, Session, SessionError, SessionStorage,
+    SessionTokenUsage, UsageSummary,
 };
 pub use storage::{Chunk, ChunkHit, Document, Embedding, StorageAdapter, StorageError};

@@ -115,6 +115,17 @@ pub struct DocumentEmbeddingStatus {
     pub last_indexed_at: Option<i64>,
 }
 
+/// Result of `SessionStorage::find_proposal_by_edit_id`. Carries the message
+/// and session context plus the single proposal record (as raw JSON, exactly
+/// as stored in `chat_messages.proposals`) so the caller can reconstruct a
+/// `StoredEdit` without a second round-trip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProposalLookup {
+    pub session_id: Uuid,
+    pub message_id: String,
+    pub proposal_json: String,
+}
+
 /// Persisted UI state for the folder sidebar.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -243,6 +254,17 @@ pub trait SessionStorage: Send + Sync {
         &self,
         _edit_id: Uuid,
     ) -> Result<Option<String>, SessionError> {
+        Ok(None)
+    }
+
+    /// Find a single proposal record by its `edit_id` from any assistant
+    /// message's `proposals` array. Used as a last-resort recovery path when
+    /// the in-memory map AND `pending_edits` are both empty (e.g. a proposal
+    /// created before pending_edits persistence existed). Default no-op.
+    async fn find_proposal_by_edit_id(
+        &self,
+        _edit_id: Uuid,
+    ) -> Result<Option<ProposalLookup>, SessionError> {
         Ok(None)
     }
 

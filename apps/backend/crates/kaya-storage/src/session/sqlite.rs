@@ -486,6 +486,21 @@ impl SessionStorage for SqliteSessionStorage {
         Ok(Some(payload))
     }
 
+    async fn find_proposal_by_edit_id(
+        &self,
+        edit_id: Uuid,
+    ) -> Result<Option<kaya_core::ProposalLookup>, SessionError> {
+        let needle = format!("%\"id\":\"{}\"%", edit_id);
+        let rows: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT id, session_id, proposals FROM chat_messages WHERE proposals LIKE ? LIMIT 5",
+        )
+        .bind(&needle)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(crate::session::extract_proposal_lookup(rows, edit_id))
+    }
+
     async fn update_proposal_status(
         &self,
         message_id: &str,
