@@ -120,6 +120,160 @@ async fn prepare_sqlite_legacy(pool: &AnyPool) -> anyhow::Result<()> {
         }
     }
 
+    // ── PRIMARY KEY rebuild for tables whose PK changed shape ────────────────
+    //
+    // Adding `user_id` via ALTER TABLE doesn't update the PRIMARY KEY, so
+    // `ON CONFLICT(user_id, …)` upserts fail on these tables. Rebuild them
+    // when the PK still matches the legacy shape.
+
+    rebuild_if_pk_legacy(
+        pool,
+        "ui_preferences",
+        &["user_id", "key"],
+        "
+        CREATE TABLE ui_preferences_new (
+            user_id    TEXT    NOT NULL,
+            key        TEXT    NOT NULL,
+            value      TEXT    NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (user_id, key)
+        );
+        INSERT INTO ui_preferences_new (user_id, key, value, updated_at)
+            SELECT user_id, key, value, updated_at FROM ui_preferences;
+        DROP TABLE ui_preferences;
+        ALTER TABLE ui_preferences_new RENAME TO ui_preferences;
+        ",
+    )
+    .await?;
+
+    rebuild_if_pk_legacy(
+        pool,
+        "document_embedding_status",
+        &["user_id", "document_id"],
+        "
+        CREATE TABLE document_embedding_status_new (
+            user_id          TEXT    NOT NULL,
+            document_id      TEXT    NOT NULL,
+            task_id          TEXT,
+            status           TEXT    NOT NULL DEFAULT 'pending',
+            expected_chunks  INTEGER NOT NULL DEFAULT 0,
+            embedded_chunks  INTEGER NOT NULL DEFAULT 0,
+            last_error       TEXT,
+            updated_at       INTEGER NOT NULL,
+            last_indexed_at  INTEGER,
+            PRIMARY KEY (user_id, document_id)
+        );
+        INSERT INTO document_embedding_status_new
+            (user_id, document_id, task_id, status, expected_chunks,
+             embedded_chunks, last_error, updated_at, last_indexed_at)
+            SELECT user_id, document_id, task_id, status, expected_chunks,
+                   embedded_chunks, last_error, updated_at, last_indexed_at
+            FROM document_embedding_status;
+        DROP TABLE document_embedding_status;
+        ALTER TABLE document_embedding_status_new RENAME TO document_embedding_status;
+        ",
+    )
+    .await?;
+
+    rebuild_if_pk_legacy(
+        pool,
+        "chunks",
+        &["user_id", "document_id", "paragraph_id"],
+        "
+        CREATE TABLE chunks_new (
+            user_id      TEXT    NOT NULL,
+            document_id  TEXT    NOT NULL,
+            paragraph_id TEXT    NOT NULL,
+            ordinal      INTEGER NOT NULL,
+            content      TEXT    NOT NULL,
+            content_hash TEXT    NOT NULL,
+            PRIMARY KEY (user_id, document_id, paragraph_id)
+        );
+        INSERT INTO chunks_new (user_id, document_id, paragraph_id, ordinal, content, content_hash)
+            SELECT user_id, document_id, paragraph_id, ordinal, content, content_hash
+            FROM chunks;
+        DROP TABLE chunks;
+        ALTER TABLE chunks_new RENAME TO chunks;
+        ",
+    )
+    .await?;
+
+    rebuild_if_pk_legacy(
+        pool,
+        "chunk_embeddings",
+        &["user_id", "document_id", "paragraph_id"],
+        "
+        CREATE TABLE chunk_embeddings_new (
+            user_id      TEXT NOT NULL,
+            document_id  TEXT NOT NULL,
+            paragraph_id TEXT NOT NULL,
+            vector       BLOB NOT NULL,
+            PRIMARY KEY (user_id, document_id, paragraph_id)
+        );
+        INSERT INTO chunk_embeddings_new (user_id, document_id, paragraph_id, vector)
+            SELECT user_id, document_id, paragraph_id, vector FROM chunk_embeddings;
+        DROP TABLE chunk_embeddings;
+        ALTER TABLE chunk_embeddings_new RENAME TO chunk_embeddings;
+        ",
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Read the column names that make up the PRIMARY KEY of `table`, in PK order.
+async fn primary_key_columns(
+    pool: &AnyPool,
+    table: &str,
+) -> anyhow::Result<Vec<String>> {
+    // pragma_table_info: pk = 0 for non-key cols, 1..N for the position within
+    // a composite PK. Order by pk to recover the declared key order.
+    let rows: Vec<(String, i64)> = sqlx::query_as(&format!(
+        "SELECT name, pk FROM pragma_table_info('{table}') WHERE pk > 0 ORDER BY pk"
+    ))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|(name, _)| name).collect())
+}
+
+/// If `table` exists and its PRIMARY KEY does not match `expected_pk`, run
+/// `rebuild_sql` (a sequence of statements ending with the rename of the new
+/// table over the old one). No-op when the table already has the right PK,
+/// or when the table doesn't exist yet.
+async fn rebuild_if_pk_legacy(
+    pool: &AnyPool,
+    table: &str,
+    expected_pk: &[&str],
+    rebuild_sql: &str,
+) -> anyhow::Result<()> {
+    let exists: Option<(String,)> = sqlx::query_as(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+    )
+    .bind(table)
+    .fetch_optional(pool)
+    .await?;
+    if exists.is_none() {
+        return Ok(());
+    }
+
+    let current_pk = primary_key_columns(pool, table).await?;
+    let current_pk_refs: Vec<&str> = current_pk.iter().map(|s| s.as_str()).collect();
+    if current_pk_refs == expected_pk {
+        return Ok(());
+    }
+
+    tracing::info!(
+        table,
+        current_pk = ?current_pk,
+        expected_pk = ?expected_pk,
+        "rebuilding SQLite table with new PRIMARY KEY",
+    );
+    for stmt in rebuild_sql.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+        sqlx::query(stmt)
+            .execute(pool)
+            .await
+            .with_context(|| format!("rebuilding {table}: {stmt}"))?;
+    }
     Ok(())
 }
 
