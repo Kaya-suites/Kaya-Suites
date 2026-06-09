@@ -425,6 +425,29 @@ fn extract_citations(text: &str) -> (String, Vec<(String, String)>) {
     (result, citations)
 }
 
+/// Insert a `StoredEdit` into the in-memory map (hot path used by the
+/// approve/reject handlers) AND mirror it into `pending_edits` table so the
+/// edit survives a server restart. Storage failures are logged and swallowed
+/// — losing durability is preferable to dropping a live SSE stream.
+async fn save_stored_edit(
+    pending_edits: &Arc<Mutex<HashMap<Uuid, StoredEdit>>>,
+    sessions: &Arc<dyn SessionStorage>,
+    stored: StoredEdit,
+) {
+    let edit_id = stored.edit.id;
+    match serde_json::to_string(&stored) {
+        Ok(payload) => {
+            if let Err(e) = sessions.save_pending_edit(edit_id, &payload).await {
+                tracing::warn!(error = %e, %edit_id, "save_pending_edit failed; in-memory only");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, %edit_id, "serialize StoredEdit failed; in-memory only");
+        }
+    }
+    pending_edits.lock().await.insert(edit_id, stored);
+}
+
 async fn build_edit_sse(
     storage: &Arc<dyn StorageAdapter>,
     sessions: &Arc<dyn SessionStorage>,
@@ -524,7 +547,7 @@ async fn build_edit_sse(
                 original_paragraph: String::new(),
                 proposed_paragraph: String::new(),
             };
-            pending_edits.lock().await.insert(edit.id, stored);
+            save_stored_edit(pending_edits, sessions, stored).await;
             let _ = sessions
                 .upsert_edit_history_entry(
                     session_id,
@@ -554,7 +577,7 @@ async fn build_edit_sse(
                 original_paragraph: String::new(),
                 proposed_paragraph: String::new(),
             };
-            pending_edits.lock().await.insert(edit.id, stored);
+            save_stored_edit(pending_edits, sessions, stored).await;
             let _ = sessions
                 .upsert_edit_history_entry(
                     session_id,
@@ -589,7 +612,7 @@ async fn build_edit_sse(
         original_paragraph: original.clone(),
         proposed_paragraph: proposed.clone(),
     };
-    pending_edits.lock().await.insert(edit.id, stored);
+    save_stored_edit(pending_edits, sessions, stored).await;
     let _ = sessions
         .upsert_edit_history_entry(
             session_id,

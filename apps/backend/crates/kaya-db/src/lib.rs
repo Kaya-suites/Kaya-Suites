@@ -433,6 +433,18 @@ async fn run_postgres(pool: &AnyPool) -> anyhow::Result<()> {
 
     rollover_mcp_tokens_postgres(pool).await?;
 
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS pending_edits (
+            id          VARCHAR(36) PRIMARY KEY,
+            payload     TEXT NOT NULL,
+            created_at  BIGINT NOT NULL
+        )
+        ",
+    )
+    .await?;
+
     tracing::info!("Postgres migrations applied");
     Ok(())
 }
@@ -644,6 +656,18 @@ async fn run_sqlite(pool: &AnyPool) -> anyhow::Result<()> {
     exec(pool, "CREATE INDEX IF NOT EXISTS oauth_access_tokens_client ON oauth_access_tokens (client_id)").await?;
 
     rollover_mcp_tokens_sqlite(pool).await?;
+
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS pending_edits (
+            id          TEXT    PRIMARY KEY,
+            payload     TEXT    NOT NULL,
+            created_at  INTEGER NOT NULL
+        )
+        ",
+    )
+    .await?;
 
     tracing::info!("SQLite migrations applied");
     Ok(())
@@ -862,6 +886,19 @@ async fn run_mysql(pool: &AnyPool) -> anyhow::Result<()> {
     .await?;
 
     rollover_mcp_tokens_mysql(pool).await?;
+
+    exec(
+        pool,
+        "
+        CREATE TABLE IF NOT EXISTS pending_edits (
+            id          VARCHAR(36) NOT NULL,
+            payload     LONGTEXT    NOT NULL,
+            created_at  BIGINT      NOT NULL,
+            PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ",
+    )
+    .await?;
 
     tracing::info!("MySQL migrations applied");
     Ok(())

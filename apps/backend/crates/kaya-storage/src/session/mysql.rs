@@ -495,6 +495,45 @@ impl SessionStorage for MySqlSessionStorage {
         Ok(())
     }
 
+    async fn save_pending_edit(
+        &self,
+        edit_id: Uuid,
+        payload_json: &str,
+    ) -> Result<(), SessionError> {
+        let now = chrono::Utc::now().timestamp_millis();
+        sqlx::query(
+            "INSERT INTO pending_edits (id, payload, created_at) VALUES (?, ?, ?) \
+             ON DUPLICATE KEY UPDATE payload = VALUES(payload)",
+        )
+        .bind(edit_id.to_string())
+        .bind(payload_json)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn take_pending_edit(
+        &self,
+        edit_id: Uuid,
+    ) -> Result<Option<String>, SessionError> {
+        let key = edit_id.to_string();
+        let row = sqlx::query("SELECT payload FROM pending_edits WHERE id = ?")
+            .bind(&key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(box_err)?;
+        let Some(row) = row else { return Ok(None) };
+        let payload: String = row.try_get("payload").map_err(box_err)?;
+        sqlx::query("DELETE FROM pending_edits WHERE id = ?")
+            .bind(&key)
+            .execute(&self.pool)
+            .await
+            .map_err(box_err)?;
+        Ok(Some(payload))
+    }
+
     async fn update_proposal_status(
         &self,
         message_id: &str,

@@ -391,6 +391,40 @@ impl SessionStorage for PostgresSessionStorage {
         Ok(())
     }
 
+    async fn save_pending_edit(
+        &self,
+        edit_id: Uuid,
+        payload_json: &str,
+    ) -> Result<(), SessionError> {
+        let now = chrono::Utc::now().timestamp_millis();
+        sqlx::query(
+            "INSERT INTO pending_edits (id, payload, created_at) VALUES ($1, $2, $3) \
+             ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload",
+        )
+        .bind(edit_id.to_string())
+        .bind(payload_json)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(())
+    }
+
+    async fn take_pending_edit(
+        &self,
+        edit_id: Uuid,
+    ) -> Result<Option<String>, SessionError> {
+        // Single round-trip: DELETE ... RETURNING gives us atomic fetch+remove.
+        let row: Option<(String,)> = sqlx::query_as(
+            "DELETE FROM pending_edits WHERE id = $1 RETURNING payload",
+        )
+        .bind(edit_id.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(box_err)?;
+        Ok(row.map(|(payload,)| payload))
+    }
+
     async fn update_proposal_status(
         &self,
         message_id: &str,

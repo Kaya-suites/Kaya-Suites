@@ -225,6 +225,27 @@ pub trait SessionStorage: Send + Sync {
     ) -> Result<(), SessionError> {
         Ok(())
     }
+    /// Persist a proposed edit awaiting user approval. Default no-op so
+    /// in-memory test backends do not need to opt in. Payload is the JSON
+    /// representation of `kaya_server::state::StoredEdit`.
+    async fn save_pending_edit(
+        &self,
+        _edit_id: Uuid,
+        _payload_json: &str,
+    ) -> Result<(), SessionError> {
+        Ok(())
+    }
+
+    /// Fetch + delete a previously persisted pending edit. Returns `None` if
+    /// the edit is unknown (already consumed, never existed, or backend lost
+    /// it). Default no-op so in-memory test backends do not need to opt in.
+    async fn take_pending_edit(
+        &self,
+        _edit_id: Uuid,
+    ) -> Result<Option<String>, SessionError> {
+        Ok(None)
+    }
+
     async fn get_usage_summary(&self) -> Result<UsageSummary, SessionError>;
     /// Record a single embedding API call (tokens used, model name).
     async fn save_embedding_call(&self, call: &EmbeddingCall) -> Result<(), SessionError>;

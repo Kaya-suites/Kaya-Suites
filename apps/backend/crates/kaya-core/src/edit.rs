@@ -9,6 +9,7 @@
 //! a real [`UserSession`].
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -20,7 +21,7 @@ use crate::storage::{Document, StorageAdapter};
 // ── Proposed edit ────────────────────────────────────────────────────────────
 
 /// The kind of change being proposed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProposedEditKind {
     /// Replace the full body of an existing document.
     UpdateContent {
@@ -57,7 +58,7 @@ pub enum ProposedEditKind {
 ///
 /// Created by the agent loop; passed to [`UserSession::approve_edit`] to
 /// produce an [`ApprovalToken`], then to [`commit_edit`] to apply the change.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposedEdit {
     /// Unique identifier for this proposal.
     pub id: Uuid,

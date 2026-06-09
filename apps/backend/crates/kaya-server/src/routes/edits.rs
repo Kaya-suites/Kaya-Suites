@@ -24,6 +24,30 @@ use kaya_core::{
 use crate::error::ApiError;
 use crate::state::StoredEdit;
 
+/// Drain the pending edit either from the in-memory map (hot path) or — if
+/// the process restarted since the proposal — from `pending_edits` storage,
+/// where `chat::save_stored_edit` mirrors every insert. Returns 404 only when
+/// neither source has it (already consumed, double-click, or unknown id).
+async fn take_pending_edit(
+    pending_edits: &Arc<Mutex<HashMap<Uuid, StoredEdit>>>,
+    sessions: &Arc<dyn SessionStorage>,
+    edit_id: Uuid,
+) -> Result<StoredEdit, ApiError> {
+    if let Some(stored) = pending_edits.lock().await.remove(&edit_id) {
+        // The DB row may still exist (write-through, not write-back) — clear it
+        // so a future bogus approve can't resurrect a consumed edit.
+        let _ = sessions.take_pending_edit(edit_id).await;
+        return Ok(stored);
+    }
+    let payload = sessions
+        .take_pending_edit(edit_id)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .ok_or_else(|| ApiError::not_found(format!("edit {edit_id}")))?;
+    serde_json::from_str::<StoredEdit>(&payload)
+        .map_err(|e| ApiError::internal(format!("deserialize pending edit: {e}")))
+}
+
 #[derive(Deserialize)]
 pub struct ApproveBody {
     pub proposed: Option<String>,
@@ -42,11 +66,7 @@ pub async fn approve_edit(
     Path(edit_id): Path<Uuid>,
     Json(body): Json<ApproveBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let stored = pending_edits
-        .lock()
-        .await
-        .remove(&edit_id)
-        .ok_or_else(|| ApiError::not_found(format!("edit {edit_id}")))?;
+    let stored = take_pending_edit(&pending_edits, &sessions, edit_id).await?;
 
     let final_proposed = body
         .proposed
@@ -141,11 +161,7 @@ pub async fn reject_edit(
     Path(edit_id): Path<Uuid>,
     Json(body): Json<RejectBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let stored = pending_edits
-        .lock()
-        .await
-        .remove(&edit_id)
-        .ok_or_else(|| ApiError::not_found(format!("edit {edit_id}")))?;
+    let stored = take_pending_edit(&pending_edits, &sessions, edit_id).await?;
 
     let final_proposed = body
         .proposed
