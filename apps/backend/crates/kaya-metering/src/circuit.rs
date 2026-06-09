@@ -94,7 +94,7 @@ impl CircuitBreaker {
             .and_utc();
 
         let spend: f64 = sqlx::query_scalar::<_, f64>(
-            "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE recorded_at >= ?",
+            "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE recorded_at >= $1",
         )
         .bind(day_start.to_rfc3339())
         .fetch_one(pool)
@@ -118,7 +118,7 @@ impl CircuitBreaker {
             let now_str = now.to_rfc3339();
             if existing.is_some() {
                 sqlx::query(
-                    "UPDATE system_flags SET value = ?, updated_at = ? WHERE key = 'circuit_breaker_tripped'",
+                    "UPDATE system_flags SET value = $1, updated_at = $2 WHERE key = 'circuit_breaker_tripped'",
                 )
                 .bind(&value)
                 .bind(&now_str)
@@ -126,7 +126,7 @@ impl CircuitBreaker {
                 .await?;
             } else {
                 sqlx::query(
-                    "INSERT INTO system_flags (key, value, updated_at) VALUES ('circuit_breaker_tripped', ?, ?)",
+                    "INSERT INTO system_flags (key, value, updated_at) VALUES ('circuit_breaker_tripped', $1, $2)",
                 )
                 .bind(&value)
                 .bind(&now_str)

@@ -35,7 +35,7 @@ pub async fn mint(pool: &AnyPool, req: MintRequest) -> Result<MintedToken, OAuth
     sqlx::query(
         "INSERT INTO oauth_access_tokens \
          (id, token_hash, client_id, user_id, scope, kind, name, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(id.to_string())
     .bind(&hash)
@@ -71,7 +71,7 @@ pub async fn resolve(pool: &AnyPool, raw: &str) -> Result<AccessToken, OAuthErro
         return Err(OAuthError::InvalidGrant);
     }
 
-    let _ = sqlx::query("UPDATE oauth_access_tokens SET last_used_at = ? WHERE token_hash = ?")
+    let _ = sqlx::query("UPDATE oauth_access_tokens SET last_used_at = $1 WHERE token_hash = $2")
         .bind(Utc::now().timestamp_millis())
         .bind(&hash)
         .execute(pool)
@@ -93,8 +93,8 @@ pub async fn resolve(pool: &AnyPool, raw: &str) -> Result<AccessToken, OAuthErro
 pub async fn revoke(pool: &AnyPool, user_id: Uuid, token_id: Uuid) -> Result<bool, OAuthError> {
     let now = Utc::now().timestamp_millis();
     let r = sqlx::query(
-        "UPDATE oauth_access_tokens SET revoked_at = ? \
-         WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+        "UPDATE oauth_access_tokens SET revoked_at = $1 \
+         WHERE id = $2 AND user_id = $3 AND revoked_at IS NULL",
     )
     .bind(now)
     .bind(token_id.to_string())
@@ -113,8 +113,8 @@ pub async fn revoke_for_client(
 ) -> Result<u64, OAuthError> {
     let now = Utc::now().timestamp_millis();
     let r = sqlx::query(
-        "UPDATE oauth_access_tokens SET revoked_at = ? \
-         WHERE user_id = ? AND client_id = ? AND revoked_at IS NULL",
+        "UPDATE oauth_access_tokens SET revoked_at = $1 \
+         WHERE user_id = $2 AND client_id = $3 AND revoked_at IS NULL",
     )
     .bind(now)
     .bind(user_id.to_string())

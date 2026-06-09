@@ -39,7 +39,7 @@ pub async fn mint(pool: &AnyPool, req: MintRequest) -> Result<MintedCode, OAuthE
         "INSERT INTO oauth_authorization_codes \
          (code_hash, client_id, user_id, redirect_uri, scope, code_challenge, \
           code_challenge_method, expires_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(&hash)
     .bind(req.client_id.to_string())
@@ -99,8 +99,8 @@ pub async fn consume(pool: &AnyPool, raw: &str) -> Result<AuthorizationCode, OAu
     let now = Utc::now().timestamp_millis();
 
     let r = sqlx::query(
-        "UPDATE oauth_authorization_codes SET consumed_at = ? \
-         WHERE code_hash = ? AND consumed_at IS NULL",
+        "UPDATE oauth_authorization_codes SET consumed_at = $1 \
+         WHERE code_hash = $2 AND consumed_at IS NULL",
     )
     .bind(now)
     .bind(&hash)

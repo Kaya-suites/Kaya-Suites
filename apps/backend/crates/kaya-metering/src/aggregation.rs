@@ -43,6 +43,11 @@ pub struct AdminStats {
 }
 
 /// Fetch the current-period usage summary for one user.
+///
+/// Uses `$N` placeholders because `sqlx::AnyPool` doesn't auto-translate `?`
+/// for Postgres — `?` parses as a JSON operator there. SQLite accepts `$N`
+/// just like Postgres; MySQL is untested in production and would need a
+/// dialect branch if ever wired up.
 pub async fn monthly_summary(pool: &AnyPool, user_id: Uuid) -> Result<UsageSummary, MeteringError> {
     let period_start = current_period_start();
     let period_start_str = period_start.to_string();
@@ -52,7 +57,7 @@ pub async fn monthly_summary(pool: &AnyPool, user_id: Uuid) -> Result<UsageSumma
                 COALESCE(tokens_out, 0)        AS tokens_out,
                 COALESCE(agent_invocations, 0) AS agent_invocations
          FROM usage_counters
-         WHERE user_id = ? AND period_start = ?",
+         WHERE user_id = $1 AND period_start = $2",
     )
     .bind(user_id.to_string())
     .bind(&period_start_str)
@@ -72,7 +77,7 @@ pub async fn monthly_summary(pool: &AnyPool, user_id: Uuid) -> Result<UsageSumma
     let period_dt = period_start.and_hms_opt(0, 0, 0).unwrap().and_utc();
 
     let cost_usd: f64 = sqlx::query_scalar::<_, f64>(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE user_id = ? AND recorded_at >= ?",
+        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE user_id = $1 AND recorded_at >= $2",
     )
     .bind(user_id.to_string())
     .bind(period_dt.to_rfc3339())
@@ -102,14 +107,14 @@ pub async fn admin_stats(
         .and_utc();
 
     let daily_spend: f64 = sqlx::query_scalar::<_, f64>(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE recorded_at >= ?",
+        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE recorded_at >= $1",
     )
     .bind(day_start.to_rfc3339())
     .fetch_one(pool)
     .await?;
 
     let monthly_spend: f64 = sqlx::query_scalar::<_, f64>(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE recorded_at >= ?",
+        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE recorded_at >= $1",
     )
     .bind(period_dt.to_rfc3339())
     .fetch_one(pool)
@@ -129,8 +134,8 @@ pub async fn admin_stats(
                 COALESCE(SUM(e.cost_usd), 0.0) AS monthly_cost,
                 COALESCE(MAX(uc.agent_invocations), 0) AS agent_invocations
          FROM users u
-         LEFT JOIN usage_events e ON e.user_id = u.id AND e.recorded_at >= ?
-         LEFT JOIN usage_counters uc ON uc.user_id = u.id AND uc.period_start = ?
+         LEFT JOIN usage_events e ON e.user_id = u.id AND e.recorded_at >= $1
+         LEFT JOIN usage_counters uc ON uc.user_id = u.id AND uc.period_start = $2
          GROUP BY u.id, u.email
          ORDER BY monthly_cost DESC
          LIMIT 20",

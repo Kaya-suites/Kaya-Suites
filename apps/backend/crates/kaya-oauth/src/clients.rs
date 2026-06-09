@@ -66,7 +66,7 @@ pub async fn register(
         "INSERT INTO oauth_clients \
          (id, name, secret_hash, redirect_uris, client_type, registration_kind, \
           owner_user_id, registration_access_token_hash, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
     .bind(id.to_string())
     .bind(&req.name)
@@ -175,7 +175,7 @@ pub async fn list_for_owner(
 }
 
 pub async fn delete(pool: &AnyPool, id: Uuid) -> Result<bool, OAuthError> {
-    let r = sqlx::query("DELETE FROM oauth_clients WHERE id = ?")
+    let r = sqlx::query("DELETE FROM oauth_clients WHERE id = $1")
         .bind(id.to_string())
         .execute(pool)
         .await?;
@@ -200,7 +200,7 @@ pub async fn ensure_pat_client(pool: &AnyPool) -> Result<Client, OAuthError> {
         "INSERT INTO oauth_clients \
          (id, name, secret_hash, redirect_uris, client_type, registration_kind, \
           owner_user_id, registration_access_token_hash, created_at, updated_at) \
-         VALUES (?, ?, NULL, ?, ?, ?, NULL, NULL, ?, ?)",
+         VALUES ($1, $2, NULL, $3, $4, $5, NULL, NULL, $6, $7)",
     )
     .bind(PAT_CLIENT_ID.to_string())
     .bind("Personal access tokens")

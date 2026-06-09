@@ -34,7 +34,7 @@ async fn window_usage(
     let used: i64 = sqlx::query_scalar::<_, i64>(
         "SELECT COALESCE(tokens_used, 0)
          FROM rate_limit_windows
-         WHERE user_id = ? AND window_type = ? AND window_start = ?",
+         WHERE user_id = $1 AND window_type = $2 AND window_start = $3",
     )
     .bind(user_id.to_string())
     .bind(window_type)
@@ -58,7 +58,7 @@ async fn increment_window(
 
     let existing = sqlx::query(
         "SELECT tokens_used FROM rate_limit_windows
-         WHERE user_id = ? AND window_type = ? AND window_start = ?",
+         WHERE user_id = $1 AND window_type = $2 AND window_start = $3",
     )
     .bind(user_id.to_string())
     .bind(window_type)
@@ -69,8 +69,8 @@ async fn increment_window(
     if let Some(row) = existing {
         let prev: i64 = row.try_get("tokens_used").unwrap_or(0);
         sqlx::query(
-            "UPDATE rate_limit_windows SET tokens_used = ?
-             WHERE user_id = ? AND window_type = ? AND window_start = ?",
+            "UPDATE rate_limit_windows SET tokens_used = $1
+             WHERE user_id = $2 AND window_type = $3 AND window_start = $4",
         )
         .bind(prev + tokens)
         .bind(user_id.to_string())
@@ -81,7 +81,7 @@ async fn increment_window(
     } else {
         sqlx::query(
             "INSERT INTO rate_limit_windows (user_id, window_type, window_start, tokens_used)
-             VALUES (?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4)",
         )
         .bind(user_id.to_string())
         .bind(window_type)

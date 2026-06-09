@@ -58,7 +58,7 @@ pub async fn persist_event(
 
     sqlx::query(
         "INSERT INTO usage_events (id, user_id, operation, model, input_tokens, output_tokens, cost_usd)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(event_id.to_string())
     .bind(user_id.to_string())
@@ -79,7 +79,7 @@ pub async fn persist_event(
 
     let existing = sqlx::query(
         "SELECT id, tokens_in, tokens_out, agent_invocations FROM usage_counters
-         WHERE user_id = ? AND period_start = ?",
+         WHERE user_id = $1 AND period_start = $2",
     )
     .bind(user_id.to_string())
     .bind(&period_start_str)
@@ -92,8 +92,8 @@ pub async fn persist_event(
         let prev_out: i64 = row.try_get("tokens_out").unwrap_or(0);
         let prev_inv: i64 = row.try_get("agent_invocations").unwrap_or(0);
         sqlx::query(
-            "UPDATE usage_counters SET tokens_in = ?, tokens_out = ?, agent_invocations = ?
-             WHERE id = ?",
+            "UPDATE usage_counters SET tokens_in = $1, tokens_out = $2, agent_invocations = $3
+             WHERE id = $4",
         )
         .bind(prev_in + usage.input_tokens as i64)
         .bind(prev_out + usage.output_tokens as i64)
@@ -105,7 +105,7 @@ pub async fn persist_event(
         let counter_id = Uuid::new_v4();
         sqlx::query(
             "INSERT INTO usage_counters (id, user_id, period_start, tokens_in, tokens_out, agent_invocations)
-             VALUES (?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(counter_id.to_string())
         .bind(user_id.to_string())

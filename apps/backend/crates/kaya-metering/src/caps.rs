@@ -26,7 +26,7 @@ pub async fn check_spend_cap(
         .and_utc();
 
     let spent: f64 = sqlx::query_scalar::<_, f64>(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE user_id = ? AND recorded_at >= ?",
+        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE user_id = $1 AND recorded_at >= $2",
     )
     .bind(user_id.to_string())
     .bind(period_start.to_rfc3339())
@@ -52,7 +52,7 @@ pub async fn current_period_spend(pool: &AnyPool, user_id: Uuid) -> Result<f64, 
         .and_utc();
 
     let spent: f64 = sqlx::query_scalar::<_, f64>(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE user_id = ? AND recorded_at >= ?",
+        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events WHERE user_id = $1 AND recorded_at >= $2",
     )
     .bind(user_id.to_string())
     .bind(period_start.to_rfc3339())

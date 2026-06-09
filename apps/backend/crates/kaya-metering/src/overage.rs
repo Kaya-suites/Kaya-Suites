@@ -17,7 +17,7 @@ pub async fn report_period_overage(
 ) -> Result<(), MeteringError> {
     let row = sqlx::query(
         "SELECT agent_invocations FROM usage_counters
-         WHERE user_id = ? AND period_start = ?
+         WHERE user_id = $1 AND period_start = $2
          LIMIT 1",
     )
     .bind(user_id.to_string())
