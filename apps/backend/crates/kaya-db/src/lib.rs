@@ -90,6 +90,11 @@ async fn prepare_sqlite_legacy(pool: &AnyPool) -> anyhow::Result<()> {
     ];
 
     for table in TABLES {
+        // Recover from a previous half-finished rebuild: if the original
+        // table is gone but its *_new staging is still around, finish the
+        // rename. Restores ui_preferences after the 952b5c7 RENAME crash.
+        recover_orphaned_staging(pool, table).await?;
+
         // Skip tables that don't exist yet — fresh DBs hit this path too, and
         // ALTER TABLE on a non-existent table is a hard error in SQLite.
         let exists: Option<(String,)> = sqlx::query_as(
@@ -202,6 +207,40 @@ async fn prepare_sqlite_legacy(pool: &AnyPool) -> anyhow::Result<()> {
     )
     .await?;
 
+    Ok(())
+}
+
+/// If `{table}` is missing but `{table}_new` exists, rename the staging table
+/// back to its original name. Recovers from a crash *between* `DROP TABLE
+/// {table}` and `ALTER TABLE {table}_new RENAME TO {table}` during a prior
+/// rebuild — data is preserved.
+async fn recover_orphaned_staging(pool: &AnyPool, table: &str) -> anyhow::Result<()> {
+    let original: Option<(String,)> = sqlx::query_as(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+    )
+    .bind(table)
+    .fetch_optional(pool)
+    .await?;
+    if original.is_some() {
+        return Ok(());
+    }
+
+    let staging_name = format!("{table}_new");
+    let staging: Option<(String,)> = sqlx::query_as(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+    )
+    .bind(&staging_name)
+    .fetch_optional(pool)
+    .await?;
+    if staging.is_none() {
+        return Ok(());
+    }
+
+    tracing::info!(table, staging = %staging_name, "recovering orphaned staging table");
+    sqlx::query(&format!("ALTER TABLE {staging_name} RENAME TO {table}"))
+        .execute(pool)
+        .await
+        .with_context(|| format!("recovering {table} from staging"))?;
     Ok(())
 }
 
