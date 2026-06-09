@@ -63,7 +63,7 @@ export default function SettingsPage() {
       if (mRes.status === 401) { setError("Not signed in."); return; }
       if (!mRes.ok) { setError("Failed to load settings."); return; }
       setMetering(await mRes.json());
-      fetch("/api/usage")
+      fetch(`${API_URL}/sessions/usage`, { credentials: "include" })
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (data) setTokenUsage({

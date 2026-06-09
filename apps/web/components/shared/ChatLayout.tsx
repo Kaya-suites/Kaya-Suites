@@ -8,10 +8,11 @@ import { DocumentPanel } from "./DocumentPanel";
 import { OnboardingChecklist } from "./OnboardingChecklist";
 import { useOnboarding } from "@/hooks/useOnboarding";
 import { Plus } from "lucide-react";
+import { apiFetch } from "@/lib/api";
 
 async function fetchSessions(): Promise<ChatSession[]> {
   try {
-    const res = await fetch("/api/sessions");
+    const res = await apiFetch("/sessions");
     if (!res.ok) return [];
     const data = (await res.json()) as unknown;
     return Array.isArray(data) ? (data as ChatSession[]) : [];
@@ -35,7 +36,7 @@ export function ChatLayout() {
 
   useEffect(() => {
     if (!onboarding.isLoaded || onboarding.state?.completed.add_document) return;
-    fetch("/api/documents")
+    apiFetch("/documents")
       .then((r) => (r.ok ? r.json() : []))
       .then((docs: unknown[]) => { if (docs.length > 0) onboarding.markStepComplete("add_document"); })
       .catch(() => {});
@@ -74,7 +75,7 @@ export function ChatLayout() {
 
   const handleRenameSession = useCallback(async (id: string, title: string) => {
     handleSessionRenamed(id, title);
-    await fetch(`/api/sessions/${id}`, {
+    await apiFetch(`/sessions/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title }),
@@ -87,7 +88,7 @@ export function ChatLayout() {
       const remaining = sessions.filter((s) => s.id !== id);
       setSessionId(remaining.length > 0 ? remaining[0].id : crypto.randomUUID());
     }
-    await fetch(`/api/sessions/${id}`, { method: "DELETE" }).catch(() => {});
+    await apiFetch(`/sessions/${id}`, { method: "DELETE" }).catch(() => {});
   }, [sessionId, sessions]);
 
   const handlePinSession = useCallback(async (id: string, pinned: boolean) => {
@@ -99,7 +100,7 @@ export function ChatLayout() {
           return b.updatedAt - a.updatedAt;
         })
     );
-    await fetch(`/api/sessions/${id}/pin`, {
+    await apiFetch(`/sessions/${id}/pin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pinned }),

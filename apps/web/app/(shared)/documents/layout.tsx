@@ -22,6 +22,7 @@ import {
 import { ChevronRight, Folder as FolderIcon, FileText } from "lucide-react";
 import { useResizable } from "@/hooks/useResizable";
 import { DocumentsContext } from "./context";
+import { apiFetch } from "@/lib/api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -164,8 +165,8 @@ export default function DocumentsLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/folders").then((r) => (r.ok ? r.json() : [])),
-      fetch("/api/documents").then((r) => (r.ok ? r.json() : [])),
+      apiFetch("/folders").then((r) => (r.ok ? r.json() : [])),
+      apiFetch("/documents").then((r) => (r.ok ? r.json() : [])),
     ])
       .then(([foldersData, docsData]: [Folder[], DocumentSummary[]]) => {
         setFolders(sortFoldersForRender(foldersData));
@@ -242,7 +243,7 @@ export default function DocumentsLayout({ children }: { children: React.ReactNod
         if (activeData.parentId == null) return;
         const targetIndex = getSiblingFolders(folders, null, activeData.folderId).length;
         try {
-          const res = await fetch(`/api/folders/${activeData.folderId}`, {
+          const res = await apiFetch(`/folders/${activeData.folderId}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ parentId: null, orderIndex: targetIndex }),
@@ -253,7 +254,7 @@ export default function DocumentsLayout({ children }: { children: React.ReactNod
         const doc = documents.find((d) => d.id === activeData.docId);
         if (!doc?.folderId) return;
         try {
-          const res = await fetch(`/api/documents/${activeData.docId}/folder`, {
+          const res = await apiFetch(`/documents/${activeData.docId}/folder`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ folderId: null }),
@@ -286,7 +287,7 @@ export default function DocumentsLayout({ children }: { children: React.ReactNod
 
       try {
         if ((dragDoc.folderId ?? null) !== targetFolderId) {
-          const moveRes = await fetch(`/api/documents/${activeData.docId}/folder`, {
+          const moveRes = await apiFetch(`/documents/${activeData.docId}/folder`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ folderId: targetFolderId }),
@@ -294,7 +295,7 @@ export default function DocumentsLayout({ children }: { children: React.ReactNod
           if (!(moveRes.ok || moveRes.status === 204)) throw new Error("move failed");
         }
 
-        const reorderRes = await fetch(`/api/documents/${activeData.docId}/order`, {
+        const reorderRes = await apiFetch(`/documents/${activeData.docId}/order`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ orderIndex: insertIdx }),
@@ -320,7 +321,7 @@ export default function DocumentsLayout({ children }: { children: React.ReactNod
       const insertIdx = isBefore ? targetIdx : targetIdx + 1;
 
       try {
-        const res = await fetch(`/api/folders/${activeData.folderId}`, {
+        const res = await apiFetch(`/folders/${activeData.folderId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ parentId, orderIndex: insertIdx }),
@@ -364,7 +365,7 @@ export default function DocumentsLayout({ children }: { children: React.ReactNod
       }
 
       try {
-        const res = await fetch(`/api/folders/${activeData.folderId}`, {
+        const res = await apiFetch(`/folders/${activeData.folderId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ parentId: targetParentId, orderIndex: targetIndex }),
@@ -377,7 +378,7 @@ export default function DocumentsLayout({ children }: { children: React.ReactNod
       const previousDocuments = documents;
       setDocuments(applyDocumentMove(documents, activeData.docId, targetFolderId, targetIndex));
       try {
-        const res = await fetch(`/api/documents/${activeData.docId}/folder`, {
+        const res = await apiFetch(`/documents/${activeData.docId}/folder`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ folderId: targetFolderId }),

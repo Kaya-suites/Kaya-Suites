@@ -5,6 +5,7 @@ import { use } from "react";
 import Link from "next/link";
 import { DocumentEditor } from "@/components/shared/DocumentEditor";
 import type { KayaDocument } from "@/types/chat";
+import { apiFetch } from "@/lib/api";
 
 export default function DocumentEditorPage({
   params,
@@ -16,7 +17,7 @@ export default function DocumentEditorPage({
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/documents/${id}`)
+    apiFetch(`/documents/${id}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
       .then((data: KayaDocument) => setDoc(data))
       .catch(() => setError(true));

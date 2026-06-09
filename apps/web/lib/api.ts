@@ -11,3 +11,18 @@ export const API_BASE_URL =
 client.setConfig({ baseUrl: API_BASE_URL });
 
 export { client };
+
+/**
+ * `fetch` against the Rust backend with session cookies attached.
+ *
+ * Use for ad-hoc browser→backend calls that don't go through `@kaya/api-client`.
+ * The backend is cross-site on Render (`*.onrender.com` is on the Public Suffix
+ * List), so credentialed requests need both an absolute URL and
+ * `credentials: "include"` — this helper centralizes both.
+ */
+export function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(`${API_BASE_URL}${path}`, {
+    credentials: "include",
+    ...init,
+  });
+}

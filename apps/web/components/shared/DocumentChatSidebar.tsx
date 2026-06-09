@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChatSession, CitationRef, DocumentContext, KayaDocument } from "@/types/chat";
 import { ChatPanel } from "./ChatPanel";
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/api";
 
 type Props = {
   document: KayaDocument;
@@ -12,7 +13,7 @@ type Props = {
 
 async function fetchSessions(): Promise<ChatSession[]> {
   try {
-    const res = await fetch("/api/sessions");
+    const res = await apiFetch("/sessions");
     return (await res.json()) as ChatSession[];
   } catch {
     return [];

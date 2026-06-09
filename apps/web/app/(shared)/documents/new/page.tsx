@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { ChevronLeft, Tag } from "lucide-react";
+import { apiFetch } from "@/lib/api";
 
 const KayaMarkdownEditor = dynamic(
   () => import("@kaya/markdown-editor").then((m) => m.KayaMarkdownEditor),
@@ -25,7 +26,7 @@ export default function NewDocumentPage() {
     setError(null);
     const tags = tagsInput.split(",").map((t) => t.trim()).filter(Boolean);
     try {
-      const res = await fetch("/api/documents", {
+      const res = await apiFetch("/documents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title.trim(), content: body.trim(), tags }),

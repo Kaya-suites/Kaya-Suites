@@ -6,6 +6,7 @@ import { MarkdownContent } from "@kaya/markdown-editor";
 import { Download, FileText, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/api";
 
 type Props = {
   docId: string | null;
@@ -31,7 +32,7 @@ export function DocumentPanel({
       return;
     }
     setLoading(true);
-    fetch(`/api/documents/${docId}`)
+    apiFetch(`/documents/${docId}`)
       .then((r) => r.json())
       .then((data: KayaDocument) => setDoc(data))
       .catch(() => setDoc(null))
@@ -70,7 +71,7 @@ export function DocumentPanel({
     if (!docId || !doc) return;
     setDownloading(true);
     try {
-      const res = await fetch(`/api/documents/${docId}/export`);
+      const res = await apiFetch(`/documents/${docId}/export`);
       if (!res.ok) throw new Error("export failed");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);

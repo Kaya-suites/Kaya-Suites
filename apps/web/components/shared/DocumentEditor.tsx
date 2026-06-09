@@ -8,6 +8,7 @@ import { DocumentChatSidebar } from "./DocumentChatSidebar";
 import { ChevronLeft, MessageSquare, Copy, Check, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
+import { apiFetch } from "@/lib/api";
 
 const KayaMarkdownEditor = dynamic(
   () => import("@kaya/markdown-editor").then((m) => m.KayaMarkdownEditor),
@@ -75,7 +76,7 @@ export function DocumentEditor({ doc }: Props) {
       isSavingRef.current = true;
       setStatus("saving");
       try {
-        const res = await fetch(`/api/documents/${baseline.id}`, {
+        const res = await apiFetch(`/documents/${baseline.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -135,7 +136,7 @@ export function DocumentEditor({ doc }: Props) {
   }, []);
 
   const refreshFromServer = useCallback(async () => {
-    const res = await fetch(`/api/documents/${serverDoc.id}`);
+    const res = await apiFetch(`/documents/${serverDoc.id}`);
     if (!res.ok) throw new Error("refresh failed");
     return await res.json() as KayaDocument;
   }, [serverDoc.id]);

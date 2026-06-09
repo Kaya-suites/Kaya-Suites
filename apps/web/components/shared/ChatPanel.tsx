@@ -13,10 +13,11 @@ import type {
   ProposedFolderCreate,
 } from "@/types/chat";
 import type { OnboardingStep } from "@/hooks/useOnboarding";
+import { apiFetch } from "@/lib/api";
 
 async function createSession(id: string, title = "New conversation"): Promise<ChatSession | null> {
   try {
-    const res = await fetch("/api/sessions", {
+    const res = await apiFetch("/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, title }),
@@ -87,7 +88,7 @@ export function ChatPanel({ sessionId, isPersisted, onCitationClick, onDocumentU
       return;
     }
     let cancelled = false;
-    fetch(`/api/sessions/${sessionId}/messages`)
+    apiFetch(`/sessions/${sessionId}/messages`)
       .then((res) => (res.ok ? res.json() : []))
       .then(
         (
@@ -203,10 +204,10 @@ export function ChatPanel({ sessionId, isPersisted, onCitationClick, onDocumentU
     if (isFirstMessage) onStepComplete?.("send_first_message");
 
     try {
-      const res = await fetch("/api/chat", {
+      const res = await apiFetch(`/sessions/${sessionId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, message: content, context: requestContext }),
+        body: JSON.stringify({ message: content, context: requestContext }),
       });
 
       if (!res.ok) {
@@ -355,7 +356,7 @@ export function ChatPanel({ sessionId, isPersisted, onCitationClick, onDocumentU
     const edit = msg?.proposedEdits?.find((e) => e.id === editId);
     if (!msg || !edit) return;
 
-    const res = await fetch(`/api/edits/${editId}/approve`, {
+    const res = await apiFetch(`/edits/${editId}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ proposed: finalText }),
@@ -385,7 +386,7 @@ export function ChatPanel({ sessionId, isPersisted, onCitationClick, onDocumentU
     const edit = msg?.proposedEdits?.find((e) => e.id === editId);
     if (!msg || !edit) return;
 
-    const res = await fetch(`/api/edits/${editId}/reject`, {
+    const res = await apiFetch(`/edits/${editId}/reject`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ proposed: pendingEditTexts[editId] ?? edit.proposed }),
@@ -407,7 +408,7 @@ export function ChatPanel({ sessionId, isPersisted, onCitationClick, onDocumentU
   }
 
   async function approveDelete(editId: string) {
-    const res = await fetch(`/api/edits/${editId}/approve`, {
+    const res = await apiFetch(`/edits/${editId}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -428,7 +429,7 @@ export function ChatPanel({ sessionId, isPersisted, onCitationClick, onDocumentU
   }
 
   async function rejectDelete(editId: string) {
-    const res = await fetch(`/api/edits/${editId}/reject`, {
+    const res = await apiFetch(`/edits/${editId}/reject`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -450,7 +451,7 @@ export function ChatPanel({ sessionId, isPersisted, onCitationClick, onDocumentU
   }
 
   async function approveFolderCreate(editId: string) {
-    const res = await fetch(`/api/edits/${editId}/approve`, {
+    const res = await apiFetch(`/edits/${editId}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -473,7 +474,7 @@ export function ChatPanel({ sessionId, isPersisted, onCitationClick, onDocumentU
   }
 
   async function rejectFolderCreate(editId: string) {
-    const res = await fetch(`/api/edits/${editId}/reject`, {
+    const res = await apiFetch(`/edits/${editId}/reject`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),

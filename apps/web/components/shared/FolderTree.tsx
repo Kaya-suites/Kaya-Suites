@@ -9,6 +9,7 @@ import {
 } from "@dnd-kit/core";
 import { MoreVertical, ChevronRight, Folder, FileText, Home, FilePlus, ChevronLeft, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -491,7 +492,7 @@ export function FolderTree({
       } catch {}
 
       try {
-        const res = await fetch("/api/preferences/folder-sidebar");
+        const res = await apiFetch("/sessions/preferences/folder-sidebar");
         if (!res.ok) return;
         const state = await res.json() as FolderSidebarState;
         if (!cancelled && !hadLocalState && Array.isArray(state.expandedFolderIds)) {
@@ -527,7 +528,7 @@ export function FolderTree({
 
     if (savePreferencesTimerRef.current) clearTimeout(savePreferencesTimerRef.current);
     savePreferencesTimerRef.current = setTimeout(() => {
-      void fetch("/api/preferences/folder-sidebar", {
+      void apiFetch("/sessions/preferences/folder-sidebar", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expandedFolderIds }),
@@ -638,7 +639,7 @@ export function FolderTree({
   async function submitRename() {
     if (!renaming || !renaming.name.trim()) { setRenaming(null); return; }
     try {
-      const res = await fetch(`/api/folders/${renaming.id}`, {
+      const res = await apiFetch(`/folders/${renaming.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: renaming.name.trim() }),
@@ -653,7 +654,7 @@ export function FolderTree({
 
   async function deleteFolder(folderId: string) {
     try {
-      const res = await fetch(`/api/folders/${folderId}`, { method: "DELETE" });
+      const res = await apiFetch(`/folders/${folderId}`, { method: "DELETE" });
       if (res.ok || res.status === 204) onFolderDeleted(folderId);
     } catch {}
   }
@@ -686,7 +687,7 @@ export function FolderTree({
   async function deleteDocument(docId: string) {
     setDocKebabMenu(null);
     try {
-      const res = await fetch(`/api/documents/${docId}`, { method: "DELETE" });
+      const res = await apiFetch(`/documents/${docId}`, { method: "DELETE" });
       if (res.ok || res.status === 204) onDocumentDeleted(docId);
     } catch {}
   }
@@ -700,7 +701,7 @@ export function FolderTree({
   async function createDocument(folderId: string | null) {
     closeAll();
     try {
-      const res = await fetch("/api/documents", {
+      const res = await apiFetch("/documents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -732,7 +733,7 @@ export function FolderTree({
   async function submitCreate() {
     if (!creating || !newFolderName.trim()) { setCreating(null); return; }
     try {
-      const res = await fetch("/api/folders", {
+      const res = await apiFetch("/folders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newFolderName.trim(), parentId: creating.parentId }),

@@ -7,6 +7,7 @@ import { DraggableDocument, DraggableFolder, type Folder } from "@/components/sh
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDocumentsContext } from "./context";
+import { apiFetch } from "@/lib/api";
 
 type DocumentSummary = {
   id: string;
@@ -64,7 +65,7 @@ export default function DocumentsPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch("/api/documents", {
+      const res = await apiFetch("/documents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title.trim(), content: content.trim(), folderId: selectedFolderId }),
@@ -186,7 +187,7 @@ export default function DocumentsPage() {
           onSelectFolder={selectFolder}
           onMoveToFolder={async (docId, folderId) => {
             try {
-              const res = await fetch(`/api/documents/${docId}/folder`, {
+              const res = await apiFetch(`/documents/${docId}/folder`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ folderId }),

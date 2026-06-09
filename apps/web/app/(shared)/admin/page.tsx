@@ -163,13 +163,13 @@ export default function AdminPage() {
 
   async function fetchFolders() {
     setFoldersError(null);
-    const r = await fetch("/api/folders", { credentials: "include" });
+    const r = await fetch(`${API_URL}/folders`, { credentials: "include" });
     if (!r.ok) { setFoldersError("Failed to load folders."); return; }
     setFolders(await r.json());
   }
 
   async function moveFolderToRoot(id: string) {
-    const r = await fetch(`/api/folders/${id}`, {
+    const r = await fetch(`${API_URL}/folders/${id}`, {
       method: "PUT",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -179,7 +179,7 @@ export default function AdminPage() {
   }
 
   async function deleteFolderAdmin(id: string) {
-    const r = await fetch(`/api/folders/${id}`, { method: "DELETE", credentials: "include" });
+    const r = await fetch(`${API_URL}/folders/${id}`, { method: "DELETE", credentials: "include" });
     if (r.ok || r.status === 204) setFolders((prev) => prev?.filter((f) => f.id !== id) ?? null);
   }
 
