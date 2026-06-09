@@ -75,8 +75,8 @@ export function ListBlockEditor({
       return (
         <button
           onClick={() => updateItem(itemIndex, (current) => ({ ...current, checked: !current.checked }))}
-          className="mt-1 flex h-5 w-5 items-center justify-center border-2 border-black text-[10px] font-bold"
-          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
+          className="mt-1 flex h-5 w-5 items-center justify-center border border-[var(--color-border)] text-[10px] font-bold"
+          style={{ borderRadius: "var(--radius-md)", boxShadow: "none" }}
         >
           {item.checked ? "x" : ""}
         </button>
@@ -89,7 +89,7 @@ export function ListBlockEditor({
         <button
           title="Switch to bullet"
           onClick={() => replaceBlock({ ...block, ordered: false, items: [{ ...item, ordered: false }] })}
-          className="self-start min-w-6 text-right text-sm font-bold font-mono hover:opacity-50"
+          className="self-start min-w-6 text-right text-sm font-bold hover:opacity-50"
         >
           {number}.
         </button>
@@ -100,7 +100,7 @@ export function ListBlockEditor({
       <button
         title="Switch to numbered"
         onClick={() => replaceBlock({ ...block, ordered: true, items: [{ ...item, ordered: true }] })}
-        className="min-w-4 text-center text-sm font-bold font-mono hover:opacity-50"
+        className="min-w-4 text-center text-sm font-bold hover:opacity-50"
       >
         •
       </button>
@@ -114,7 +114,7 @@ export function ListBlockEditor({
           {itemPrefix(item, itemIndex)}
           <EditableHtml
             html={item.html}
-            className="min-h-8 flex-1 text-sm font-mono leading-relaxed focus:outline-none [&_a]:font-bold [&_a]:text-[var(--color-accent)] [&_a]:underline"
+            className="min-h-8 flex-1 text-sm leading-relaxed focus:outline-none [&_a]:font-bold [&_a]:text-[var(--color-accent)] [&_a]:underline"
             dataBlockId={block.id}
             dataItemId={item.id}
             registerRef={(node) => {

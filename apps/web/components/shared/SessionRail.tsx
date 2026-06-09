@@ -2,7 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChatSession } from "@/types/chat";
-import { MoreVertical, Pencil, Pin, Trash2, ChevronLeft, ChevronRight, Plus, AlignJustify, Rows3 } from "lucide-react";
+import {
+  AlignJustify,
+  ChevronLeft,
+  ChevronRight,
+  MoreVertical,
+  Pencil,
+  Pin,
+  Plus,
+  Rows3,
+  Trash2,
+} from "lucide-react";
+import { cn } from "@/components/ui/cn";
 
 type ViewMode = "comfortable" | "compact";
 
@@ -41,9 +52,10 @@ function formatDate(ts: number): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-const iconBtn = "p-1.5 border-2 border-transparent hover:border-black hover:bg-[var(--color-muted-bg)] transition-all text-black";
-
-// ── Kebab menu ────────────────────────────────────────────────────────────────
+const iconBtn =
+  "inline-flex items-center justify-center w-7 h-7 rounded-[var(--radius-md)] " +
+  "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-subtle)] " +
+  "transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]";
 
 type KebabMenuProps = {
   session: ChatSession;
@@ -87,41 +99,43 @@ function KebabMenu({ session, isActive, onDelete, onPin, onStartEdit }: KebabMen
     onDelete?.(session.id);
   }
 
-  const textColor = isActive ? "text-white" : "text-[var(--color-muted)]";
-  const menuBg = "bg-[var(--color-background)] border-2 border-black";
   const menuItem =
-    "flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs font-mono text-black hover:bg-[var(--color-muted-bg)] transition-colors";
+    "flex items-center gap-2 w-full px-3 py-1.5 text-left text-[var(--font-size-sm)] " +
+    "text-[var(--color-text)] hover:bg-[var(--color-bg-subtle)] transition-colors";
 
   return (
     <div ref={menuRef} className="relative shrink-0">
       <button
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className={`opacity-0 group-hover:opacity-100 ${open ? "opacity-100" : ""} p-1.5 transition-opacity ${textColor}`}
-        title="Options"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className={cn(
+          "opacity-0 group-hover:opacity-100 p-1.5 transition-opacity",
+          open && "opacity-100",
+          isActive ? "text-[var(--color-text)]" : "text-[var(--color-text-muted)]",
+        )}
         aria-label="Session options"
       >
         <MoreVertical size={12} />
       </button>
 
       {open && (
-        <div
-          className={`absolute right-0 top-full mt-0.5 z-50 w-36 ${menuBg}`}
-          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
-        >
+        <div className="absolute right-0 top-full mt-1 z-50 w-36 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-[var(--radius-md)] shadow-[var(--shadow-md)] py-1">
           <button className={menuItem} onClick={handleRename}>
-            <Pencil size={11} />
+            <Pencil size={12} />
             Rename
           </button>
           <button className={menuItem} onClick={handlePin}>
-            <Pin size={11} />
+            <Pin size={12} />
             {session.pinned ? "Unpin" : "Pin"}
           </button>
-          <div className="border-t border-black/10 my-0.5" />
+          <div className="border-t border-[var(--color-border)] my-1" />
           <button
-            className={`${menuItem} text-red-600 hover:bg-red-50`}
+            className={cn(menuItem, "text-[var(--color-danger)]")}
             onClick={handleDelete}
           >
-            <Trash2 size={11} />
+            <Trash2 size={12} />
             Delete
           </button>
         </div>
@@ -130,9 +144,15 @@ function KebabMenu({ session, isActive, onDelete, onPin, onStartEdit }: KebabMen
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
-
-export function SessionRail({ sessions, currentSessionId, onSelect, onNew, onRename, onDelete, onPin }: Props) {
+export function SessionRail({
+  sessions,
+  currentSessionId,
+  onSelect,
+  onNew,
+  onRename,
+  onDelete,
+  onPin,
+}: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [viewMode, setViewMode] = useViewMode();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -162,19 +182,18 @@ export function SessionRail({ sessions, currentSessionId, onSelect, onNew, onRen
   if (collapsed) {
     return (
       <aside
-        className="flex flex-col items-center w-10 min-h-0 border-r-2 border-black py-3 gap-3 shrink-0"
-        style={{ background: "var(--color-background)" }}
+        className="flex flex-col items-center w-10 min-h-0 border-r border-[var(--color-border)] bg-[var(--color-surface)] py-3 gap-2 shrink-0"
+        aria-label="Sessions (collapsed)"
       >
         <button
           onClick={() => setCollapsed(false)}
-          title="Expand sessions"
-          className="w-8 h-8 flex items-center justify-center border-2 border-black bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity"
-          style={{ boxShadow: "var(--shadow-button)" }}
+          aria-label="Expand sessions"
+          className={iconBtn}
         >
           <ChevronRight size={14} />
         </button>
-        <button onClick={onNew} className={iconBtn} title="New conversation">
-          <Plus size={16} />
+        <button onClick={onNew} className={iconBtn} aria-label="New conversation">
+          <Plus size={14} />
         </button>
       </aside>
     );
@@ -182,27 +201,28 @@ export function SessionRail({ sessions, currentSessionId, onSelect, onNew, onRen
 
   return (
     <aside
-      className="flex flex-col w-56 min-h-0 border-r-2 border-black shrink-0"
-      style={{ background: "var(--color-background)" }}
+      className="flex flex-col w-56 min-h-0 border-r border-[var(--color-border)] bg-[var(--color-surface)] shrink-0"
+      aria-label="Sessions"
     >
-      <div className="flex items-center justify-between px-3 py-3 border-b-2 border-black">
-        <span className="text-xs font-bold text-black uppercase tracking-wider font-mono">Sessions</span>
-        <div className="flex items-center gap-1">
+      <div className="flex items-center justify-between px-3 py-3 border-b border-[var(--color-border)]">
+        <span className="text-[var(--font-size-xs)] font-medium text-[var(--color-text-muted)] tracking-wide">
+          Sessions
+        </span>
+        <div className="flex items-center gap-0.5">
           <button
             onClick={() => setViewMode(viewMode === "comfortable" ? "compact" : "comfortable")}
             className={iconBtn}
-            title={viewMode === "comfortable" ? "Compact view" : "Comfortable view"}
+            aria-label={viewMode === "comfortable" ? "Compact view" : "Comfortable view"}
           >
             {viewMode === "comfortable" ? <AlignJustify size={14} /> : <Rows3 size={14} />}
           </button>
-          <button onClick={onNew} className={iconBtn} title="New conversation">
+          <button onClick={onNew} className={iconBtn} aria-label="New conversation">
             <Plus size={14} />
           </button>
           <button
             onClick={() => setCollapsed(true)}
-            title="Collapse sessions"
-            className="w-8 h-8 flex items-center justify-center border-2 border-black bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity"
-            style={{ boxShadow: "var(--shadow-button)" }}
+            aria-label="Collapse sessions"
+            className={iconBtn}
           >
             <ChevronLeft size={14} />
           </button>
@@ -211,23 +231,22 @@ export function SessionRail({ sessions, currentSessionId, onSelect, onNew, onRen
 
       <nav className="flex-1 overflow-y-auto py-2">
         {sessions.length === 0 && (
-          <p className="px-3 py-2 text-xs text-[var(--color-muted)] font-mono italic">No past sessions</p>
+          <p className="px-3 py-2 text-[var(--font-size-sm)] text-[var(--color-text-subtle)] italic">
+            No past sessions
+          </p>
         )}
         {sessions.map((s, i) => {
           const isActive = s.id === currentSessionId;
           const isEditing = editingId === s.id;
+          const rowBase =
+            "group flex mx-2 mb-0.5 rounded-[var(--radius-md)] transition-colors";
+          const rowState = isActive
+            ? "bg-[var(--color-bg-subtle)] text-[var(--color-text)]"
+            : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text)]";
 
           if (viewMode === "compact") {
             return (
-              <div
-                key={s.id ?? i}
-                className={`group flex items-center mx-1 border-2 transition-all ${
-                  isActive
-                    ? "bg-[var(--color-accent)] text-white border-black"
-                    : "border-transparent text-black hover:border-black hover:bg-[var(--color-muted-bg)]"
-                }`}
-                style={isActive ? { borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" } : { borderRadius: "var(--border-radius)" }}
-              >
+              <div key={s.id ?? i} className={cn(rowBase, rowState, "items-center")}>
                 {isEditing ? (
                   <input
                     ref={inputRef}
@@ -235,14 +254,21 @@ export function SessionRail({ sessions, currentSessionId, onSelect, onNew, onRen
                     onChange={(e) => setEditValue(e.target.value)}
                     onBlur={() => commitEdit(s.id)}
                     onKeyDown={(e) => handleEditKey(e, s.id)}
-                    className="flex-1 px-3 py-1.5 text-xs bg-transparent outline-none font-mono text-black"
+                    className="flex-1 px-3 py-1.5 text-[var(--font-size-sm)] bg-transparent outline-none text-[var(--color-text)]"
                   />
                 ) : (
                   <button
                     onClick={() => onSelect(s.id)}
-                    className="flex-1 text-left px-3 py-1.5 text-xs truncate leading-5 font-mono font-bold"
+                    aria-current={isActive ? "true" : undefined}
+                    className="flex-1 text-left px-3 py-1.5 text-[var(--font-size-sm)] truncate font-medium"
                   >
-                    {s.pinned && <Pin className="inline mr-1 mb-0.5 opacity-60" size={9} fill="currentColor" />}
+                    {s.pinned && (
+                      <Pin
+                        className="inline mr-1 mb-0.5 opacity-60"
+                        size={9}
+                        fill="currentColor"
+                      />
+                    )}
                     {s.title}
                   </button>
                 )}
@@ -261,15 +287,7 @@ export function SessionRail({ sessions, currentSessionId, onSelect, onNew, onRen
           }
 
           return (
-            <div
-              key={s.id ?? i}
-              className={`group flex items-start mx-1 border-2 mb-1 transition-all ${
-                isActive
-                  ? "bg-[var(--color-accent)] text-white border-black"
-                  : "border-transparent text-black hover:border-black hover:bg-[var(--color-muted-bg)]"
-              }`}
-              style={isActive ? { borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" } : { borderRadius: "var(--border-radius)" }}
-            >
+            <div key={s.id ?? i} className={cn(rowBase, rowState, "items-start")}>
               {isEditing ? (
                 <input
                   ref={inputRef}
@@ -277,18 +295,25 @@ export function SessionRail({ sessions, currentSessionId, onSelect, onNew, onRen
                   onChange={(e) => setEditValue(e.target.value)}
                   onBlur={() => commitEdit(s.id)}
                   onKeyDown={(e) => handleEditKey(e, s.id)}
-                  className="flex-1 px-3 py-2 text-sm bg-transparent outline-none font-mono text-black"
+                  className="flex-1 px-3 py-2 text-[var(--font-size-sm)] bg-transparent outline-none text-[var(--color-text)]"
                 />
               ) : (
                 <button
                   onClick={() => onSelect(s.id)}
+                  aria-current={isActive ? "true" : undefined}
                   className="flex-1 text-left px-3 py-2 min-w-0"
                 >
-                  <div className="truncate leading-5 text-xs font-bold font-mono">
-                    {s.pinned && <Pin className="inline mr-1 mb-0.5 opacity-60" size={9} fill="currentColor" />}
+                  <div className="truncate text-[var(--font-size-sm)] font-medium">
+                    {s.pinned && (
+                      <Pin
+                        className="inline mr-1 mb-0.5 opacity-60"
+                        size={9}
+                        fill="currentColor"
+                      />
+                    )}
                     {s.title}
                   </div>
-                  <div className={`text-xs mt-0.5 font-mono ${isActive ? "text-white/70" : "text-[var(--color-muted)]"}`}>
+                  <div className="text-[var(--font-size-xs)] mt-0.5 text-[var(--color-text-subtle)]">
                     {formatDate(s.updatedAt)}
                   </div>
                 </button>

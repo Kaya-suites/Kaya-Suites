@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Home, Folder, FileText, ChevronRight, FolderInput } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 type DocumentSummary = {
   id: string;
@@ -97,20 +98,20 @@ function FolderPicker({
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-1 z-50 bg-white border-2 border-black shadow-lg min-w-44 py-1"
-      style={{ borderRadius: "var(--border-radius)" }}
+      className="absolute right-0 top-full mt-1 z-50 bg-[var(--color-surface)] border border-[var(--color-border)] shadow-lg min-w-44 py-1"
+      style={{ borderRadius: "var(--radius-md)" }}
       onClick={(e) => e.stopPropagation()}
     >
-      <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-muted)] font-mono border-b border-black mb-1">
+      <p className="px-3 py-1 text-[var(--font-size-xs)] font-medium text-[var(--color-text-subtle)] border-b border-[var(--color-border)] mb-1">
         Move to folder
       </p>
 
       {/* No folder / root */}
       <button
-        className={`w-full text-left flex items-center gap-2 px-3 py-1.5 text-xs font-mono font-bold uppercase tracking-wider transition-colors ${
+        className={`w-full text-left flex items-center gap-2 px-3 py-1.5 text-xs font-medium transition-colors ${
           (currentFolderId ?? null) === null
-            ? "bg-[var(--color-accent)] text-white"
-            : "hover:bg-[var(--color-muted-bg)] text-black"
+            ? "bg-[var(--color-accent)] text-[var(--color-accent-fg)]"
+            : "hover:bg-[var(--color-bg-subtle)] text-[var(--color-text)]"
         }`}
         onClick={() => { onMove(docId, null); onClose(); }}
       >
@@ -121,10 +122,10 @@ function FolderPicker({
       {tree.map(({ folder, depth }) => (
         <button
           key={folder.id}
-          className={`w-full text-left flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider transition-colors py-1.5 pr-3 ${
+          className={`w-full text-left flex items-center gap-2 text-xs font-medium transition-colors py-1.5 pr-3 ${
             currentFolderId === folder.id
-              ? "bg-[var(--color-accent)] text-white"
-              : "hover:bg-[var(--color-muted-bg)] text-black"
+              ? "bg-[var(--color-accent)] text-[var(--color-accent-fg)]"
+              : "hover:bg-[var(--color-bg-subtle)] text-[var(--color-text)]"
           }`}
           style={{ paddingLeft: `${depth * 12 + 12}px` }}
           onClick={() => { onMove(docId, folder.id); onClose(); }}
@@ -135,7 +136,7 @@ function FolderPicker({
       ))}
 
       {folders.length === 0 && (
-        <p className="px-3 py-2 text-xs font-mono text-[var(--color-muted)]">No folders yet</p>
+        <p className="px-3 py-2 text-xs text-[var(--color-text-muted)]">No folders yet</p>
       )}
     </div>
   );
@@ -153,7 +154,7 @@ export function DocumentList({ documents, loading, folders, subfolders, onSelect
     return (
       <div className="p-6 space-y-3">
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="h-14 border-2 border-black bg-[var(--color-muted-bg)] animate-pulse" style={{ borderRadius: "var(--border-radius)" }} />
+          <div key={i} className="h-14 border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
         ))}
       </div>
     );
@@ -163,31 +164,31 @@ export function DocumentList({ documents, loading, folders, subfolders, onSelect
 
   if (!hasContent) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-[var(--color-muted)] text-sm gap-3 font-mono">
-        <FileText size={32} />
-        <p className="uppercase tracking-wider text-xs font-bold">No documents yet. Ask Kaya to create one.</p>
+      <div className="flex flex-col items-center justify-center h-64 text-[var(--color-text-subtle)] gap-3">
+        <FileText size={32} strokeWidth={1.5} />
+        <p className="text-[var(--font-size-sm)]">No documents yet. Ask Kaya to create one.</p>
       </div>
     );
   }
 
   return (
-    <div className="divide-y-2 divide-black">
+    <div className="divide-y divide-[var(--color-border)]">
       {subfolders?.map((folder, idx) => {
         const folderRow = (
           <div key={folder.id} className="group relative flex items-stretch">
             <button
               onClick={() => onSelectFolder?.(folder.id)}
-              className="flex-1 flex items-start gap-4 px-6 py-4 hover:bg-[var(--color-muted-bg)] transition-colors min-w-0 text-left"
+              className="flex-1 flex items-start gap-4 px-6 py-4 hover:bg-[var(--color-bg-subtle)] transition-colors min-w-0 text-left"
             >
-              <div className="shrink-0 mt-0.5 text-[var(--color-muted)] group-hover:text-[var(--color-accent)] transition-colors">
+              <div className="shrink-0 mt-0.5 text-[var(--color-text-muted)] group-hover:text-[var(--color-accent)] transition-colors">
                 <Folder size={16} />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wider text-black group-hover:text-[var(--color-accent)] truncate transition-colors font-mono">
+                <p className="text-[var(--font-size-base)] font-medium text-[var(--color-text)] truncate transition-colors">
                   {folder.name}
                 </p>
               </div>
-              <div className="shrink-0 text-[var(--color-muted)] group-hover:text-black mt-0.5 transition-colors">
+              <div className="shrink-0 text-[var(--color-text-muted)] group-hover:text-[var(--color-text)] mt-0.5 transition-colors">
                 <ChevronRight size={14} />
               </div>
             </button>
@@ -210,33 +211,27 @@ export function DocumentList({ documents, loading, folders, subfolders, onSelect
           <div className="group relative flex items-stretch">
             <Link
               href={`/documents/${doc.id}`}
-              className="flex-1 flex items-start gap-4 px-6 py-4 hover:bg-[var(--color-muted-bg)] transition-colors min-w-0"
+              className="flex-1 flex items-start gap-4 px-6 py-4 hover:bg-[var(--color-bg-subtle)] transition-colors min-w-0"
             >
-              <div className="shrink-0 mt-0.5 text-[var(--color-muted)] group-hover:text-[var(--color-accent)] transition-colors">
+              <div className="shrink-0 mt-0.5 text-[var(--color-text-muted)] group-hover:text-[var(--color-accent)] transition-colors">
                 <FileText size={16} />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wider text-black group-hover:text-[var(--color-accent)] truncate transition-colors font-mono">
+                <p className="text-[var(--font-size-base)] font-medium text-[var(--color-text)] truncate transition-colors">
                   {doc.title}
                 </p>
                 <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                   {doc.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="px-2 py-0.5 border-2 border-black text-black text-xs font-bold uppercase font-mono"
-                      style={{ borderRadius: "var(--border-radius)" }}
-                    >
-                      {tag}
-                    </span>
+                    <Badge key={tag}>{tag}</Badge>
                   ))}
                   {doc.lastReviewed && (
-                    <span className="text-xs text-[var(--color-muted)] font-mono">
+                    <span className="text-[var(--font-size-xs)] text-[var(--color-text-subtle)]">
                       Reviewed {doc.lastReviewed}
                     </span>
                   )}
                 </div>
               </div>
-              <div className="shrink-0 text-[var(--color-muted)] group-hover:text-black mt-0.5 transition-colors">
+              <div className="shrink-0 text-[var(--color-text-muted)] group-hover:text-[var(--color-text)] mt-0.5 transition-colors">
                 <ChevronRight size={14} />
               </div>
             </Link>
@@ -246,8 +241,8 @@ export function DocumentList({ documents, loading, folders, subfolders, onSelect
               <div className="relative shrink-0 flex items-center pr-3">
                 <button
                   title="Move to folder"
-                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 border-2 border-transparent hover:border-black hover:bg-[var(--color-muted-bg)] text-[var(--color-muted)] hover:text-black"
-                  style={{ borderRadius: "var(--border-radius)" }}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 border border-transparent hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-subtle)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                  style={{ borderRadius: "var(--radius-md)" }}
                   onClick={() => setOpenPickerId(openPickerId === doc.id ? null : doc.id)}
                 >
                   <FolderInput size={14} />

@@ -58,8 +58,8 @@ function fmt(usd: number) {
   return `$${usd.toFixed(4)}`;
 }
 
-const cardClass = "bg-[var(--color-surface)] border-2 border-black";
-const cardStyle = { borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" };
+const cardClass = "bg-[var(--color-surface)] border border-[var(--color-border)]";
+const cardStyle = { borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" };
 
 function cellValue(v: unknown): string {
   if (v === null || v === undefined) return "NULL";
@@ -72,23 +72,23 @@ function cellValue(v: unknown): string {
 
 function ResultTable({ columns, rows }: { columns: string[]; rows: unknown[][] }) {
   if (columns.length === 0) {
-    return <p className="text-[var(--color-muted)] text-xs px-6 py-4">No rows returned.</p>;
+    return <p className="text-[var(--color-text-muted)] text-xs px-6 py-4">No rows returned.</p>;
   }
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs min-w-max">
         <thead>
-          <tr className="text-left border-b-2 border-black" style={{ background: "var(--color-background)" }}>
+          <tr className="text-left border-b border-[var(--color-border)]" style={{ background: "var(--color-bg)" }}>
             {columns.map((c) => (
-              <th key={c} className="px-4 py-3 font-bold uppercase tracking-wider whitespace-nowrap">{c}</th>
+              <th key={c} className="px-4 py-3 font-medium whitespace-nowrap">{c}</th>
             ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-black/10">
           {rows.map((row, i) => (
-            <tr key={i} className="hover:bg-[var(--color-muted-bg)]">
+            <tr key={i} className="hover:bg-[var(--color-bg-subtle)]">
               {row.map((cell, j) => (
-                <td key={j} className="px-4 py-2 font-mono text-xs text-black max-w-xs truncate whitespace-nowrap">
+                <td key={j} className="px-4 py-2 text-xs text-[var(--color-text)] max-w-xs truncate whitespace-nowrap">
                   {cellValue(cell)}
                 </td>
               ))}
@@ -310,13 +310,13 @@ export default function AdminPage() {
   }, []);
 
   return (
-    <main className="min-h-screen p-8 font-mono" style={{ background: "var(--color-background)" }}>
+    <main className="min-h-screen p-8" style={{ background: "var(--color-bg)" }}>
       <div className="max-w-6xl mx-auto space-y-10">
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <h1 className="text-2xl font-black uppercase tracking-tight">Admin Dashboard</h1>
+          <h1 className="font-[var(--font-serif)] text-3xl font-semibold tracking-tight">Admin Dashboard</h1>
           <Link
             href="/admin/oauth-clients"
-            className="text-xs font-bold uppercase tracking-wider underline"
+            className="text-xs font-medium underline"
           >
             OAuth clients →
           </Link>
@@ -324,27 +324,31 @@ export default function AdminPage() {
 
         {/* ── Stats ── */}
         <section className="space-y-4">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">Founder Stats</h2>
+          <h2 className="text-xs font-medium text-[var(--color-text-muted)]">Founder Stats</h2>
 
           {statsError ? (
-            <p className="text-[var(--color-danger)] font-bold text-xs uppercase tracking-wider">{statsError}</p>
+            <p className="text-[var(--color-danger)] font-semibold text-xs ">{statsError}</p>
           ) : !stats ? (
-            <p className="text-[var(--color-muted)] text-xs uppercase tracking-wider animate-pulse">Loading…</p>
+            <div className="space-y-2">
+              <div className="h-3 w-32 border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+              <div className="h-3 w-48 border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+              <div className="h-3 w-40 border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+            </div>
           ) : (
             <>
               {stats.circuit_breaker_active && (
                 <div
-                  className="border-2 border-[var(--color-danger)] bg-[#FFD6CC] p-4 flex items-center justify-between"
-                  style={{ borderRadius: "var(--border-radius)", boxShadow: "4px 4px 0px var(--color-danger)" }}
+                  className="border border-[var(--color-danger)] bg-[#FFD6CC] p-4 flex items-center justify-between"
+                  style={{ borderRadius: "var(--radius-md)", boxShadow: "4px 4px 0px var(--color-danger)" }}
                 >
-                  <p className="text-[var(--color-danger)] font-bold text-xs uppercase tracking-wider">
+                  <p className="text-[var(--color-danger)] font-semibold text-xs ">
                     CIRCUIT BREAKER OPEN — new agent invocations are blocked.
                   </p>
                   <button
                     onClick={resetCircuitBreaker}
                     disabled={resetting}
-                    className="ml-4 text-xs border-2 border-[var(--color-danger)] bg-[var(--color-danger)] text-white px-3 py-1.5 font-bold uppercase tracking-wider disabled:opacity-50"
-                    style={{ borderRadius: "var(--border-radius)" }}
+                    className="ml-4 text-xs border border-[var(--color-danger)] bg-[var(--color-danger)] text-[var(--color-accent-fg)] px-3 py-1.5 font-medium disabled:opacity-50"
+                    style={{ borderRadius: "var(--radius-md)" }}
                   >
                     {resetting ? "Resetting…" : "Reset"}
                   </button>
@@ -359,28 +363,28 @@ export default function AdminPage() {
               </div>
 
               <div className={`${cardClass} overflow-hidden`} style={cardStyle}>
-                <div className="px-6 py-4 border-b-2 border-black" style={{ background: "var(--color-muted-bg)" }}>
-                  <h3 className="font-bold text-xs uppercase tracking-wider">Top users by monthly spend</h3>
+                <div className="px-6 py-4 border-b border-[var(--color-border)]" style={{ background: "var(--color-bg-subtle)" }}>
+                  <h3 className="font-semibold text-xs ">Top users by monthly spend</h3>
                 </div>
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="text-left border-b-2 border-black" style={{ background: "var(--color-background)" }}>
-                      <th className="px-6 py-3 font-bold uppercase tracking-wider">Email</th>
-                      <th className="px-6 py-3 text-right font-bold uppercase tracking-wider">Spend (MTD)</th>
-                      <th className="px-6 py-3 text-right font-bold uppercase tracking-wider">Invocations</th>
+                    <tr className="text-left border-b border-[var(--color-border)]" style={{ background: "var(--color-bg)" }}>
+                      <th className="px-6 py-3 font-medium">Email</th>
+                      <th className="px-6 py-3 text-right font-medium">Spend (MTD)</th>
+                      <th className="px-6 py-3 text-right font-medium">Invocations</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y-2 divide-black">
                     {stats.top_users.map((u) => (
                       <tr key={u.user_id}>
-                        <td className="px-6 py-3 font-mono text-xs text-black">{u.email}</td>
-                        <td className="px-6 py-3 text-right tabular-nums font-bold">{fmt(u.monthly_cost_usd)}</td>
-                        <td className="px-6 py-3 text-right tabular-nums font-bold">{u.agent_invocations}</td>
+                        <td className="px-6 py-3 text-xs text-[var(--color-text)]">{u.email}</td>
+                        <td className="px-6 py-3 text-right tabular-nums font-semibold">{fmt(u.monthly_cost_usd)}</td>
+                        <td className="px-6 py-3 text-right tabular-nums font-semibold">{u.agent_invocations}</td>
                       </tr>
                     ))}
                     {stats.top_users.length === 0 && (
                       <tr>
-                        <td colSpan={3} className="px-6 py-6 text-center text-[var(--color-muted)]">No usage this period.</td>
+                        <td colSpan={3} className="px-6 py-6 text-center text-[var(--color-text-muted)]">No usage this period.</td>
                       </tr>
                     )}
                   </tbody>
@@ -388,7 +392,7 @@ export default function AdminPage() {
               </div>
 
               <p className="text-xs text-right">
-                <button onClick={fetchStats} className="underline font-bold text-black hover:text-[var(--color-accent)]">
+                <button onClick={fetchStats} className="underline font-semibold text-[var(--color-text)] hover:text-[var(--color-accent)]">
                   Reload stats
                 </button>
               </p>
@@ -398,51 +402,55 @@ export default function AdminPage() {
 
         {/* ── User management ── */}
         <section className="space-y-4">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">User Management</h2>
+          <h2 className="text-xs font-medium text-[var(--color-text-muted)]">User Management</h2>
 
           {usersError ? (
-            <p className="text-[var(--color-danger)] font-bold text-xs uppercase tracking-wider">{usersError}</p>
+            <p className="text-[var(--color-danger)] font-semibold text-xs ">{usersError}</p>
           ) : !users ? (
-            <p className="text-[var(--color-muted)] text-xs uppercase tracking-wider animate-pulse">Loading…</p>
+            <div className="space-y-2">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="h-10 w-full border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+              ))}
+            </div>
           ) : (
             <>
               <div className={`${cardClass} overflow-hidden`} style={cardStyle}>
-                <div className="px-6 py-4 border-b-2 border-black" style={{ background: "var(--color-muted-bg)" }}>
-                  <h3 className="font-bold text-xs uppercase tracking-wider">All users ({users.length})</h3>
+                <div className="px-6 py-4 border-b border-[var(--color-border)]" style={{ background: "var(--color-bg-subtle)" }}>
+                  <h3 className="font-semibold text-xs ">All users ({users.length})</h3>
                 </div>
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="text-left border-b-2 border-black" style={{ background: "var(--color-background)" }}>
-                      <th className="px-6 py-3 font-bold uppercase tracking-wider">Email</th>
-                      <th className="px-6 py-3 font-bold uppercase tracking-wider">Username</th>
-                      <th className="px-6 py-3 font-bold uppercase tracking-wider">Role</th>
-                      <th className="px-6 py-3 font-bold uppercase tracking-wider">Created</th>
-                      <th className="px-6 py-3 font-bold uppercase tracking-wider"></th>
+                    <tr className="text-left border-b border-[var(--color-border)]" style={{ background: "var(--color-bg)" }}>
+                      <th className="px-6 py-3 font-medium">Email</th>
+                      <th className="px-6 py-3 font-medium">Username</th>
+                      <th className="px-6 py-3 font-medium">Role</th>
+                      <th className="px-6 py-3 font-medium">Created</th>
+                      <th className="px-6 py-3 font-medium"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y-2 divide-black">
                     {users.map((u) => (
                       <tr key={u.id}>
-                        <td className="px-6 py-3 font-mono text-xs text-black">{u.email}</td>
-                        <td className="px-6 py-3 text-[var(--color-muted)]">{u.username ?? "—"}</td>
+                        <td className="px-6 py-3 text-xs text-[var(--color-text)]">{u.email}</td>
+                        <td className="px-6 py-3 text-[var(--color-text-muted)]">{u.username ?? "—"}</td>
                         <td className="px-6 py-3">
                           {u.is_superadmin ? (
-                            <span className="bg-black text-white text-xs px-2 py-0.5 font-bold uppercase tracking-wider" style={{ borderRadius: "var(--border-radius)" }}>
+                            <span className="bg-black text-[var(--color-accent-fg)] text-xs px-2 py-0.5 font-medium" style={{ borderRadius: "var(--radius-md)" }}>
                               Superadmin
                             </span>
                           ) : (
-                            <span className="text-[var(--color-muted)]">User</span>
+                            <span className="text-[var(--color-text-muted)]">User</span>
                           )}
                         </td>
-                        <td className="px-6 py-3 text-[var(--color-muted)]">
+                        <td className="px-6 py-3 text-[var(--color-text-muted)]">
                           {new Date(u.created_at).toLocaleDateString()}
                         </td>
                         <td className="px-6 py-3">
                           <button
                             disabled={u.id === currentUserId || u.is_superadmin}
                             onClick={() => deleteUser(u.id)}
-                            className="text-xs border-2 border-[var(--color-danger)] text-[var(--color-danger)] px-2 py-1 font-bold uppercase tracking-wider hover:bg-[var(--color-danger)] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-                            style={{ borderRadius: "var(--border-radius)" }}
+                            className="text-xs border border-[var(--color-danger)] text-[var(--color-danger)] px-2 py-1 font-medium hover:bg-[var(--color-danger)] hover:text-[var(--color-accent-fg)] disabled:opacity-30 disabled:cursor-not-allowed"
+                            style={{ borderRadius: "var(--radius-md)" }}
                           >
                             Delete
                           </button>
@@ -451,7 +459,7 @@ export default function AdminPage() {
                     ))}
                     {users.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="px-6 py-6 text-center text-[var(--color-muted)]">No users yet.</td>
+                        <td colSpan={5} className="px-6 py-6 text-center text-[var(--color-text-muted)]">No users yet.</td>
                       </tr>
                     )}
                   </tbody>
@@ -459,7 +467,7 @@ export default function AdminPage() {
               </div>
 
               <div className={`${cardClass} p-6 space-y-4`} style={cardStyle}>
-                <h3 className="font-bold text-xs uppercase tracking-wider">Create user</h3>
+                <h3 className="font-semibold text-xs ">Create user</h3>
                 <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Field label="Email" type="email" value={createForm.email} required onChange={(v) => setCreateForm((f) => ({ ...f, email: v }))} />
                   <Field label="Username (optional)" type="text" value={createForm.username} onChange={(v) => setCreateForm((f) => ({ ...f, username: v }))} />
@@ -470,20 +478,20 @@ export default function AdminPage() {
                       type="checkbox"
                       checked={createForm.is_superadmin}
                       onChange={(e) => setCreateForm((f) => ({ ...f, is_superadmin: e.target.checked }))}
-                      className="w-4 h-4 border-2 border-black"
+                      className="w-4 h-4 border border-[var(--color-border)]"
                     />
-                    <label htmlFor="is_superadmin" className="text-xs font-bold uppercase tracking-wider">Superadmin</label>
+                    <label htmlFor="is_superadmin" className="text-xs font-medium">Superadmin</label>
                   </div>
                   <div className="md:col-span-2 flex items-center gap-4">
                     <button
                       type="submit"
                       disabled={creating}
-                      className="text-xs border-2 border-black bg-black text-white px-4 py-2 font-bold uppercase tracking-wider hover:bg-[var(--color-accent)] hover:border-[var(--color-accent)] disabled:opacity-50"
-                      style={{ borderRadius: "var(--border-radius)" }}
+                      className="text-xs border border-[var(--color-border)] bg-black text-[var(--color-accent-fg)] px-4 py-2 font-medium hover:bg-[var(--color-accent)] hover:border-[var(--color-accent)] disabled:opacity-50"
+                      style={{ borderRadius: "var(--radius-md)" }}
                     >
                       {creating ? "Creating…" : "Create user"}
                     </button>
-                    {createError && <p className="text-[var(--color-danger)] text-xs font-bold">{createError}</p>}
+                    {createError && <p className="text-[var(--color-danger)] text-xs font-semibold">{createError}</p>}
                   </div>
                 </form>
               </div>
@@ -494,29 +502,33 @@ export default function AdminPage() {
         {/* ── Folders ── */}
         <section className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">Folders</h2>
-            <button onClick={fetchFolders} className="text-xs underline font-bold text-black hover:text-[var(--color-accent)]">
+            <h2 className="text-xs font-medium text-[var(--color-text-muted)]">Folders</h2>
+            <button onClick={fetchFolders} className="text-xs underline font-semibold text-[var(--color-text)] hover:text-[var(--color-accent)]">
               Reload
             </button>
           </div>
 
           {foldersError ? (
-            <p className="text-[var(--color-danger)] font-bold text-xs uppercase tracking-wider">{foldersError}</p>
+            <p className="text-[var(--color-danger)] font-semibold text-xs ">{foldersError}</p>
           ) : !folders ? (
-            <p className="text-[var(--color-muted)] text-xs uppercase tracking-wider animate-pulse">Loading…</p>
+            <div className="space-y-2">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="h-10 w-full border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+              ))}
+            </div>
           ) : (
             <div className={`${cardClass} overflow-hidden`} style={cardStyle}>
-              <div className="px-6 py-4 border-b-2 border-black" style={{ background: "var(--color-muted-bg)" }}>
-                <h3 className="font-bold text-xs uppercase tracking-wider">All folders ({folders.length})</h3>
+              <div className="px-6 py-4 border-b border-[var(--color-border)]" style={{ background: "var(--color-bg-subtle)" }}>
+                <h3 className="font-semibold text-xs ">All folders ({folders.length})</h3>
               </div>
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="text-left border-b-2 border-black" style={{ background: "var(--color-background)" }}>
-                    <th className="px-6 py-3 font-bold uppercase tracking-wider">Name</th>
-                    <th className="px-6 py-3 font-bold uppercase tracking-wider">Parent</th>
-                    <th className="px-6 py-3 font-bold uppercase tracking-wider">ID</th>
-                    <th className="px-6 py-3 font-bold uppercase tracking-wider">Created</th>
-                    <th className="px-6 py-3 font-bold uppercase tracking-wider"></th>
+                  <tr className="text-left border-b border-[var(--color-border)]" style={{ background: "var(--color-bg)" }}>
+                    <th className="px-6 py-3 font-medium">Name</th>
+                    <th className="px-6 py-3 font-medium">Parent</th>
+                    <th className="px-6 py-3 font-medium">ID</th>
+                    <th className="px-6 py-3 font-medium">Created</th>
+                    <th className="px-6 py-3 font-medium"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y-2 divide-black">
@@ -524,34 +536,34 @@ export default function AdminPage() {
                     const parent = folders.find((p) => p.id === f.parentId);
                     return (
                       <tr key={f.id}>
-                        <td className="px-6 py-3 font-bold text-black">{f.name}</td>
-                        <td className="px-6 py-3 text-[var(--color-muted)]">
+                        <td className="px-6 py-3 font-semibold text-[var(--color-text)]">{f.name}</td>
+                        <td className="px-6 py-3 text-[var(--color-text-muted)]">
                           {parent ? (
                             <span className="font-mono">{parent.name}</span>
                           ) : f.parentId ? (
-                            <span className="text-[var(--color-danger)] font-bold">MISSING ({f.parentId.slice(0, 8)}…)</span>
+                            <span className="text-[var(--color-danger)] font-semibold">MISSING ({f.parentId.slice(0, 8)}…)</span>
                           ) : (
-                            <span className="text-[var(--color-muted)]">Root</span>
+                            <span className="text-[var(--color-text-muted)]">Root</span>
                           )}
                         </td>
-                        <td className="px-6 py-3 font-mono text-[var(--color-muted)]">{f.id.slice(0, 8)}…</td>
-                        <td className="px-6 py-3 text-[var(--color-muted)]">
+                        <td className="px-6 py-3 text-[var(--color-text-muted)]">{f.id.slice(0, 8)}…</td>
+                        <td className="px-6 py-3 text-[var(--color-text-muted)]">
                           {new Date(f.createdAt).toLocaleDateString()}
                         </td>
                         <td className="px-6 py-3 flex items-center gap-2">
                           {f.parentId !== null && (
                             <button
                               onClick={() => moveFolderToRoot(f.id)}
-                              className="text-xs border-2 border-black px-2 py-1 font-bold uppercase tracking-wider hover:bg-black hover:text-white"
-                              style={{ borderRadius: "var(--border-radius)" }}
+                              className="text-xs border border-[var(--color-border)] px-2 py-1 font-medium hover:bg-[var(--color-text)] hover:text-[var(--color-accent-fg)]"
+                              style={{ borderRadius: "var(--radius-md)" }}
                             >
                               Move to root
                             </button>
                           )}
                           <button
                             onClick={() => deleteFolderAdmin(f.id)}
-                            className="text-xs border-2 border-[var(--color-danger)] text-[var(--color-danger)] px-2 py-1 font-bold uppercase tracking-wider hover:bg-[var(--color-danger)] hover:text-white"
-                            style={{ borderRadius: "var(--border-radius)" }}
+                            className="text-xs border border-[var(--color-danger)] text-[var(--color-danger)] px-2 py-1 font-medium hover:bg-[var(--color-danger)] hover:text-[var(--color-accent-fg)]"
+                            style={{ borderRadius: "var(--radius-md)" }}
                           >
                             Delete
                           </button>
@@ -561,7 +573,7 @@ export default function AdminPage() {
                   })}
                   {folders.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-6 py-6 text-center text-[var(--color-muted)]">No folders yet.</td>
+                      <td colSpan={5} className="px-6 py-6 text-center text-[var(--color-text-muted)]">No folders yet.</td>
                     </tr>
                   )}
                 </tbody>
@@ -573,30 +585,34 @@ export default function AdminPage() {
         {/* ── Embeddings ── */}
         <section className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">Embeddings</h2>
-            <button onClick={fetchEmbeddings} className="text-xs underline font-bold text-black hover:text-[var(--color-accent)]">
+            <h2 className="text-xs font-medium text-[var(--color-text-muted)]">Embeddings</h2>
+            <button onClick={fetchEmbeddings} className="text-xs underline font-semibold text-[var(--color-text)] hover:text-[var(--color-accent)]">
               Reload
             </button>
           </div>
 
           {embeddingsError ? (
-            <p className="text-[var(--color-danger)] font-bold text-xs uppercase tracking-wider">{embeddingsError}</p>
+            <p className="text-[var(--color-danger)] font-semibold text-xs ">{embeddingsError}</p>
           ) : !embeddingCalls || !embeddingCoverage ? (
-            <p className="text-[var(--color-muted)] text-xs uppercase tracking-wider animate-pulse">Loading…</p>
+            <div className="space-y-2">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="h-10 w-full border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+              ))}
+            </div>
           ) : (
             <div className="grid grid-cols-1 gap-4">
               <div className={`${cardClass} overflow-hidden`} style={cardStyle}>
-                <div className="px-6 py-4 border-b-2 border-black flex items-center justify-between" style={{ background: "var(--color-muted-bg)" }}>
-                  <h3 className="font-bold text-xs uppercase tracking-wider">Recent embedding API calls</h3>
-                  <span className="text-xs text-[var(--color-muted)]">{embeddingCalls.total} total</span>
+                <div className="px-6 py-4 border-b border-[var(--color-border)] flex items-center justify-between" style={{ background: "var(--color-bg-subtle)" }}>
+                  <h3 className="font-semibold text-xs ">Recent embedding API calls</h3>
+                  <span className="text-xs text-[var(--color-text-muted)]">{embeddingCalls.total} total</span>
                 </div>
                 <ResultTable columns={embeddingCalls.columns} rows={embeddingCalls.rows} />
               </div>
 
               <div className={`${cardClass} overflow-hidden`} style={cardStyle}>
-                <div className="px-6 py-4 border-b-2 border-black flex items-center justify-between" style={{ background: "var(--color-muted-bg)" }}>
-                  <h3 className="font-bold text-xs uppercase tracking-wider">Document embedding coverage</h3>
-                  <span className="text-xs text-[var(--color-muted)]">{embeddingCoverage.total} documents tracked</span>
+                <div className="px-6 py-4 border-b border-[var(--color-border)] flex items-center justify-between" style={{ background: "var(--color-bg-subtle)" }}>
+                  <h3 className="font-semibold text-xs ">Document embedding coverage</h3>
+                  <span className="text-xs text-[var(--color-text-muted)]">{embeddingCoverage.total} documents tracked</span>
                 </div>
                 <ResultTable columns={embeddingCoverage.columns} rows={embeddingCoverage.rows} />
               </div>
@@ -606,14 +622,17 @@ export default function AdminPage() {
 
         {/* ── Table browser ── */}
         <section className="space-y-4">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">Table Browser</h2>
+          <h2 className="text-xs font-medium text-[var(--color-text-muted)]">Table Browser</h2>
 
           {tables.length === 0 ? (
-            <p className="text-[var(--color-muted)] text-xs uppercase tracking-wider animate-pulse">Loading…</p>
+            <div className="space-y-2">
+              <div className="h-10 w-full border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+              <div className="h-32 w-full border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+            </div>
           ) : (
             <div className={`${cardClass} overflow-hidden`} style={cardStyle}>
               {/* Tab bar */}
-              <div className="flex overflow-x-auto border-b-2 border-black" style={{ background: "var(--color-muted-bg)" }}>
+              <div className="flex overflow-x-auto border-b border-[var(--color-border)]" style={{ background: "var(--color-bg-subtle)" }}>
                 {tables.map((t) => (
                   <button
                     key={t}
@@ -622,10 +641,10 @@ export default function AdminPage() {
                       setTableData(null);
                     }}
                     className={[
-                      "px-4 py-3 text-xs font-bold uppercase tracking-wider whitespace-nowrap border-r-2 border-black",
+                      "px-4 py-3 text-xs font-medium whitespace-nowrap border-r border-[var(--color-border)]",
                       activeTable === t
-                        ? "bg-black text-white"
-                        : "hover:bg-black/5",
+                        ? "bg-black text-[var(--color-accent-fg)]"
+                        : "hover:bg-[var(--color-text)]/5",
                     ].join(" ")}
                   >
                     {t}
@@ -636,31 +655,35 @@ export default function AdminPage() {
               {/* Table content */}
               <div className="min-h-[120px]">
                 {tableLoading ? (
-                  <p className="text-[var(--color-muted)] text-xs uppercase tracking-wider animate-pulse px-6 py-4">Loading…</p>
+                  <div className="px-6 py-4 space-y-2">
+                    {[...Array(5)].map((_, i) => (
+                      <div key={i} className="h-4 w-full border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+                    ))}
+                  </div>
                 ) : tableError ? (
-                  <p className="text-[var(--color-danger)] text-xs font-bold px-6 py-4">{tableError}</p>
+                  <p className="text-[var(--color-danger)] text-xs font-semibold px-6 py-4">{tableError}</p>
                 ) : tableData ? (
                   <>
                     <ResultTable columns={tableData.columns} rows={tableData.rows} />
                     {/* Pagination */}
-                    <div className="px-6 py-3 border-t-2 border-black flex items-center justify-between" style={{ background: "var(--color-muted-bg)" }}>
-                      <span className="text-xs text-[var(--color-muted)]">
+                    <div className="px-6 py-3 border-t border-[var(--color-border)] flex items-center justify-between" style={{ background: "var(--color-bg-subtle)" }}>
+                      <span className="text-xs text-[var(--color-text-muted)]">
                         {tableData.total} rows · page {tableData.page} of {Math.max(1, Math.ceil(tableData.total / tableData.page_size))}
                       </span>
                       <div className="flex gap-2">
                         <button
                           disabled={tableData.page <= 1}
                           onClick={() => activeTable && fetchTablePage(activeTable, tableData.page - 1)}
-                          className="text-xs border-2 border-black px-3 py-1 font-bold uppercase tracking-wider disabled:opacity-30 hover:bg-black hover:text-white"
-                          style={{ borderRadius: "var(--border-radius)" }}
+                          className="text-xs border border-[var(--color-border)] px-3 py-1 font-medium disabled:opacity-30 hover:bg-[var(--color-text)] hover:text-[var(--color-accent-fg)]"
+                          style={{ borderRadius: "var(--radius-md)" }}
                         >
                           Prev
                         </button>
                         <button
                           disabled={tableData.page >= Math.ceil(tableData.total / tableData.page_size)}
                           onClick={() => activeTable && fetchTablePage(activeTable, tableData.page + 1)}
-                          className="text-xs border-2 border-black px-3 py-1 font-bold uppercase tracking-wider disabled:opacity-30 hover:bg-black hover:text-white"
-                          style={{ borderRadius: "var(--border-radius)" }}
+                          className="text-xs border border-[var(--color-border)] px-3 py-1 font-medium disabled:opacity-30 hover:bg-[var(--color-text)] hover:text-[var(--color-accent-fg)]"
+                          style={{ borderRadius: "var(--radius-md)" }}
                         >
                           Next
                         </button>
@@ -675,16 +698,16 @@ export default function AdminPage() {
 
         {/* ── SQL console ── */}
         <section className="space-y-4">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">SQL Console</h2>
+          <h2 className="text-xs font-medium text-[var(--color-text-muted)]">SQL Console</h2>
           <div className={`${cardClass} overflow-hidden`} style={cardStyle}>
-            <div className="px-6 py-4 border-b-2 border-black space-y-3" style={{ background: "var(--color-muted-bg)" }}>
+            <div className="px-6 py-4 border-b border-[var(--color-border)] space-y-3" style={{ background: "var(--color-bg-subtle)" }}>
               <textarea
                 value={sql}
                 onChange={(e) => setSql(e.target.value)}
                 rows={8}
                 spellCheck={false}
-                className="w-full bg-[var(--color-background)] border-2 border-black px-3 py-2 text-xs font-mono focus:outline-none focus:border-[var(--color-accent)] resize-y"
-                style={{ borderRadius: "var(--border-radius)" }}
+                className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] px-3 py-2 text-xs focus:outline-none focus:border-[var(--color-accent)] resize-y"
+                style={{ borderRadius: "var(--radius-md)" }}
                 placeholder="SELECT * FROM users LIMIT 20"
                 onKeyDown={(e) => {
                   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -697,28 +720,28 @@ export default function AdminPage() {
                 <button
                   onClick={runQuery}
                   disabled={queryRunning || !sql.trim()}
-                  className="text-xs border-2 border-black bg-black text-white px-4 py-2 font-bold uppercase tracking-wider hover:bg-[var(--color-accent)] hover:border-[var(--color-accent)] disabled:opacity-50"
-                  style={{ borderRadius: "var(--border-radius)" }}
+                  className="text-xs border border-[var(--color-border)] bg-black text-[var(--color-accent-fg)] px-4 py-2 font-medium hover:bg-[var(--color-accent)] hover:border-[var(--color-accent)] disabled:opacity-50"
+                  style={{ borderRadius: "var(--radius-md)" }}
                 >
                   {queryRunning ? "Running…" : "Run Query"}
                 </button>
-                <span className="text-xs text-[var(--color-muted)]">or ⌘↵ / Ctrl↵</span>
-                <span className="ml-auto text-xs text-[var(--color-muted)]">Read-only · SELECT only</span>
+                <span className="text-xs text-[var(--color-text-muted)]">or ⌘↵ / Ctrl↵</span>
+                <span className="ml-auto text-xs text-[var(--color-text-muted)]">Read-only · SELECT only</span>
               </div>
             </div>
 
             <div className="min-h-[80px]">
               {queryError ? (
-                <p className="text-[var(--color-danger)] text-xs font-bold font-mono px-6 py-4">{queryError}</p>
+                <p className="text-[var(--color-danger)] text-xs font-semibold px-6 py-4">{queryError}</p>
               ) : queryResult ? (
                 <>
                   <ResultTable columns={queryResult.columns} rows={queryResult.rows} />
-                  <div className="px-6 py-2 border-t-2 border-black" style={{ background: "var(--color-muted-bg)" }}>
-                    <span className="text-xs text-[var(--color-muted)]">{queryResult.rows.length} row{queryResult.rows.length !== 1 ? "s" : ""} returned</span>
+                  <div className="px-6 py-2 border-t border-[var(--color-border)]" style={{ background: "var(--color-bg-subtle)" }}>
+                    <span className="text-xs text-[var(--color-text-muted)]">{queryResult.rows.length} row{queryResult.rows.length !== 1 ? "s" : ""} returned</span>
                   </div>
                 </>
               ) : (
-                <p className="text-[var(--color-muted)] text-xs px-6 py-4">Run a query to see results.</p>
+                <p className="text-[var(--color-text-muted)] text-xs px-6 py-4">Run a query to see results.</p>
               )}
             </div>
           </div>
@@ -733,11 +756,11 @@ export default function AdminPage() {
 function Kpi({ label, value }: { label: string; value: string }) {
   return (
     <div
-      className="bg-[var(--color-surface)] border-2 border-black p-5 font-mono"
-      style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+      className="bg-[var(--color-surface)] border border-[var(--color-border)] p-5"
+      style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" }}
     >
-      <p className="text-xs text-[var(--color-muted)] mb-1 uppercase tracking-wider">{label}</p>
-      <p className="text-xl font-black tabular-nums">{value}</p>
+      <p className="text-xs text-[var(--color-text-muted)] mb-1 ">{label}</p>
+      <p className="text-xl font-semibold tabular-nums">{value}</p>
     </div>
   );
 }
@@ -757,14 +780,14 @@ function Field({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs font-bold uppercase tracking-wider">{label}</label>
+      <label className="text-xs font-medium">{label}</label>
       <input
         type={type}
         value={value}
         required={required}
         onChange={(e) => onChange(e.target.value)}
-        className="border-2 border-black bg-[var(--color-background)] px-3 py-2 text-xs font-mono focus:outline-none focus:border-[var(--color-accent)]"
-        style={{ borderRadius: "var(--border-radius)" }}
+        className="border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-xs focus:outline-none focus:border-[var(--color-accent)]"
+        style={{ borderRadius: "var(--radius-md)" }}
       />
     </div>
   );

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { ProposedDelete } from "@/types/chat";
 import { Check, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   deletion: ProposedDelete;
@@ -10,17 +11,20 @@ type Props = {
   onReject: (editId: string) => Promise<void>;
 };
 
+const statusBase =
+  "mt-3 px-4 py-3 rounded-[var(--radius-md)] border text-[var(--font-size-sm)] flex items-center gap-2";
+
 export function DeleteReview({ deletion, onApprove, onReject }: Props) {
   const [loading, setLoading] = useState(false);
 
   if (deletion.status === "approved") {
     return (
       <div
-        className="mt-3 border-2 border-[var(--color-danger)] bg-[var(--color-surface)] px-4 py-3 text-sm text-[var(--color-danger)] flex items-center gap-2 font-mono"
-        style={{ borderRadius: "var(--border-radius)", boxShadow: "3px 3px 0px var(--color-danger)" }}
+        className={`${statusBase} border-[var(--color-danger)] bg-[var(--color-bg-subtle)] text-[var(--color-danger)]`}
+        role="status"
       >
         <Check size={14} strokeWidth={1.8} className="shrink-0" />
-        DOCUMENT DELETED.
+        Document deleted.
       </div>
     );
   }
@@ -28,10 +32,10 @@ export function DeleteReview({ deletion, onApprove, onReject }: Props) {
   if (deletion.status === "rejected") {
     return (
       <div
-        className="mt-3 border-2 border-black bg-[var(--color-surface)] px-4 py-3 text-sm text-[var(--color-muted)] line-through font-mono"
-        style={{ borderRadius: "var(--border-radius)" }}
+        className={`${statusBase} border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-subtle)] line-through`}
+        role="status"
       >
-        DELETION REJECTED.
+        Deletion rejected.
       </div>
     );
   }
@@ -46,39 +50,33 @@ export function DeleteReview({ deletion, onApprove, onReject }: Props) {
   }
 
   return (
-    <div
-      className="mt-3 border-2 border-black bg-[var(--color-surface)] overflow-hidden"
-      style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)", borderLeftColor: "var(--color-danger)", borderLeftWidth: "4px" }}
-    >
-      <div className="px-4 py-2.5 border-b-2 border-black bg-[#FFD6CC] flex items-center gap-2">
-        <Trash2 size={14} strokeWidth={1.4} className="text-[var(--color-danger)] shrink-0" />
-        <span className="text-xs font-bold text-[var(--color-danger)] uppercase tracking-wider font-mono">Proposed Deletion</span>
-      </div>
+    <div className="mt-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden border-l-[3px] border-l-[var(--color-danger)]">
+      <header className="px-4 py-2.5 border-b border-[var(--color-border)] bg-[var(--color-bg-subtle)] flex items-center gap-2">
+        <Trash2 size={14} strokeWidth={1.6} className="text-[var(--color-danger)] shrink-0" />
+        <span className="text-[var(--font-size-sm)] font-medium text-[var(--color-text)]">
+          Proposed deletion
+        </span>
+      </header>
 
-      <div className="px-4 py-3 border-b-2 border-black">
-        <p className="text-sm font-mono text-black">
-          Delete{" "}
-          <span className="font-bold">{deletion.docTitle}</span>?{" "}
-          This action cannot be undone.
+      <div className="px-4 py-3 border-b border-[var(--color-border)]">
+        <p className="text-[var(--font-size-sm)] text-[var(--color-text)] leading-relaxed">
+          Delete <span className="font-semibold">{deletion.docTitle}</span>? This
+          action cannot be undone.
         </p>
       </div>
 
-      <div className="px-4 py-2.5 flex items-center gap-2 justify-end bg-[var(--color-background)]">
-        <button
-          onClick={() => onReject(deletion.id)}
-          className="px-3 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black text-black hover:bg-[var(--color-muted-bg)] transition-all font-mono"
-          style={{ borderRadius: "var(--border-radius)" }}
-        >
+      <div className="px-4 py-2.5 flex items-center gap-2 justify-end bg-[var(--color-bg-subtle)]">
+        <Button size="sm" variant="ghost" onClick={() => onReject(deletion.id)}>
           Reject
-        </button>
-        <button
+        </Button>
+        <Button
+          size="sm"
+          variant="danger"
           onClick={handleApprove}
           disabled={loading}
-          className="px-4 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black bg-[var(--color-danger)] text-white disabled:opacity-60 transition-all font-mono"
-          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
         >
           {loading ? "Deleting…" : "Delete"}
-        </button>
+        </Button>
       </div>
     </div>
   );

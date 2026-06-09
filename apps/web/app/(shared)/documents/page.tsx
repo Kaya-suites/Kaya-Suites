@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { DocumentList } from "@/components/shared/DocumentList";
 import { DraggableDocument, DraggableFolder, type Folder } from "@/components/shared/FolderTree";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useDocumentsContext } from "./context";
 
 type DocumentSummary = {
@@ -84,72 +86,68 @@ export default function DocumentsPage() {
     }
   }
 
-  const inputClass =
-    "w-full text-sm border-2 border-black px-3 py-2 focus:outline-none focus:border-[var(--color-accent)] bg-white text-black font-mono placeholder:text-[var(--color-muted)]";
-
   return (
-    <div className="h-full overflow-y-auto">
-      {/* Header */}
-      <div className="sticky top-0 z-10 border-b-2 border-black bg-[var(--color-background)]">
-        <div className="px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-1 text-xs font-mono font-bold uppercase tracking-wider text-black">
+    <div className="h-full overflow-y-auto bg-[var(--color-bg)]">
+      {/* Header — sticky, hairline bottom, lines up with the sidebar border */}
+      <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80">
+        <div className="px-6 py-4 flex items-center justify-between gap-4">
+          <nav
+            aria-label="Breadcrumb"
+            className="flex items-center gap-1.5 text-[var(--font-size-base)] text-[var(--color-text-muted)] min-w-0"
+          >
             <button
               onClick={() => selectFolder(null)}
-              className="hover:text-[var(--color-accent)] transition-colors"
+              className="font-[var(--font-serif)] text-2xl font-semibold tracking-tight text-[var(--color-text)] hover:text-[var(--color-text-muted)] transition-colors"
             >
               Documents
             </button>
             {breadcrumb.map((f) => (
-              <span key={f.id} className="flex items-center gap-1">
-                <span className="text-[var(--color-muted)]">/</span>
+              <span key={f.id} className="flex items-center gap-1.5 min-w-0">
+                <span className="text-[var(--color-text-subtle)]" aria-hidden="true">
+                  /
+                </span>
                 <button
                   onClick={() => selectFolder(f.id)}
-                  className="hover:text-[var(--color-accent)] transition-colors"
+                  className="font-[var(--font-serif)] text-2xl font-semibold tracking-tight text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors truncate"
                 >
                   {f.name}
                 </button>
               </span>
             ))}
-          </div>
+          </nav>
 
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-[var(--color-muted)] font-mono">
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="text-[var(--font-size-sm)] text-[var(--color-text-subtle)] hidden sm:inline">
               {!loading && `${visibleDocs.length} doc${visibleDocs.length !== 1 ? "s" : ""}`}
             </span>
-            <button
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => { setShowForm((v) => !v); setError(null); }}
-              className="text-xs px-3 py-1.5 border-2 border-black font-bold uppercase tracking-wider font-mono transition-all hover:bg-[var(--color-muted-bg)]"
-              style={{ borderRadius: "var(--border-radius)", background: showForm ? "var(--color-muted-bg)" : "var(--color-surface)", boxShadow: "var(--shadow-button)" }}
+              aria-pressed={showForm}
             >
               {showForm ? "Cancel" : "Import"}
-            </button>
-            <Link
-              href="/documents/new"
-              className="text-xs px-3 py-1.5 border-2 border-black font-bold uppercase tracking-wider font-mono bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity"
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
-            >
-              New
+            </Button>
+            <Link href="/documents/new">
+              <Button size="sm">New</Button>
             </Link>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Import form */}
+      {/* Import form — flush card, no inner shadow doubling */}
       {showForm && (
-        <div className="max-w-3xl mx-auto mt-4 px-4">
+        <div className="max-w-3xl mx-auto mt-6 px-6">
           <form
             onSubmit={handleSubmit}
-            className="bg-[var(--color-surface)] border-2 border-black p-5 space-y-3"
-            style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+            className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 space-y-4"
           >
-            <input
+            <Input
               ref={titleRef}
               type="text"
               placeholder="Document title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className={inputClass}
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
               required
             />
             <textarea
@@ -157,30 +155,28 @@ export default function DocumentsPage() {
               value={content}
               onChange={(e) => setContent(e.target.value)}
               rows={10}
-              className={`${inputClass} resize-y`}
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
               required
+              className="w-full px-3 py-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg-elevated)] text-[var(--font-size-base)] text-[var(--color-text)] leading-relaxed resize-y placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:border-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
             />
-            {error && <p className="text-xs text-[var(--color-danger)] font-mono font-bold">{error}</p>}
+            {error && (
+              <p className="text-[var(--font-size-sm)] text-[var(--color-danger)]" role="alert">
+                {error}
+              </p>
+            )}
             <div className="flex justify-end">
-              <button
+              <Button
                 type="submit"
                 disabled={submitting || !title.trim() || !content.trim()}
-                className="text-xs px-4 py-2 border-2 border-black bg-[var(--color-accent)] text-white font-bold uppercase tracking-wider font-mono disabled:opacity-50"
-                style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
               >
                 {submitting ? "Saving…" : "Save document"}
-              </button>
+              </Button>
             </div>
           </form>
         </div>
       )}
 
-      {/* Document list */}
-      <div
-        className="bg-[var(--color-surface)] mt-4 mx-4 border-2 border-black"
-        style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
-      >
+      {/* Document list — no outer card, list bleeds to the layout edges so dividers do the work */}
+      <section className="max-w-5xl mx-auto px-2 sm:px-0 py-2">
         <DocumentList
           documents={visibleDocs}
           loading={loading}
@@ -209,7 +205,7 @@ export default function DocumentsPage() {
             </DraggableFolder>
           )}
         />
-      </div>
+      </section>
     </div>
   );
 }

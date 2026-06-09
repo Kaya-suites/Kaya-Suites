@@ -20,15 +20,15 @@ interface CreatedClient {
   redirect_uris: string[];
 }
 
-const cardClass = "bg-[var(--color-surface)] border-2 border-black p-6 space-y-4";
-const cardStyle = { borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" };
-const sectionHeading = "font-bold text-xs uppercase tracking-wider text-black font-mono";
+const cardClass = "bg-[var(--color-surface)] border border-[var(--color-border)] p-6 space-y-4";
+const cardStyle = { borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" };
+const sectionHeading = "font-semibold text-xs  text-[var(--color-text)]";
 const inputClass =
-  "border-2 border-black px-3 py-2 text-xs focus:outline-none bg-white text-black font-mono";
+  "border border-[var(--color-border)] px-3 py-2 text-xs focus:outline-none bg-[var(--color-surface)] text-[var(--color-text)]";
 const btnPrimary =
-  "border-2 border-black bg-black text-white px-4 py-2 text-xs font-bold uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed font-mono";
+  "border border-[var(--color-border)] bg-black text-[var(--color-accent-fg)] px-4 py-2 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed";
 const btnSecondary =
-  "border-2 border-black bg-[var(--color-surface)] text-black px-4 py-2 text-xs font-bold uppercase tracking-wider hover:bg-[var(--color-muted-bg)] font-mono";
+  "border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] px-4 py-2 text-xs font-medium hover:bg-[var(--color-bg-subtle)]";
 
 export default function AdminOAuthClientsPage() {
   const [clients, setClients] = useState<OAuthClient[] | null>(null);
@@ -93,12 +93,12 @@ export default function AdminOAuthClientsPage() {
   if (err && !clients) {
     return (
       <main
-        className="h-full flex items-center justify-center font-mono"
-        style={{ background: "var(--color-background)" }}
+        className="h-full flex items-center justify-center"
+        style={{ background: "var(--color-bg)" }}
       >
         <div className="text-center space-y-3">
-          <p className="text-[var(--color-danger)] font-bold text-xs uppercase">{err}</p>
-          <Link href="/" className="text-xs underline font-bold">Back to Kaya →</Link>
+          <p className="text-[var(--color-danger)] font-semibold text-xs">{err}</p>
+          <Link href="/" className="text-xs underline font-semibold">Back to Kaya →</Link>
         </div>
       </main>
     );
@@ -106,13 +106,13 @@ export default function AdminOAuthClientsPage() {
 
   return (
     <main
-      className="h-full overflow-y-auto py-12 font-mono"
-      style={{ background: "var(--color-background)" }}
+      className="h-full overflow-y-auto py-12"
+      style={{ background: "var(--color-bg)" }}
     >
       <div className="max-w-3xl mx-auto px-6 space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-black uppercase tracking-tight">OAuth clients</h1>
-          <Link href="/admin" className="text-xs font-bold underline">
+          <h1 className="font-[var(--font-serif)] text-3xl font-semibold tracking-tight">OAuth clients</h1>
+          <Link href="/admin" className="text-xs font-semibold underline">
             ← Admin
           </Link>
         </div>
@@ -120,15 +120,15 @@ export default function AdminOAuthClientsPage() {
         {/* Mint form */}
         <div className={cardClass} style={cardStyle}>
           <h2 className={sectionHeading}>Register a new client</h2>
-          <p className="text-xs text-[var(--color-muted)]">
+          <p className="text-xs text-[var(--color-text-muted)]">
             Manually-registered clients are an alternative to Dynamic Client Registration —
             use this when the integrating app can&apos;t discover the OAuth flow on its own.
-            For Claude Desktop, DCR via <code className="bg-[var(--color-muted-bg)] px-1 border border-black">/.well-known/oauth-authorization-server</code> works automatically and you don&apos;t need to register here.
+            For Claude Desktop, DCR via <code className="bg-[var(--color-bg-subtle)] px-1 border border-black">/.well-known/oauth-authorization-server</code> works automatically and you don&apos;t need to register here.
           </p>
 
           <div className="space-y-3">
             <div className="space-y-1">
-              <label className="block text-xs font-bold uppercase tracking-wider">Name</label>
+              <label className="block text-xs font-medium">Name</label>
               <input
                 type="text"
                 value={name}
@@ -136,12 +136,12 @@ export default function AdminOAuthClientsPage() {
                 disabled={busy}
                 placeholder="e.g. Internal automation"
                 className={`${inputClass} w-full`}
-                style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
+                style={{ borderRadius: "var(--radius-md)", boxShadow: "none" }}
               />
             </div>
 
             <div className="space-y-1">
-              <label className="block text-xs font-bold uppercase tracking-wider">
+              <label className="block text-xs font-medium">
                 Redirect URIs (one per line)
               </label>
               <textarea
@@ -151,12 +151,12 @@ export default function AdminOAuthClientsPage() {
                 placeholder="http://localhost:7321/cb"
                 rows={3}
                 className={`${inputClass} w-full`}
-                style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
+                style={{ borderRadius: "var(--radius-md)", boxShadow: "none" }}
               />
             </div>
 
             <div className="space-y-1">
-              <label className="block text-xs font-bold uppercase tracking-wider">Client type</label>
+              <label className="block text-xs font-medium">Client type</label>
               <div className="flex gap-3 text-xs">
                 {(["public", "confidential"] as const).map((t) => (
                   <label key={t} className="flex items-center gap-1 cursor-pointer">
@@ -167,7 +167,7 @@ export default function AdminOAuthClientsPage() {
                       disabled={busy}
                     />
                     <span>{t}</span>
-                    <span className="text-[var(--color-muted)]">
+                    <span className="text-[var(--color-text-muted)]">
                       ({t === "public" ? "PKCE-only, no secret" : "with secret"})
                     </span>
                   </label>
@@ -179,11 +179,11 @@ export default function AdminOAuthClientsPage() {
               onClick={mint}
               disabled={busy}
               className={btnPrimary}
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
+              style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-sm)" }}
             >
               {busy ? "Minting…" : "Register client"}
             </button>
-            {err && <p className="text-xs text-[var(--color-danger)] font-bold">{err}</p>}
+            {err && <p className="text-xs text-[var(--color-danger)] font-semibold">{err}</p>}
           </div>
 
           {created && <CreatedClientView created={created} onDismiss={() => setCreated(null)} />}
@@ -193,34 +193,34 @@ export default function AdminOAuthClientsPage() {
         <div className={cardClass} style={cardStyle}>
           <h2 className={sectionHeading}>Registered clients</h2>
           {clients && clients.length === 0 && (
-            <p className="text-xs text-[var(--color-muted)]">No manually-registered clients.</p>
+            <p className="text-xs text-[var(--color-text-muted)]">No manually-registered clients.</p>
           )}
           {clients && clients.length > 0 && (
-            <table className="w-full text-xs border-2 border-black" style={{ borderRadius: "var(--border-radius)" }}>
+            <table className="w-full text-xs border border-[var(--color-border)]" style={{ borderRadius: "var(--radius-md)" }}>
               <thead>
-                <tr className="border-b-2 border-black text-left" style={{ background: "var(--color-muted-bg)" }}>
-                  <th className="font-bold px-3 py-2 uppercase">Name</th>
-                  <th className="font-bold px-3 py-2 uppercase">Type</th>
-                  <th className="font-bold px-3 py-2 uppercase">Redirect URIs</th>
-                  <th className="font-bold px-3 py-2 uppercase">Created</th>
-                  <th className="font-bold px-3 py-2 uppercase text-right">Action</th>
+                <tr className="border-b border-[var(--color-border)] text-left" style={{ background: "var(--color-bg-subtle)" }}>
+                  <th className="font-semibold px-3 py-2">Name</th>
+                  <th className="font-semibold px-3 py-2">Type</th>
+                  <th className="font-semibold px-3 py-2">Redirect URIs</th>
+                  <th className="font-semibold px-3 py-2">Created</th>
+                  <th className="font-semibold px-3 py-2 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y-2 divide-black">
                 {clients.map((c) => (
                   <tr key={c.id}>
-                    <td className="py-2 px-3 font-bold break-all">{c.name}</td>
-                    <td className="py-2 px-3 uppercase">{c.client_type}</td>
-                    <td className="py-2 px-3 text-[var(--color-muted)] break-all">
+                    <td className="py-2 px-3 font-semibold break-all">{c.name}</td>
+                    <td className="py-2 px-3">{c.client_type}</td>
+                    <td className="py-2 px-3 text-[var(--color-text-muted)] break-all">
                       {c.redirect_uris.join(", ")}
                     </td>
-                    <td className="py-2 px-3 text-[var(--color-muted)]">
+                    <td className="py-2 px-3 text-[var(--color-text-muted)]">
                       {new Date(c.created_at).toLocaleDateString()}
                     </td>
                     <td className="py-2 px-3 text-right">
                       <button
                         onClick={() => revoke(c.id, c.name)}
-                        className="text-xs font-bold uppercase tracking-wider text-[var(--color-danger)] hover:underline"
+                        className="text-xs font-medium text-[var(--color-danger)] hover:underline"
                       >
                         Revoke
                       </button>
@@ -248,31 +248,31 @@ function CreatedClientView({
   }
 
   const snippet =
-    "border-2 border-black p-3 text-xs font-mono whitespace-pre-wrap break-all bg-[var(--color-muted-bg)]";
+    "border border-[var(--color-border)] p-3 text-xs whitespace-pre-wrap break-all bg-[var(--color-bg-subtle)]";
 
   return (
     <div
-      className="border-2 border-[var(--color-accent)] p-4 space-y-3 mt-4"
-      style={{ borderRadius: "var(--border-radius)", boxShadow: "4px 4px 0px var(--color-accent)" }}
+      className="border border-[var(--color-accent)] p-4 space-y-3 mt-4"
+      style={{ borderRadius: "var(--radius-md)", boxShadow: "4px 4px 0px var(--color-accent)" }}
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="font-bold text-xs uppercase tracking-wider text-black">
+          <p className="font-semibold text-xs  text-[var(--color-text)]">
             Client created — copy now
           </p>
           {created.client_secret ? (
-            <p className="text-xs text-[var(--color-muted)] mt-1">
+            <p className="text-xs text-[var(--color-text-muted)] mt-1">
               The client secret will not be shown again. Hand the ID + secret to the integrator out of band.
             </p>
           ) : (
-            <p className="text-xs text-[var(--color-muted)] mt-1">
+            <p className="text-xs text-[var(--color-text-muted)] mt-1">
               Public client — no secret. The client authenticates with PKCE only.
             </p>
           )}
         </div>
         <button
           onClick={onDismiss}
-          className="text-xs font-bold uppercase tracking-wider underline"
+          className="text-xs font-medium underline"
         >
           Dismiss
         </button>
@@ -280,19 +280,19 @@ function CreatedClientView({
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider">Client ID</span>
-          <button onClick={() => copy(created.client_id)} className="text-xs font-bold underline">Copy</button>
+          <span className="text-xs font-medium">Client ID</span>
+          <button onClick={() => copy(created.client_id)} className="text-xs font-semibold underline">Copy</button>
         </div>
-        <div className={snippet} style={{ borderRadius: "var(--border-radius)" }}>{created.client_id}</div>
+        <div className={snippet} style={{ borderRadius: "var(--radius-md)" }}>{created.client_id}</div>
       </div>
 
       {created.client_secret && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider">Client secret</span>
-            <button onClick={() => copy(created.client_secret!)} className="text-xs font-bold underline">Copy</button>
+            <span className="text-xs font-medium">Client secret</span>
+            <button onClick={() => copy(created.client_secret!)} className="text-xs font-semibold underline">Copy</button>
           </div>
-          <div className={snippet} style={{ borderRadius: "var(--border-radius)" }}>{created.client_secret}</div>
+          <div className={snippet} style={{ borderRadius: "var(--radius-md)" }}>{created.client_secret}</div>
         </div>
       )}
     </div>

@@ -34,11 +34,8 @@ export function ChatInput({ onSend, disabled }: Props) {
   }
 
   return (
-    <div className="border-t-2 border-black bg-[var(--color-surface)] px-4 py-3">
-      <div
-        className="flex items-end gap-2 border-2 border-black bg-white px-3 py-2 transition-all focus-within:outline focus-within:outline-2 focus-within:outline-[var(--color-accent)]"
-        style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
-      >
+    <div className="border-t border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
+      <div className="flex items-end gap-2 px-3 py-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg-elevated)] transition-colors focus-within:border-[var(--color-text)]">
         <textarea
           ref={textareaRef}
           onKeyDown={handleKeyDown}
@@ -46,20 +43,19 @@ export function ChatInput({ onSend, disabled }: Props) {
           disabled={disabled}
           placeholder="Ask about your documents… (Enter to send)"
           rows={1}
-          className="flex-1 resize-none border-none outline-none bg-transparent text-sm text-black placeholder:text-[var(--color-muted)] leading-relaxed py-0.5 disabled:opacity-50 font-mono"
+          className="flex-1 resize-none border-none outline-none bg-transparent text-[var(--font-size-base)] text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] leading-relaxed py-0.5 disabled:opacity-50"
         />
         <button
           onClick={submit}
           disabled={disabled}
-          className="shrink-0 mb-0.5 px-3 py-1.5 border-2 border-black bg-[var(--color-accent)] text-white font-bold text-xs uppercase tracking-wider disabled:opacity-50 transition-all hover:translate-[-1px] active:translate-[1px]"
-          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
-          title="Send"
+          aria-label="Send"
+          className="shrink-0 mb-0.5 inline-flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-accent-fg)] hover:bg-[var(--color-accent-hover)] disabled:opacity-50 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
         >
           <Send size={14} strokeWidth={1.5} />
         </button>
       </div>
-      <p className="mt-1.5 text-center text-[10px] text-[var(--color-muted)] font-mono">
-        KAYA AI · RESPONSES MAY CONTAIN ERRORS. ALWAYS VERIFY CITED SOURCES.
+      <p className="mt-2 text-center text-[var(--font-size-xs)] text-[var(--color-text-subtle)]">
+        Kaya AI · responses may contain errors. Always verify cited sources.
       </p>
     </div>
   );

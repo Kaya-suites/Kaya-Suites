@@ -115,7 +115,7 @@ export function BlockShell({
                 clone.style.opacity = "0.85";
                 clone.style.background = "var(--color-surface)";
                 clone.style.border = "2px solid black";
-                clone.style.borderRadius = "var(--border-radius)";
+                clone.style.borderRadius = "var(--radius-md)";
                 clone.style.padding = "4px 8px";
                 document.body.appendChild(clone);
                 e.dataTransfer.setDragImage(clone, 16, 16);
@@ -127,30 +127,30 @@ export function BlockShell({
             onClick={(e) => { e.stopPropagation(); onMenuToggle(); }}
             aria-label={`Options for ${blockLabel(block)} block ${index + 1}`}
             aria-keyshortcuts="Alt+Shift+ArrowUp Alt+Shift+ArrowDown"
-            className="flex items-center justify-center border border-black bg-white font-bold leading-none hover:bg-[var(--color-muted-bg)]"
-            style={{ width: "20px", height: "20px", fontSize: "10px", borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
+            className="flex items-center justify-center border border-[var(--color-border-strong)] bg-[var(--color-surface)] font-bold leading-none hover:bg-[var(--color-bg-subtle)]"
+            style={{ width: "20px", height: "20px", fontSize: "10px", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-sm)" }}
             title={`Options for ${blockLabel(block)} block ${index + 1}`}
           >
             ⋮⋮
           </button>
           {menuOpen && (
             <div
-              className="absolute left-10 top-0 z-30 min-w-36 border-2 border-black bg-[var(--color-surface)] py-1"
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+              className="absolute left-10 top-0 z-30 min-w-36 border border-[var(--color-border)] bg-[var(--color-surface)] py-1"
+              style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" }}
               onClick={(e) => e.stopPropagation()}
             >
               <button
                 type="button"
                 onClick={() => { onDuplicate(); onMenuToggle(); }}
-                className="flex w-full items-center px-3 py-2 text-left text-xs font-bold uppercase tracking-wide font-mono hover:bg-[var(--color-muted-bg)]"
+                className="flex w-full items-center px-3 py-2 text-left text-xs font-medium hover:bg-[var(--color-bg-subtle)]"
               >
                 Duplicate
               </button>
-              <div className="mx-2 border-t border-black/10" />
+              <div className="mx-2 border-t border-[var(--color-border)]" />
               <button
                 type="button"
                 onClick={() => { onDelete(); onMenuToggle(); }}
-                className="flex w-full items-center px-3 py-2 text-left text-xs font-bold uppercase tracking-wide font-mono text-[var(--color-danger)] hover:bg-[var(--color-muted-bg)]"
+                className="flex w-full items-center px-3 py-2 text-left text-xs font-medium text-[var(--color-danger)] hover:bg-[var(--color-bg-subtle)]"
               >
                 Delete
               </button>

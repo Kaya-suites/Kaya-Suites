@@ -81,7 +81,7 @@ export default function MDXEditorClient({ markdown, onChange }: Props) {
           ),
         }),
       ]}
-      contentEditableClassName="prose max-w-none min-h-[400px] focus:outline-none font-mono text-sm"
+      contentEditableClassName="prose max-w-none min-h-[400px] focus:outline-none text-sm"
     />
   );
 }

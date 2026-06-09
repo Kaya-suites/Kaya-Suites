@@ -3,14 +3,24 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { MessageSquare, FileText, Settings, LayoutGrid, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  LayoutGrid,
+  LogOut,
+  MessageSquare,
+  Settings,
+} from "lucide-react";
+import { cn } from "@/components/ui/cn";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 const navItems = [
-  { href: "/chat", label: "Chat", icon: <MessageSquare size={15} /> },
-  { href: "/documents", label: "Docs", icon: <FileText size={15} /> },
-  { href: "/settings", label: "Settings", icon: <Settings size={15} /> },
+  { href: "/chat", label: "Chat", Icon: MessageSquare },
+  { href: "/documents", label: "Docs", Icon: FileText },
+  { href: "/settings", label: "Settings", Icon: Settings },
 ];
 
 async function logout() {
@@ -18,8 +28,14 @@ async function logout() {
   window.location.href = "/";
 }
 
-const CollapseIcon = ({ direction }: { direction: "left" | "right" }) =>
-  direction === "left" ? <ChevronLeft size={12} strokeWidth={2.5} /> : <ChevronRight size={12} strokeWidth={2.5} />;
+function isActive(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(href + "/");
+}
+
+const itemClass =
+  "flex items-center gap-2.5 px-2.5 py-1.5 rounded-[var(--radius-md)] " +
+  "text-[var(--font-size-sm)] font-medium transition-colors duration-150 " +
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]";
 
 export function AppNav() {
   const pathname = usePathname();
@@ -33,8 +49,10 @@ export function AppNav() {
 
   useEffect(() => {
     fetch(`${API_URL}/auth/me`, { credentials: "include" })
-      .then((r) => r.ok ? r.json() : null)
-      .then((u) => { if (u?.is_superadmin) setIsSuperadmin(true); })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((u) => {
+        if (u?.is_superadmin) setIsSuperadmin(true);
+      })
       .catch(() => {});
   }, []);
 
@@ -49,16 +67,15 @@ export function AppNav() {
   if (collapsed) {
     return (
       <aside
-        className="flex flex-col shrink-0 min-h-screen border-r-2 border-black items-center pt-4"
-        style={{ width: "2.5rem", background: "var(--color-background)" }}
+        className="flex flex-col shrink-0 min-h-screen items-center pt-4 w-10 border-r border-[var(--color-border)] bg-[var(--color-surface)]"
+        aria-label="Primary navigation (collapsed)"
       >
         <button
           onClick={toggleCollapsed}
-          title="Expand sidebar"
-          className="w-8 h-8 flex items-center justify-center border-2 border-black bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity"
-          style={{ boxShadow: "var(--shadow-button)" }}
+          aria-label="Expand sidebar"
+          className="w-8 h-8 inline-flex items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-subtle)] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
         >
-          <CollapseIcon direction="right" />
+          <ChevronRight size={14} />
         </button>
       </aside>
     );
@@ -66,41 +83,42 @@ export function AppNav() {
 
   return (
     <aside
-      className="flex flex-col shrink-0 min-h-screen border-r-2 border-black"
-      style={{ width: "var(--nav-width)", background: "var(--color-background)" }}
+      className="flex flex-col shrink-0 min-h-screen border-r border-[var(--color-border)] bg-[var(--color-surface)]"
+      style={{ width: "var(--nav-width)" }}
+      aria-label="Primary navigation"
     >
-      <div className="px-4 py-4 border-b-2 border-black flex items-center justify-between gap-2">
+      <div className="px-4 py-4 flex items-center justify-between gap-2 border-b border-[var(--color-border)]">
         <Link
           href="/"
-          className="font-bold text-xs tracking-wider text-black uppercase hover:text-[var(--color-accent)] transition-colors truncate"
+          className="font-[var(--font-serif)] text-base font-semibold tracking-tight text-[var(--color-text)] hover:text-[var(--color-text-muted)] transition-colors truncate"
         >
           Kaya Suites
         </Link>
         <button
           onClick={toggleCollapsed}
-          title="Collapse sidebar"
-          className="shrink-0 w-8 h-8 flex items-center justify-center border-2 border-black bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity"
-          style={{ boxShadow: "var(--shadow-button)" }}
+          aria-label="Collapse sidebar"
+          className="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-subtle)] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
         >
-          <CollapseIcon direction="left" />
+          <ChevronLeft size={14} />
         </button>
       </div>
 
-      <nav className="flex-1 py-3 space-y-1 px-2">
-        {navItems.map(({ href, label, icon }) => {
-          const active = pathname === href || pathname.startsWith(href + "/");
+      <nav className="flex-1 py-3 space-y-0.5 px-2">
+        {navItems.map(({ href, label, Icon }) => {
+          const active = isActive(pathname, href);
           return (
             <Link
               key={href}
               href={href}
-              className={`flex items-center gap-2.5 px-2 py-2 text-xs font-bold uppercase tracking-wider transition-all border-2 ${
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                itemClass,
                 active
-                  ? "bg-[var(--color-accent)] text-white border-black"
-                  : "border-transparent text-black hover:border-black hover:bg-[var(--color-muted-bg)]"
-              }`}
-              style={active ? { boxShadow: "var(--shadow-button)" } : {}}
+                  ? "bg-[var(--color-bg-subtle)] text-[var(--color-text)]"
+                  : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text)]",
+              )}
             >
-              {icon}
+              <Icon size={15} />
               {label}
             </Link>
           );
@@ -108,15 +126,16 @@ export function AppNav() {
 
         {isSuperadmin && (
           <>
-            <div className="mx-2 my-2 border-t border-black/20" />
+            <div className="mx-2 my-3 border-t border-[var(--color-border)]" />
             <Link
               href="/admin"
-              className={`flex items-center gap-2.5 px-2 py-2 text-xs font-bold uppercase tracking-wider transition-all border-2 ${
-                pathname === "/admin" || pathname.startsWith("/admin/")
-                  ? "bg-[var(--color-accent)] text-white border-black"
-                  : "border-transparent text-black hover:border-black hover:bg-[var(--color-muted-bg)]"
-              }`}
-              style={pathname.startsWith("/admin") ? { boxShadow: "var(--shadow-button)" } : {}}
+              aria-current={isActive(pathname, "/admin") ? "page" : undefined}
+              className={cn(
+                itemClass,
+                isActive(pathname, "/admin")
+                  ? "bg-[var(--color-bg-subtle)] text-[var(--color-text)]"
+                  : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text)]",
+              )}
             >
               <LayoutGrid size={15} />
               Admin
@@ -125,10 +144,16 @@ export function AppNav() {
         )}
       </nav>
 
-      <div className="border-t-2 border-black p-2">
+      <div className="border-t border-[var(--color-border)] p-2 space-y-2">
+        <div className="px-1">
+          <ThemeToggle />
+        </div>
         <button
           onClick={logout}
-          className="flex items-center gap-2.5 w-full px-2 py-2 border-2 border-transparent text-xs font-bold uppercase tracking-wider text-[var(--color-muted)] hover:border-black hover:text-black hover:bg-[var(--color-muted-bg)] transition-all"
+          className={cn(
+            itemClass,
+            "w-full text-[var(--color-text-muted)] hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text)]",
+          )}
         >
           <LogOut size={15} />
           Log out

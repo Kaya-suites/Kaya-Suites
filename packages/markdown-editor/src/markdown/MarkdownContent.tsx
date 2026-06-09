@@ -56,8 +56,8 @@ function renderInline(markdown: string, decorateText?: (text: string) => ReactNo
           key={`img-${key++}`}
           src={image[2]}
           alt={image[1]}
-          className="my-3 max-w-full border-2 border-black bg-white"
-          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+          className="my-3 max-w-full border border-[var(--color-border)] bg-[var(--color-surface)]"
+          style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" }}
         />,
       );
       index += image[0].length;
@@ -70,7 +70,7 @@ function renderInline(markdown: string, decorateText?: (text: string) => ReactNo
         <Link
           key={`link-${key++}`}
           href={link[2]}
-          className="text-[var(--color-accent)] underline font-bold hover:opacity-70"
+          className="text-[var(--color-accent)] underline underline-offset-2 hover:text-[var(--color-accent-hover)]"
           target="_blank"
           rel="noreferrer"
         >
@@ -84,7 +84,7 @@ function renderInline(markdown: string, decorateText?: (text: string) => ReactNo
     const strong = rest.match(/^\*\*([^*]+)\*\*/);
     if (strong) {
       nodes.push(
-        <strong key={`strong-${key++}`} className="font-bold text-black">
+        <strong key={`strong-${key++}`} className="font-bold text-[var(--color-text)]">
           <InlineMarkdown markdown={strong[1]} decorateText={decorateText} />
         </strong>,
       );
@@ -119,7 +119,7 @@ function renderInline(markdown: string, decorateText?: (text: string) => ReactNo
       nodes.push(
         <code
           key={`code-${key++}`}
-          className="bg-[var(--color-muted-bg)] border border-black px-1 py-0.5 text-xs font-mono text-black"
+          className="bg-[var(--color-bg-subtle)] rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[0.875em] font-[var(--font-mono)] text-[var(--color-text)]"
         >
           {code[1]}
         </code>,
@@ -133,7 +133,7 @@ function renderInline(markdown: string, decorateText?: (text: string) => ReactNo
       nodes.push(
         <span
           key={`html-${key++}`}
-          className="inline-block bg-[var(--color-muted-bg)] border border-black px-1 py-0.5 text-xs font-mono"
+          className="inline-block bg-[var(--color-bg-subtle)] rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[0.875em] font-[var(--font-mono)]"
         >
           {html[0]}
         </span>,
@@ -226,17 +226,17 @@ function MarkdownTable({
   return (
     <div
       ref={containerRef}
-      className="mb-4 overflow-x-auto overflow-y-visible border-2 border-black bg-white"
-      style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+      className="mb-4 overflow-x-auto overflow-y-visible border border-[var(--color-border)] bg-[var(--color-surface)]"
+      style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" }}
     >
-      <table className="min-w-full border-separate border-spacing-0 text-sm font-mono">
+      <table className="min-w-full border-separate border-spacing-0 text-sm">
         <thead>
           <tr ref={headerRowRef}>
             {block.header.map((cell, columnIndex) => (
               <th
                 key={`${block.id}-head-${columnIndex}`}
                 data-sticky-header="true"
-                className={`border-b-2 border-black bg-[var(--color-muted-bg)] px-3 py-2 font-bold uppercase tracking-wide break-words ${alignmentClass(block.alignments[columnIndex] ?? null)} ${columnIndex < block.header.length - 1 ? "border-r-2" : ""}`}
+                className={`border-b border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-3 py-2 font-medium break-words ${alignmentClass(block.alignments[columnIndex] ?? null)} ${columnIndex < block.header.length - 1 ? "border-r-2" : ""}`}
                 style={
                   stickyActive
                     ? {
@@ -259,7 +259,7 @@ function MarkdownTable({
               {row.map((cell, columnIndex) => (
                 <td
                   key={`${block.id}-row-${rowIndex}-col-${columnIndex}`}
-                  className={`border-b-2 border-black px-3 py-2 break-words ${alignmentClass(block.alignments[columnIndex] ?? null)} ${columnIndex < row.length - 1 ? "border-r-2" : ""}`}
+                  className={`border-b border-[var(--color-border)] px-3 py-2 break-words ${alignmentClass(block.alignments[columnIndex] ?? null)} ${columnIndex < row.length - 1 ? "border-r-2" : ""}`}
                 >
                   <InlineMarkdown markdown={inlineHtmlToMarkdown(cell)} decorateText={decorateText} />
                 </td>
@@ -284,24 +284,25 @@ export function MarkdownContent({ markdown, className, decorateText, isStreaming
             return (
               <p
                 key={block.id}
-                className="mb-3 last:mb-0 font-mono leading-relaxed"
+                className="mb-3 last:mb-0 leading-relaxed"
                 style={{
                   paddingLeft: block.depth > 0 ? `${block.depth * 1.5}rem` : undefined,
-                  borderLeft: block.depth > 0 ? "2px solid var(--color-muted)" : undefined,
+                  borderLeft: block.depth > 0 ? "2px solid var(--color-text-muted)" : undefined,
                 }}
               >
                 <InlineMarkdown markdown={inlineHtmlToMarkdown(block.html)} decorateText={decorateText} />
               </p>
             );
           case "heading": {
+            const serif = "font-[var(--font-serif)] tracking-tight";
             const headingClass =
               block.level === 1
-                ? "mb-3 text-2xl font-bold font-mono"
+                ? `mb-3 text-3xl font-semibold ${serif}`
                 : block.level === 2
-                  ? "mb-3 mt-6 text-lg font-bold font-mono"
-                  : "mb-3 mt-4 text-base font-bold font-mono";
+                  ? `mb-3 mt-6 text-2xl font-semibold ${serif}`
+                  : `mb-3 mt-4 text-xl font-semibold ${serif}`;
             const depthStyle = block.depth > 0
-              ? { paddingLeft: `${block.depth * 1.5}rem`, borderLeft: "2px solid var(--color-muted)" }
+              ? { paddingLeft: `${block.depth * 1.5}rem`, borderLeft: "2px solid var(--color-text-muted)" }
               : undefined;
             const content = <InlineMarkdown markdown={inlineHtmlToMarkdown(block.html)} decorateText={decorateText} />;
             if (block.level === 1) return <h1 key={block.id} className={headingClass} style={depthStyle}>{content}</h1>;
@@ -315,8 +316,8 @@ export function MarkdownContent({ markdown, className, decorateText, isStreaming
             return (
               <blockquote
                 key={block.id}
-                className="mb-3 border-l-4 border-black bg-[var(--color-muted-bg)] px-4 py-3 font-mono"
-                style={{ borderRadius: "var(--border-radius)", marginLeft: block.depth > 0 ? `${block.depth * 1.5}rem` : undefined }}
+                className="mb-3 border-l-2 border-[var(--color-border-strong)] bg-[var(--color-bg-subtle)] px-4 py-3"
+                style={{ borderRadius: "var(--radius-md)", marginLeft: block.depth > 0 ? `${block.depth * 1.5}rem` : undefined }}
               >
                 <InlineMarkdown markdown={inlineHtmlToMarkdown(block.html)} decorateText={decorateText} />
               </blockquote>
@@ -324,12 +325,12 @@ export function MarkdownContent({ markdown, className, decorateText, isStreaming
           case "list": {
             const orderedCounters = new Map<number, number>();
             return (
-              <div key={block.id} className="mb-3 last:mb-0 space-y-1 font-mono">
+              <div key={block.id} className="mb-3 last:mb-0 space-y-1">
                 {block.items.map((item) => {
                   let prefix: ReactNode;
                   if (item.checked !== null) {
                     prefix = (
-                      <span className="mt-1 inline-flex h-4 w-4 items-center justify-center border-2 border-black text-[10px]">
+                      <span className="mt-1 inline-flex h-4 w-4 items-center justify-center border border-[var(--color-border)] text-[10px]">
                         {item.checked ? "x" : ""}
                       </span>
                     );
@@ -370,14 +371,14 @@ export function MarkdownContent({ markdown, className, decorateText, isStreaming
               return (
                 <div key={block.id} className="mb-4 space-y-3">
                   <pre
-                    className="overflow-x-auto border-2 border-black bg-[var(--color-muted-bg)] p-4 text-xs font-mono"
-                    style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+                    className="overflow-x-auto border border-[var(--color-border)] bg-[var(--color-bg-subtle)] p-4 text-xs"
+                    style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" }}
                   >
                     <code>{block.code}</code>
                   </pre>
                   <MermaidDiagram
                     code={block.code}
-                    className="overflow-auto border-2 border-black bg-white p-4"
+                    className="overflow-auto border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
                     isStreaming={isStreaming}
                   />
                 </div>
@@ -385,13 +386,13 @@ export function MarkdownContent({ markdown, className, decorateText, isStreaming
             }
 
             return (
-              <div key={block.id} className="mb-4 overflow-hidden border-2 border-black bg-[var(--color-surface)]" style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}>
-                <div className="border-b-2 border-black bg-[var(--color-muted-bg)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-black">
+              <div key={block.id} className="mb-4 overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface)]" style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" }}>
+                <div className="border-b border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-3 py-1.5 text-[10px] font-medium tracking-[0.18em] text-[var(--color-text)]">
                   {block.language || "plain text"}
                 </div>
                 <pre className="overflow-x-auto p-4 text-xs">
                   <code
-                    className={`language-${block.language || "markup"} font-mono`}
+                    className={`language-${block.language || "markup"}`}
                     dangerouslySetInnerHTML={{ __html: highlightCode(block.code, block.language) }}
                   />
                 </pre>
@@ -403,24 +404,24 @@ export function MarkdownContent({ markdown, className, decorateText, isStreaming
                 <img
                   src={block.src}
                   alt={block.alt}
-                  className="max-w-full border-2 border-black bg-white"
-                  style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+                  className="max-w-full border border-[var(--color-border)] bg-[var(--color-surface)]"
+                  style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" }}
                 />
                 {(block.alt || block.title) && (
-                  <figcaption className="mt-2 text-xs uppercase tracking-wide text-[var(--color-muted)] font-mono">
+                  <figcaption className="mt-2 text-xs  text-[var(--color-text-muted)]">
                     {block.alt || block.title}
                   </figcaption>
                 )}
               </figure>
             );
           case "hr":
-            return <hr key={block.id} className="my-6 border-0 border-t-2 border-black" />;
+            return <hr key={block.id} className="my-6 border-0 border-t border-[var(--color-border)]" />;
           case "html":
             return (
               <pre
                 key={block.id}
-                className="mb-4 overflow-x-auto border-2 border-black bg-[var(--color-muted-bg)] p-4 text-xs font-mono text-black"
-                style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+                className="mb-4 overflow-x-auto border border-[var(--color-border)] bg-[var(--color-bg-subtle)] p-4 text-xs text-[var(--color-text)]"
+                style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" }}
               >
                 <code>{block.source}</code>
               </pre>

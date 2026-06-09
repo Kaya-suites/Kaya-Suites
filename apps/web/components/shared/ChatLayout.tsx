@@ -105,7 +105,7 @@ export function ChatLayout() {
   }, []);
 
   return (
-    <div className="flex h-full overflow-hidden" style={{ background: "var(--color-background)" }}>
+    <div className="flex h-full overflow-hidden" style={{ background: "var(--color-bg)" }}>
       <div className="hidden md:flex shrink-0">
         <SessionRail
           sessions={sessions}
@@ -119,25 +119,23 @@ export function ChatLayout() {
       </div>
 
       <div
-        className={`flex flex-col min-w-0 border-r-2 border-black bg-[var(--color-surface)] transition-all duration-200 ${
+        className={`flex flex-col min-w-0 border-r border-[var(--color-border)] bg-[var(--color-surface)] transition-all duration-200 ${
           openDocId ? "w-1/2" : "flex-1"
         }`}
       >
-        <div className="flex items-center justify-between px-5 py-3 border-b-2 border-black shrink-0 bg-[var(--color-background)]">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--color-border)] shrink-0 bg-[var(--color-surface)]">
           <div className="flex items-center gap-2">
-            <div
-              className="w-6 h-6 border-2 border-black bg-black flex items-center justify-center text-white text-xs font-bold font-mono"
-              style={{ borderRadius: "var(--border-radius)" }}
-            >
+            <div className="w-6 h-6 inline-flex items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-bg-subtle)] text-[var(--color-text)] text-[var(--font-size-xs)] font-semibold">
               K
             </div>
-            <span className="text-xs font-bold text-black uppercase tracking-wider font-mono">Kaya</span>
+            <span className="font-[var(--font-serif)] text-[var(--font-size-base)] font-semibold text-[var(--color-text)] tracking-tight">
+              Kaya
+            </span>
           </div>
           <button
             onClick={handleNewSession}
-            className="md:hidden p-1.5 border-2 border-transparent hover:border-black hover:bg-[var(--color-muted-bg)] text-black transition-all"
-            style={{ borderRadius: "var(--border-radius)" }}
-            title="New conversation"
+            aria-label="New conversation"
+            className="md:hidden p-1.5 rounded-[var(--radius-md)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-subtle)] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
           >
             <Plus size={15} strokeWidth={1.5} />
           </button>

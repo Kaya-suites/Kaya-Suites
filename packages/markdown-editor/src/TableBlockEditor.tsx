@@ -30,7 +30,7 @@ function normalizeSizes(current: number[], length: number, fallback: number) {
 }
 
 function tableActionClassName() {
-  return "inline-flex h-6 min-w-6 items-center justify-center border-2 border-black bg-white px-1 text-[10px] font-bold font-mono uppercase tracking-wide hover:bg-[var(--color-muted-bg)]";
+  return "inline-flex h-6 min-w-6 items-center justify-center border border-[var(--color-border)] bg-[var(--color-surface)] px-1 text-[10px] font-medium hover:bg-[var(--color-bg-subtle)]";
 }
 
 export function TableBlockEditor({
@@ -218,13 +218,13 @@ export function TableBlockEditor({
   return (
     <div className="space-y-3">
       <div
-        className="flex flex-wrap gap-2 border-2 border-black bg-[var(--color-background)] px-3 py-2"
-        style={{ borderRadius: "var(--border-radius)" }}
+        className="flex flex-wrap gap-2 border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2"
+        style={{ borderRadius: "var(--radius-md)" }}
       >
-        <ToolbarButton title="Add Row" icon={<span className="text-[10px] font-bold font-mono">+row</span>} onClick={() => onChange(addTableRow(block, block.rows.length))} />
-        <ToolbarButton title="Remove Row" icon={<span className="text-[10px] font-bold font-mono">-row</span>} onClick={() => onChange(removeTableRow(block, block.rows.length - 1))} />
-        <ToolbarButton title="Add Column" icon={<span className="text-[10px] font-bold font-mono">+col</span>} onClick={() => onChange(addTableColumn(block, block.header.length))} />
-        <ToolbarButton title="Remove Column" icon={<span className="text-[10px] font-bold font-mono">-col</span>} onClick={() => onChange(removeTableColumn(block, block.header.length - 1))} />
+        <ToolbarButton title="Add Row" icon={<span className="text-[10px] font-bold">+row</span>} onClick={() => onChange(addTableRow(block, block.rows.length))} />
+        <ToolbarButton title="Remove Row" icon={<span className="text-[10px] font-bold">-row</span>} onClick={() => onChange(removeTableRow(block, block.rows.length - 1))} />
+        <ToolbarButton title="Add Column" icon={<span className="text-[10px] font-bold">+col</span>} onClick={() => onChange(addTableColumn(block, block.header.length))} />
+        <ToolbarButton title="Remove Column" icon={<span className="text-[10px] font-bold">-col</span>} onClick={() => onChange(removeTableColumn(block, block.header.length - 1))} />
         <ToolbarButton title="Toggle Header Row" icon={<ArrowUpDown size={14} />} onClick={() => onChange(toggleTableHeader(block))} />
       </div>
 
@@ -232,8 +232,8 @@ export function TableBlockEditor({
         ref={containerRef}
         data-table-scroll-container="true"
         data-width-mode={isOverflowMode ? "overflow" : "fit"}
-        className="relative overflow-x-auto overflow-y-visible border-2 border-black bg-white"
-        style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+        className="relative overflow-x-auto overflow-y-visible border border-[var(--color-border)] bg-[var(--color-surface)]"
+        style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" }}
       >
         <table className="border-separate border-spacing-0" style={tableStyle}>
           <colgroup>
@@ -253,7 +253,7 @@ export function TableBlockEditor({
                   data-sticky-header="true"
                   onMouseEnter={() => setHoveredColumnIndex(columnIndex)}
                   onMouseLeave={() => setHoveredColumnIndex((current) => (current === columnIndex ? null : current))}
-                  className={`group/column relative border-b-2 border-black bg-[var(--color-muted-bg)] align-top ${columnIndex < block.header.length - 1 ? "border-r-2" : ""}`}
+                  className={`group/column relative border-b border-[var(--color-border)] bg-[var(--color-bg-subtle)] align-top ${columnIndex < block.header.length - 1 ? "border-r-2" : ""}`}
                   style={{
                     minHeight: `${visibleRowHeights[0] ?? DEFAULT_ROW_HEIGHT}px`,
                     ...(stickyActive
@@ -275,7 +275,7 @@ export function TableBlockEditor({
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => onChange(addTableColumn(block, columnIndex))}
                         className={tableActionClassName()}
-                        style={{ borderRadius: "calc(var(--border-radius) - 4px)" }}
+                        style={{ borderRadius: "calc(var(--radius-md) - 4px)" }}
                       >
                         +L
                       </button>
@@ -286,7 +286,7 @@ export function TableBlockEditor({
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => onChange(addTableColumn(block, columnIndex + 1))}
                         className={tableActionClassName()}
-                        style={{ borderRadius: "calc(var(--border-radius) - 4px)" }}
+                        style={{ borderRadius: "calc(var(--radius-md) - 4px)" }}
                       >
                         +R
                       </button>
@@ -297,7 +297,7 @@ export function TableBlockEditor({
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => onChange(removeTableColumn(block, columnIndex))}
                         className={tableActionClassName()}
-                        style={{ borderRadius: "calc(var(--border-radius) - 4px)" }}
+                        style={{ borderRadius: "calc(var(--radius-md) - 4px)" }}
                       >
                         -C
                       </button>
@@ -315,7 +315,7 @@ export function TableBlockEditor({
                       autoResizeTextarea(event.currentTarget);
                       updateHeaderCell(columnIndex, event.target.value);
                     }}
-                    className="block w-full resize-none bg-transparent px-3 py-3 text-sm font-bold font-mono outline-none"
+                    className="block w-full resize-none bg-transparent px-3 py-3 text-sm font-bold outline-none"
                     style={{ minHeight: `${visibleRowHeights[0] ?? DEFAULT_ROW_HEIGHT}px` }}
                   />
                   {columnIndex < block.header.length - 1 && (
@@ -346,7 +346,7 @@ export function TableBlockEditor({
                   <td
                     key={`${block.id}-row-${rowIndex}-col-${columnIndex}`}
                     data-row-index={rowIndex}
-                    className={`border-b-2 border-black align-top ${columnIndex < row.length - 1 ? "border-r-2" : ""} ${columnIndex === 0 ? "relative" : ""}`}
+                    className={`border-b border-[var(--color-border)] align-top ${columnIndex < row.length - 1 ? "border-r-2" : ""} ${columnIndex === 0 ? "relative" : ""}`}
                     style={{ minHeight: `${visibleRowHeights[rowIndex + 1] ?? DEFAULT_ROW_HEIGHT}px` }}
                   >
                     {columnIndex === 0 && hoveredRowIndex === rowIndex && (
@@ -358,7 +358,7 @@ export function TableBlockEditor({
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => onChange(addTableRow(block, rowIndex))}
                           className={tableActionClassName()}
-                          style={{ borderRadius: "calc(var(--border-radius) - 4px)" }}
+                          style={{ borderRadius: "calc(var(--radius-md) - 4px)" }}
                         >
                           +A
                         </button>
@@ -369,7 +369,7 @@ export function TableBlockEditor({
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => onChange(addTableRow(block, rowIndex + 1))}
                           className={tableActionClassName()}
-                          style={{ borderRadius: "calc(var(--border-radius) - 4px)" }}
+                          style={{ borderRadius: "calc(var(--radius-md) - 4px)" }}
                         >
                           +B
                         </button>
@@ -380,7 +380,7 @@ export function TableBlockEditor({
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => onChange(removeTableRow(block, rowIndex))}
                           className={tableActionClassName()}
-                          style={{ borderRadius: "calc(var(--border-radius) - 4px)" }}
+                          style={{ borderRadius: "calc(var(--radius-md) - 4px)" }}
                         >
                           -R
                         </button>
@@ -398,7 +398,7 @@ export function TableBlockEditor({
                         autoResizeTextarea(event.currentTarget);
                         updateBodyCell(rowIndex, columnIndex, event.target.value);
                       }}
-                      className="block w-full resize-none px-3 py-3 text-sm font-mono outline-none"
+                      className="block w-full resize-none px-3 py-3 text-sm outline-none"
                       style={{ minHeight: `${visibleRowHeights[rowIndex + 1] ?? DEFAULT_ROW_HEIGHT}px` }}
                     />
                     {columnIndex === 0 && (

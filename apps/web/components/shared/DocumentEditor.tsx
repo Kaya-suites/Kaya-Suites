@@ -6,6 +6,8 @@ import Link from "next/link";
 import type { KayaDocument } from "@/types/chat";
 import { DocumentChatSidebar } from "./DocumentChatSidebar";
 import { ChevronLeft, MessageSquare, Copy, Check, Tag } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/components/ui/cn";
 
 const KayaMarkdownEditor = dynamic(
   () => import("@kaya/markdown-editor").then((m) => m.KayaMarkdownEditor),
@@ -237,11 +239,10 @@ export function DocumentEditor({ doc }: Props) {
   return (
     <div className="flex h-full min-h-0 bg-[var(--color-surface)]">
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex items-center gap-3 px-6 py-3 border-b-2 border-black bg-[var(--color-background)] shrink-0">
+        <div className="flex items-center gap-3 px-6 py-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0">
           <Link
             href="/documents"
-            className="flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-[var(--color-muted)] hover:text-black transition-colors font-mono border-2 border-transparent hover:border-black px-2 py-1"
-            style={{ borderRadius: "var(--border-radius)" }}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-md)] text-[var(--font-size-sm)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-subtle)] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
           >
             <ChevronLeft size={14} />
             Docs
@@ -252,26 +253,28 @@ export function DocumentEditor({ doc }: Props) {
               type="text"
               value={title}
               onChange={(e) => handleTitleChange(e.target.value)}
-              className="w-full text-sm font-bold text-black bg-transparent border-none outline-none placeholder-[var(--color-muted)] font-mono uppercase tracking-wide"
-              placeholder="UNTITLED"
+              aria-label="Document title"
+              className="w-full font-[var(--font-serif)] text-[var(--font-size-lg)] font-semibold tracking-tight text-[var(--color-text)] bg-transparent border-none outline-none placeholder:text-[var(--color-text-subtle)]"
+              placeholder="Untitled"
             />
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <button
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => setChatOpen((v) => !v)}
-              title={chatOpen ? "Hide chat" : "Show chat"}
-              className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black font-mono transition-colors hover:bg-[var(--color-muted-bg)]"
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)", background: chatOpen ? "var(--color-muted-bg)" : "var(--color-surface)" }}
+              aria-pressed={chatOpen}
+              className={cn(chatOpen && "bg-[var(--color-bg-subtle)]")}
             >
               <MessageSquare size={13} />
               {chatOpen ? "Hide chat" : "Show chat"}
-            </button>
-            <button
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => void handleCopyMarkdown()}
-              title="Copy document as Markdown"
-              className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black font-mono transition-colors hover:bg-[var(--color-muted-bg)]"
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
+              aria-label="Copy document as Markdown"
             >
               {copyStatus === "copied" ? (
                 <>
@@ -284,58 +287,52 @@ export function DocumentEditor({ doc }: Props) {
                   Copy MD
                 </>
               )}
-            </button>
-            <button
-              onClick={handleClearAll}
-              title="Clear all content"
-              className="px-2 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black font-mono transition-colors hover:bg-[var(--color-danger)] hover:text-white hover:border-[var(--color-danger)]"
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
-            >
+            </Button>
+            <Button size="sm" variant="ghost" onClick={handleClearAll}>
               Clear
-            </button>
+            </Button>
             {status === "saved" && (
-              <span className="text-xs text-[var(--color-success)] flex items-center gap-1 font-mono font-bold uppercase">
+              <span className="text-[var(--font-size-sm)] text-[var(--color-success)] inline-flex items-center gap-1">
                 <Check size={12} strokeWidth={1.8} />
                 Saved
               </span>
             )}
             {status === "error" && (
-              <span className="text-xs text-[var(--color-danger)] font-mono font-bold uppercase">Save failed</span>
+              <span className="text-[var(--font-size-sm)] text-[var(--color-danger)]">
+                Save failed
+              </span>
             )}
-            <button
+            <Button
+              size="sm"
               onClick={handleSaveClick}
               disabled={!isDirty || status === "saving" || pendingRemoteDoc !== null}
-              className="px-3 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black bg-[var(--color-accent)] text-white disabled:opacity-40 disabled:cursor-not-allowed font-mono"
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
             >
               {status === "saving" ? "Saving…" : "Save"}
-            </button>
+            </Button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 px-6 py-2 border-b-2 border-black bg-[var(--color-background)] shrink-0">
-          <Tag size={12} className="text-[var(--color-muted)] shrink-0" />
+        <div className="flex items-center gap-2 px-6 py-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0">
+          <Tag size={12} className="text-[var(--color-text-subtle)] shrink-0" />
           <input
             type="text"
             value={tagsInput}
             onChange={(e) => handleTagsChange(e.target.value)}
             placeholder="Add tags, comma-separated…"
-            className="flex-1 text-xs text-[var(--color-muted)] bg-transparent border-none outline-none placeholder-[var(--color-muted)] font-mono"
+            aria-label="Tags"
+            className="flex-1 text-[var(--font-size-sm)] text-[var(--color-text-muted)] bg-transparent border-none outline-none placeholder:text-[var(--color-text-subtle)]"
           />
         </div>
 
         {pendingRemoteDoc && (
-          <div className="flex items-center justify-between gap-3 px-6 py-3 border-b-2 border-black bg-[var(--color-warning-bg)]">
-            <p className="text-xs font-mono font-bold uppercase tracking-wider text-black">
-              Agent changes were applied on the server. Reload before saving to avoid overwriting them.
+          <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg-subtle)]">
+            <p className="text-[var(--font-size-sm)] text-[var(--color-text)]">
+              Agent changes were applied on the server. Reload before saving to
+              avoid overwriting them.
             </p>
-            <button
-              onClick={handleReloadRemoteVersion}
-              className="shrink-0 px-3 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black bg-white text-black font-mono"
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
-            >
+            <Button size="sm" variant="secondary" onClick={handleReloadRemoteVersion}>
               Reload latest
-            </button>
+            </Button>
           </div>
         )}
 

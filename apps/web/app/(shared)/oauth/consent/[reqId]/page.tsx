@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -17,11 +18,6 @@ interface ConsentDetails {
 interface DecideResponse {
   redirect: string;
 }
-
-const cardStyle = {
-  borderRadius: "var(--border-radius)",
-  boxShadow: "var(--shadow-card)",
-};
 
 export default function ConsentPage({
   params,
@@ -40,13 +36,16 @@ export default function ConsentPage({
           credentials: "include",
         });
         if (r.status === 401) {
-          // Bounce to sign-in, return here afterwards.
-          const next = encodeURIComponent(window.location.pathname + window.location.search);
+          const next = encodeURIComponent(
+            window.location.pathname + window.location.search,
+          );
           window.location.href = `/auth/signin?next=${next}`;
           return;
         }
         if (r.status === 404) {
-          setError("This consent request has expired or was already used. Restart the connection from your client.");
+          setError(
+            "This consent request has expired or was already used. Restart the connection from your client.",
+          );
           return;
         }
         if (!r.ok) {
@@ -77,8 +76,6 @@ export default function ConsentPage({
         return;
       }
       const data: DecideResponse = await r.json();
-      // The redirect URL points at the MCP client's callback (e.g. localhost).
-      // Navigate there — the browser will surrender control to the client.
       window.location.href = data.redirect;
     } catch {
       setError("Failed to reach the server.");
@@ -88,19 +85,18 @@ export default function ConsentPage({
 
   if (error) {
     return (
-      <main
-        className="h-full flex items-center justify-center font-mono px-6"
-        style={{ background: "var(--color-background)" }}
-      >
-        <div
-          className="bg-[var(--color-surface)] border-2 border-[var(--color-danger)] p-6 space-y-3 max-w-md"
-          style={{ borderRadius: "var(--border-radius)", boxShadow: "4px 4px 0px var(--color-danger)" }}
-        >
-          <p className="font-bold text-xs uppercase tracking-wider text-[var(--color-danger)]">
+      <main className="h-full flex items-center justify-center px-6 bg-[var(--color-bg)]">
+        <div className="bg-[var(--color-surface)] border border-[var(--color-danger)] rounded-[var(--radius-lg)] p-6 space-y-3 max-w-md w-full">
+          <p className="font-[var(--font-serif)] text-xl font-semibold tracking-tight text-[var(--color-danger)]">
             Cannot complete connection
           </p>
-          <p className="text-xs text-black">{error}</p>
-          <Link href="/" className="text-xs font-bold underline">
+          <p className="text-[var(--font-size-sm)] text-[var(--color-text-muted)]">
+            {error}
+          </p>
+          <Link
+            href="/"
+            className="inline-block text-[var(--font-size-sm)] font-medium text-[var(--color-text)] underline underline-offset-2"
+          >
             Back to Kaya
           </Link>
         </div>
@@ -110,13 +106,12 @@ export default function ConsentPage({
 
   if (!details) {
     return (
-      <main
-        className="h-full flex items-center justify-center font-mono"
-        style={{ background: "var(--color-background)" }}
-      >
-        <p className="text-[var(--color-muted)] text-xs uppercase tracking-wider animate-pulse">
-          Loading consent request…
-        </p>
+      <main className="h-full flex items-center justify-center bg-[var(--color-bg)]">
+        <div className="w-full max-w-md space-y-3 px-6">
+          <div className="h-5 w-40 border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+          <div className="h-24 w-full border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+          <div className="h-3 w-3/4 border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+        </div>
       </main>
     );
   }
@@ -127,28 +122,18 @@ export default function ConsentPage({
   );
 
   return (
-    <main
-      className="h-full flex items-center justify-center font-mono px-6"
-      style={{ background: "var(--color-background)" }}
-    >
-      <div
-        className="bg-[var(--color-surface)] border-2 border-black p-8 space-y-6 max-w-md w-full"
-        style={cardStyle}
-      >
+    <main className="h-full flex items-center justify-center px-6 bg-[var(--color-bg)]">
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-8 space-y-6 max-w-md w-full">
         <div className="space-y-2">
-          <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">
+          <p className="text-[var(--font-size-xs)] tracking-wide text-[var(--color-text-subtle)]">
             Connection request
           </p>
-          <h1 className="text-xl font-black tracking-tight text-black">
-            <span className="underline">{details.client_name}</span> wants access
-            to your Kaya knowledge base.
+          <h1 className="font-[var(--font-serif)] text-2xl font-semibold tracking-tight text-[var(--color-text)] leading-snug">
+            <span className="italic">{details.client_name}</span> wants access to your Kaya knowledge base.
           </h1>
         </div>
 
-        <div
-          className="border-2 border-black p-4 text-xs space-y-2"
-          style={{ background: "var(--color-muted-bg)", borderRadius: "var(--border-radius)" }}
-        >
+        <div className="border border-[var(--color-border)] bg-[var(--color-bg-subtle)] rounded-[var(--radius-md)] p-4 text-[var(--font-size-sm)] space-y-2">
           <Row label="Scope" value={details.scope} />
           <Row
             label="Permissions"
@@ -158,29 +143,30 @@ export default function ConsentPage({
           <Row label="Expires in" value={`${minutesLeft} min`} />
         </div>
 
-        <p className="text-xs text-[var(--color-muted)]">
+        <p className="text-[var(--font-size-sm)] text-[var(--color-text-muted)] leading-relaxed">
           Only allow if you initiated this connection from your MCP client (e.g.
           Claude Desktop). Tokens issued here can be revoked any time from
           Settings → Connected apps.
         </p>
 
         <div className="flex gap-3">
-          <button
+          <Button
+            size="lg"
+            className="flex-1"
             onClick={() => decide("allow")}
             disabled={submitting}
-            className="flex-1 border-2 border-black bg-black text-white px-4 py-3 text-xs font-bold uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
           >
             {submitting ? "Working…" : "Allow"}
-          </button>
-          <button
+          </Button>
+          <Button
+            size="lg"
+            variant="secondary"
+            className="flex-1"
             onClick={() => decide("deny")}
             disabled={submitting}
-            className="flex-1 border-2 border-black bg-[var(--color-surface)] text-black px-4 py-3 text-xs font-bold uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
           >
             Deny
-          </button>
+          </Button>
         </div>
       </div>
     </main>
@@ -190,11 +176,9 @@ export default function ConsentPage({
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex justify-between gap-3">
-      <span className="text-[var(--color-muted)] uppercase tracking-wider shrink-0">
-        {label}
-      </span>
+      <span className="text-[var(--color-text-subtle)] shrink-0">{label}</span>
       <span
-        className={`text-black text-right break-all ${mono ? "font-mono" : "font-bold"}`}
+        className={`text-[var(--color-text)] text-right break-all ${mono ? "font-[var(--font-mono)]" : "font-medium"}`}
       >
         {value}
       </span>

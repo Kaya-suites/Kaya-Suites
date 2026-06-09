@@ -6,6 +6,7 @@ import { DiffReview } from "./DiffReview";
 import { DeleteReview } from "./DeleteReview";
 import { FolderCreateReview } from "./FolderCreateReview";
 import { MarkdownContent } from "@kaya/markdown-editor";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   message: ChatMessageData;
@@ -45,8 +46,7 @@ function CitationText({
               <sup key={i}>
                 <button
                   onClick={() => onCitationClick(ref)}
-                  className="inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold border-2 border-black bg-[var(--color-accent)] text-white leading-none ml-0.5 cursor-pointer font-mono"
-                  style={{ borderRadius: "var(--border-radius)" }}
+                  className="inline-flex items-center justify-center w-4 h-4 ml-0.5 text-[10px] font-medium leading-none bg-[var(--color-accent)] text-[var(--color-accent-fg)] rounded-[var(--radius-sm)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
                   title={`Open: ${ref.title}`}
                 >
                   {label}
@@ -82,10 +82,7 @@ export function ChatMessage({
   if (isUser) {
     return (
       <div className="flex justify-end mb-4">
-        <div
-          className="max-w-[75%] bg-[var(--color-accent)] text-white border-2 border-black px-4 py-2.5 text-sm leading-relaxed font-mono font-bold"
-          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-bubble)" }}
-        >
+        <div className="max-w-[75%] bg-[var(--color-accent)] text-[var(--color-accent-fg)] px-4 py-2.5 text-[var(--font-size-base)] leading-relaxed rounded-[var(--radius-lg)]">
           {message.content}
         </div>
       </div>
@@ -116,19 +113,13 @@ export function ChatMessage({
   }
 
   return (
-    <div className="flex mb-5 gap-3">
-      <div
-        className="shrink-0 w-7 h-7 border-2 border-black bg-black flex items-center justify-center text-white text-xs font-bold mt-0.5 font-mono"
-        style={{ borderRadius: "var(--border-radius)" }}
-      >
+    <div className="flex mb-6 gap-3">
+      <div className="shrink-0 w-7 h-7 mt-0.5 inline-flex items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-bg-subtle)] text-[var(--color-text)] text-[var(--font-size-xs)] font-semibold">
         K
       </div>
 
       <div className="flex-1 min-w-0">
-        <div
-          className="border-2 border-black bg-[var(--color-surface)] px-4 py-3 font-mono text-sm text-black [&>*:last-child]:mb-0"
-          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-bubble)" }}
-        >
+        <div className="text-[var(--font-size-base)] text-[var(--color-text)] leading-relaxed [&>*:last-child]:mb-0">
           {message.content ? (
             <MarkdownContent
               markdown={message.content}
@@ -142,7 +133,7 @@ export function ChatMessage({
           ) : null}
 
           {isStreaming && (
-            <span className="inline-block w-2 h-4 ml-1 bg-[var(--color-accent)] animate-pulse align-text-bottom" />
+            <span className="inline-block w-1.5 h-4 ml-1 bg-[var(--color-text)] animate-pulse align-text-bottom" />
           )}
         </div>
 
@@ -176,47 +167,44 @@ export function ChatMessage({
         ))}
 
         {pendingCount >= 2 && (
-          <div className="mt-3 flex items-center gap-2 justify-end border-t-2 border-black pt-3">
-            <button
+          <div className="mt-3 flex items-center gap-2 justify-end border-t border-[var(--color-border)] pt-3">
+            <Button
+              size="sm"
+              variant="ghost"
               onClick={handleRejectAll}
               disabled={approveAllLoading}
-              className="px-3 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black text-black hover:bg-[var(--color-muted-bg)] transition-all disabled:opacity-60 font-mono"
-              style={{ borderRadius: "var(--border-radius)" }}
             >
               Reject all
-            </button>
-            <button
+            </Button>
+            <Button
+              size="sm"
               onClick={handleApproveAll}
               disabled={approveAllLoading}
-              className="px-4 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-black bg-[var(--color-accent)] text-white disabled:opacity-60 font-mono"
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
             >
               {approveAllLoading ? "Approving…" : `Approve all (${pendingCount})`}
-            </button>
+            </Button>
           </div>
         )}
 
         {message.citations.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          <div className="mt-4 flex flex-wrap gap-1.5">
             {Array.from(
               message.citations.reduce((map, c) => {
                 if (!map.has(c.docId)) map.set(c.docId, { first: c, labels: [] });
                 map.get(c.docId)!.labels.push(c.label);
                 return map;
-              }, new Map<string, { first: CitationRef; labels: number[] }>())
+              }, new Map<string, { first: CitationRef; labels: number[] }>()),
             ).map(([docId, { first, labels }]) => (
               <button
                 key={docId}
                 onClick={() => onCitationClick(first)}
-                className="inline-flex items-center gap-1.5 px-2 py-1 border-2 border-black bg-[var(--color-surface)] text-xs text-black font-bold uppercase tracking-wide hover:bg-[var(--color-muted-bg)] transition-all font-mono"
-                style={{ borderRadius: "var(--border-radius)" }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-pill)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--font-size-xs)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-subtle)] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
               >
                 <span className="inline-flex items-center gap-0.5">
                   {labels.map((label) => (
                     <span
                       key={label}
-                      className="inline-flex items-center justify-center w-3.5 h-3.5 border border-black bg-[var(--color-accent)] text-[9px] font-bold text-white"
-                      style={{ borderRadius: "var(--border-radius)" }}
+                      className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-[var(--radius-sm)] bg-[var(--color-accent)] text-[9px] font-medium text-[var(--color-accent-fg)]"
                     >
                       {label}
                     </span>

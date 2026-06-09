@@ -430,25 +430,22 @@ export default function DocumentsLayout({ children }: { children: React.ReactNod
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex h-full overflow-hidden" style={{ background: "var(--color-background)" }}>
+        <div className="flex h-full overflow-hidden bg-[var(--color-bg)]">
           {folderSidebarCollapsed ? (
-            /* Collapsed strip — click to expand */
-            <div className="shrink-0 flex flex-col items-center pt-3 w-9 border-r-2 border-black" style={{ background: "var(--color-background)" }}>
+            <div className="shrink-0 flex flex-col items-center pt-3 w-10 border-r border-[var(--color-border)] bg-[var(--color-surface)]">
               <button
                 onClick={() => setFolderSidebarCollapsed(false)}
-                title="Show folder sidebar"
-                className="w-7 h-7 flex items-center justify-center border-2 border-black bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity"
-                style={{ boxShadow: "var(--shadow-button)" }}
+                aria-label="Show folder sidebar"
+                className="w-7 h-7 inline-flex items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-subtle)] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
               >
-                <ChevronRight size={12} strokeWidth={2.5} />
+                <ChevronRight size={14} />
               </button>
             </div>
           ) : (
             <>
-              {/* Folder sidebar */}
               <div
-                className="shrink-0 overflow-y-auto"
-                style={{ width: `min(${sidebarWidth}px, 75vw)`, background: "var(--color-background)" }}
+                className="shrink-0 overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-surface)]"
+                style={{ width: `min(${sidebarWidth}px, 75vw)` }}
               >
                 <FolderTree
                   folders={folders}
@@ -466,15 +463,16 @@ export default function DocumentsLayout({ children }: { children: React.ReactNod
                 />
               </div>
 
-              {/* Resize handle — hidden on mobile */}
               <div
-                className="hidden sm:block shrink-0 w-0.5 border-r-2 border-black cursor-col-resize hover:border-[var(--color-accent)] transition-colors"
+                className="hidden sm:block shrink-0 w-1 cursor-col-resize bg-transparent hover:bg-[var(--color-border-strong)] transition-colors"
                 onMouseDown={onResizeStart}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize folder sidebar"
               />
             </>
           )}
 
-          {/* Page content */}
           <div className="flex-1 min-w-0 overflow-hidden">
             {children}
           </div>
@@ -482,14 +480,14 @@ export default function DocumentsLayout({ children }: { children: React.ReactNod
 
         <DragOverlay>
           {activeFolder && (
-            <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider px-3 py-1.5 bg-white border-2 border-[var(--color-accent)] shadow-lg opacity-90">
-              <FolderIcon size={12} />
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-border-strong)] shadow-[var(--shadow-lg)] text-[var(--font-size-sm)] font-medium text-[var(--color-text)] opacity-95">
+              <FolderIcon size={13} />
               {activeFolder.name}
             </div>
           )}
           {activeDoc && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white border-2 border-[var(--color-accent)] shadow-lg opacity-90 text-xs font-mono text-[var(--color-muted)]">
-              <FileText size={11} className="shrink-0" />
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-border-strong)] shadow-[var(--shadow-lg)] text-[var(--font-size-sm)] text-[var(--color-text)] opacity-95">
+              <FileText size={12} className="shrink-0" />
               <span className="truncate max-w-32">{activeDoc.title}</span>
             </div>
           )}

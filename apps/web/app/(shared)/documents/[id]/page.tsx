@@ -41,13 +41,13 @@ export default function DocumentEditorPage({
     return (
       <div className="flex flex-col h-screen" style={{ background: "var(--color-surface)" }}>
         <div className="flex items-center gap-3 px-6 py-3 border-b-2 border-black" style={{ background: "var(--color-background)" }}>
-          <div className="h-4 w-24 border-2 border-black bg-[var(--color-muted-bg)] animate-pulse" style={{ borderRadius: "var(--border-radius)" }} />
-          <div className="flex-1 h-5 border-2 border-black bg-[var(--color-muted-bg)] animate-pulse" style={{ borderRadius: "var(--border-radius)" }} />
-          <div className="h-8 w-16 border-2 border-black bg-[var(--color-muted-bg)] animate-pulse" style={{ borderRadius: "var(--border-radius)" }} />
+          <div className="h-4 w-24 border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+          <div className="flex-1 h-5 border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
+          <div className="h-8 w-16 border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ borderRadius: "var(--radius-md)" }} />
         </div>
         <div className="flex-1 px-6 py-4 space-y-3">
           {[...Array(6)].map((_, i) => (
-            <div key={i} className="h-4 border-2 border-black bg-[var(--color-muted-bg)] animate-pulse" style={{ width: `${70 + (i % 3) * 10}%`, borderRadius: "var(--border-radius)" }} />
+            <div key={i} className="h-4 border border-[var(--color-border)] bg-[var(--color-bg-subtle)] animate-pulse" style={{ width: `${70 + (i % 3) * 10}%`, borderRadius: "var(--radius-md)" }} />
           ))}
         </div>
       </div>

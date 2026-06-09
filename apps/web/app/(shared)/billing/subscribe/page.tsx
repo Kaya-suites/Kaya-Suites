@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const PADDLE_CLIENT_TOKEN = process.env.NEXT_PUBLIC_PADDLE_CLIENT_TOKEN ?? "";
@@ -61,27 +63,25 @@ export default function SubscribePage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center px-4 font-mono" style={{ background: "var(--color-background)" }}>
-      <div
-        className="w-full max-w-md bg-[var(--color-surface)] border-2 border-black p-10"
-        style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
-      >
-        <h1 className="text-2xl font-black text-black mb-2 uppercase tracking-tight">
+    <main className="min-h-screen flex items-center justify-center px-4 bg-[var(--color-bg)]">
+      <div className="w-full max-w-md">
+        <h1 className="font-[var(--font-serif)] text-4xl font-semibold tracking-tight text-[var(--color-text)] mb-2">
           Kaya Suites
         </h1>
-        <p className="text-[var(--color-muted)] mb-8 leading-relaxed text-xs">
+        <p className="text-[var(--font-size-base)] text-[var(--color-text-muted)] mb-10 leading-relaxed">
           AI-native knowledge base — one plan, everything included.
         </p>
 
-        <div
-          className="border-2 border-black bg-[var(--color-muted-bg)] p-6 mb-8"
-          style={{ borderRadius: "var(--border-radius)" }}
-        >
-          <div className="flex items-baseline gap-1 mb-4">
-            <span className="text-4xl font-black text-black">$10</span>
-            <span className="text-[var(--color-muted)] text-sm">/month</span>
+        <div className="border border-[var(--color-border)] bg-[var(--color-surface)] rounded-[var(--radius-lg)] p-6 mb-8">
+          <div className="flex items-baseline gap-1 mb-5">
+            <span className="font-[var(--font-serif)] text-5xl font-semibold tracking-tight text-[var(--color-text)]">
+              $10
+            </span>
+            <span className="text-[var(--color-text-muted)] text-[var(--font-size-base)]">
+              / month
+            </span>
           </div>
-          <ul className="space-y-2 text-xs text-black">
+          <ul className="space-y-2.5 text-[var(--font-size-sm)] text-[var(--color-text)]">
             {[
               "Unlimited documents",
               "AI-assisted editing & search",
@@ -90,7 +90,8 @@ export default function SubscribePage() {
               "30-day money-back guarantee",
             ].map((f) => (
               <li key={f} className="flex gap-2">
-                <span className="text-[var(--color-accent)] font-bold">✓</span> {f}
+                <Check size={14} className="mt-0.5 shrink-0 text-[var(--color-text)]" />
+                {f}
               </li>
             ))}
           </ul>
@@ -98,23 +99,18 @@ export default function SubscribePage() {
 
         {error && (
           <div
-            className="border-2 border-[var(--color-danger)] bg-[#FFD6CC] px-4 py-3 text-xs text-[var(--color-danger)] font-bold mb-4"
-            style={{ borderRadius: "var(--border-radius)" }}
+            className="border border-[var(--color-danger)] bg-[var(--color-bg-subtle)] px-4 py-3 text-[var(--font-size-sm)] text-[var(--color-danger)] mb-4 rounded-[var(--radius-md)]"
+            role="alert"
           >
             {error}
           </div>
         )}
 
-        <button
-          onClick={openCheckout}
-          disabled={loading}
-          className="w-full border-2 border-black bg-[var(--color-accent)] text-white py-3 px-6 font-bold text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
-        >
+        <Button size="lg" className="w-full" onClick={openCheckout} disabled={loading}>
           {loading ? "Opening checkout…" : "Subscribe — $10/month"}
-        </button>
+        </Button>
 
-        <p className="mt-4 text-center text-xs text-[var(--color-muted)]">
+        <p className="mt-4 text-center text-[var(--font-size-sm)] text-[var(--color-text-subtle)]">
           Secure checkout via Paddle. Cancel any time.
         </p>
       </div>

@@ -78,17 +78,17 @@ export function renderEditorBlock({
       const Tag = block.type === "heading" ? (`h${block.level}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6") : "div";
       const className =
         block.type === "paragraph"
-          ? "min-h-8 text-sm font-mono leading-relaxed focus:outline-none [&_a]:font-bold [&_a]:text-[var(--color-accent)] [&_a]:underline"
+          ? "min-h-8 text-sm leading-relaxed focus:outline-none [&_a]:font-bold [&_a]:text-[var(--color-accent)] [&_a]:underline"
           : block.type === "blockquote"
-            ? "min-h-8 border-l-4 border-black bg-[var(--color-muted-bg)] px-4 py-3 text-sm font-mono leading-relaxed focus:outline-none [&_a]:font-bold [&_a]:text-[var(--color-accent)] [&_a]:underline"
+            ? "min-h-8 border-l-2 border-[var(--color-border-strong)] bg-[var(--color-bg-subtle)] px-4 py-3 text-sm leading-relaxed focus:outline-none [&_a]:font-bold [&_a]:text-[var(--color-accent)] [&_a]:underline"
             : block.level === 1
-              ? "min-h-10 text-3xl font-bold font-mono focus:outline-none [&_a]:text-[var(--color-accent)] [&_a]:underline"
+              ? "min-h-10 text-3xl font-bold focus:outline-none [&_a]:text-[var(--color-accent)] [&_a]:underline"
               : block.level === 2
-                ? "min-h-9 text-xl font-bold font-mono focus:outline-none [&_a]:text-[var(--color-accent)] [&_a]:underline"
-                : "min-h-8 text-lg font-bold font-mono focus:outline-none [&_a]:text-[var(--color-accent)] [&_a]:underline";
+                ? "min-h-9 text-xl font-bold focus:outline-none [&_a]:text-[var(--color-accent)] [&_a]:underline"
+                : "min-h-8 text-lg font-bold focus:outline-none [&_a]:text-[var(--color-accent)] [&_a]:underline";
 
       return (
-        <div style={{ paddingLeft: `${block.depth * 1.5}rem`, borderLeft: block.depth > 0 ? "2px solid var(--color-muted)" : undefined }}>
+        <div style={{ paddingLeft: `${block.depth * 1.5}rem`, borderLeft: block.depth > 0 ? "2px solid var(--color-text-muted)" : undefined }}>
           <EditableHtml
           html={block.html}
           tagName={Tag}
@@ -317,11 +317,11 @@ export function renderEditorBlock({
       return (
         <div className="space-y-3">
           <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr]">
-            <div className="border-2 border-dashed border-black bg-white p-3" style={{ borderRadius: "var(--border-radius)" }}>
+            <div className="border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-3" style={{ borderRadius: "var(--radius-md)" }}>
               {block.src ? (
                 <img src={block.src} alt={block.alt} className="max-h-80 w-full object-contain" />
               ) : (
-                <div className="flex h-48 items-center justify-center text-xs uppercase tracking-wide text-[var(--color-muted)] font-mono">
+                <div className="flex h-48 items-center justify-center text-xs  text-[var(--color-text-muted)]">
                   Image Preview
                 </div>
               )}
@@ -331,24 +331,24 @@ export function renderEditorBlock({
                 value={block.src}
                 onFocus={() => { clearSelection(); setActiveBlockId(block.id); }}
                 onChange={(event) => updateBlock(block.id, (current) => current.type === "image" ? { ...current, src: event.target.value } : current)}
-                className="w-full border-2 border-black bg-white px-3 py-2 text-sm font-mono"
-                style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
+                className="w-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+                style={{ borderRadius: "var(--radius-md)", boxShadow: "none" }}
                 placeholder="Image URL"
               />
               <input
                 value={block.alt}
                 onFocus={() => { clearSelection(); setActiveBlockId(block.id); }}
                 onChange={(event) => updateBlock(block.id, (current) => current.type === "image" ? { ...current, alt: event.target.value } : current)}
-                className="w-full border-2 border-black bg-white px-3 py-2 text-sm font-mono"
-                style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
+                className="w-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+                style={{ borderRadius: "var(--radius-md)", boxShadow: "none" }}
                 placeholder="Alt text"
               />
               <input
                 value={block.title}
                 onFocus={() => { clearSelection(); setActiveBlockId(block.id); }}
                 onChange={(event) => updateBlock(block.id, (current) => current.type === "image" ? { ...current, title: event.target.value } : current)}
-                className="w-full border-2 border-black bg-white px-3 py-2 text-sm font-mono"
-                style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
+                className="w-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+                style={{ borderRadius: "var(--radius-md)", boxShadow: "none" }}
                 placeholder="Title"
               />
             </div>
@@ -357,19 +357,19 @@ export function renderEditorBlock({
       );
     case "callout":
       return (
-        <div className="flex gap-3 border-2 border-black bg-[var(--color-muted-bg)] px-3 py-3" style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}>
+        <div className="flex gap-3 border border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-3 py-3" style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" }}>
           <input
             value={block.icon}
             onFocus={() => { clearSelection(); setActiveBlockId(block.id); }}
             onChange={(e) => updateBlock(block.id, (c) => c.type === "callout" ? { ...c, icon: e.target.value.slice(0, 3) } : c)}
-            className="h-8 w-10 border-2 border-black bg-white text-center text-base font-mono"
-            style={{ borderRadius: "var(--border-radius)" }}
+            className="h-8 w-10 border border-[var(--color-border)] bg-[var(--color-surface)] text-center text-base"
+            style={{ borderRadius: "var(--radius-md)" }}
             aria-label="Callout icon"
           />
           <EditableHtml
             html={block.html}
             tagName="div"
-            className="min-h-8 flex-1 text-sm font-mono leading-relaxed focus:outline-none"
+            className="min-h-8 flex-1 text-sm leading-relaxed focus:outline-none"
             dataBlockId={block.id}
             ariaLabel="Callout body"
             registerRef={(node) => {
@@ -388,13 +388,13 @@ export function renderEditorBlock({
         <details open={block.open} onToggle={(e) => {
           const nextOpen = (e.currentTarget as HTMLDetailsElement | null)?.open ?? !block.open;
           updateBlock(block.id, (c) => c.type === "toggle" ? { ...c, open: nextOpen } : c);
-        }} className="border-l-2 border-black pl-3">
+        }} className="border-l border-[var(--color-border)] pl-3">
           <summary className="cursor-pointer">
             <input
               value={block.summary}
               onFocus={() => { clearSelection(); setActiveBlockId(block.id); }}
               onChange={(e) => updateBlock(block.id, (c) => c.type === "toggle" ? { ...c, summary: e.target.value } : c)}
-              className="border-b-2 border-transparent bg-transparent text-sm font-bold font-mono focus:border-black focus:outline-none"
+              className="border-b-2 border-transparent bg-transparent text-sm font-bold focus:border-[var(--color-text)] focus:outline-none"
               placeholder="Toggle summary"
               aria-label="Toggle summary"
             />
@@ -402,7 +402,7 @@ export function renderEditorBlock({
           <EditableHtml
             html={block.html}
             tagName="div"
-            className="mt-2 min-h-8 text-sm font-mono leading-relaxed focus:outline-none"
+            className="mt-2 min-h-8 text-sm leading-relaxed focus:outline-none"
             dataBlockId={block.id}
             ariaLabel="Toggle body"
             registerRef={(node) => {
@@ -417,7 +417,7 @@ export function renderEditorBlock({
         </details>
       );
     case "hr":
-      return <hr className="my-4 border-0 border-t-2 border-black" />;
+      return <hr className="my-4 border-0 border-t border-[var(--color-border)]" />;
     case "html":
       return (
         <textarea
@@ -425,8 +425,8 @@ export function renderEditorBlock({
           onFocus={() => { clearSelection(); setActiveBlockId(block.id); }}
           onChange={(event) => updateBlock(block.id, (current) => current.type === "html" ? { ...current, source: event.target.value } : current)}
           rows={6}
-          className="w-full border-2 border-black bg-[var(--color-muted-bg)] px-4 py-3 text-sm font-mono"
-          style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+          className="w-full border border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-4 py-3 text-sm"
+          style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" }}
         />
       );
   }

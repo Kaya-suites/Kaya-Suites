@@ -1340,7 +1340,7 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
         }}
       />
 
-      <div ref={toolbarRef} className="sticky top-0 z-20 border-b-2 border-black bg-[var(--color-background)] px-4 py-3">
+      <div ref={toolbarRef} className="sticky top-0 z-20 border-b border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={
@@ -1355,8 +1355,8 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
                   : activeBlock?.type ?? "paragraph"
             }
             onChange={(event) => updateActiveBlockType(event.target.value)}
-            className="border-2 border-black bg-white px-2 py-1 text-xs font-bold uppercase tracking-wide font-mono"
-            style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
+            className="border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs font-medium"
+            style={{ borderRadius: "var(--radius-md)", boxShadow: "none" }}
           >
             {renderBlockTypeOptions()}
           </select>
@@ -1370,17 +1370,17 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
             setCanUndo(undoStackRef.current.length > 0);
             setBlocks(snapshot);
           }} disabled={!canUndo} />
-          <div className="mx-1 h-7 w-0.5 bg-black" />
+          <div className="mx-1 h-7 w-0.5 bg-[var(--color-border)]" />
           <ToolbarButton title="Bold" icon={<Bold size={14} />} onClick={() => applyInlineCommand("bold")} />
           <ToolbarButton title="Italic" icon={<Italic size={14} />} onClick={() => applyInlineCommand("italic")} />
           <ToolbarButton title="Strikethrough" icon={<Strikethrough size={14} />} onClick={() => applyInlineCommand("strikeThrough")} />
           <ToolbarButton title="Inline Code" icon={<Code size={14} />} onClick={() => applyInlineCommand("insertHTML", `<code>${window.getSelection()?.toString() ?? ""}</code>`)} />
           <ToolbarButton title="Link" icon={<Link size={14} />} onClick={openLinkDialog} />
-          <div className="mx-1 h-7 w-0.5 bg-black" />
+          <div className="mx-1 h-7 w-0.5 bg-[var(--color-border)]" />
           <ToolbarButton title="Bulleted List" icon={<List size={14} />} onClick={() => updateActiveBlockType("list-bullet")} />
           <ToolbarButton title="Numbered List" icon={<ListOrdered size={14} />} onClick={() => updateActiveBlockType("list-numbered")} />
           <ToolbarButton title="Task List" icon={<CheckSquare size={14} />} onClick={() => updateActiveBlockType("list-task")} />
-          <div className="mx-1 h-7 w-0.5 bg-black" />
+          <div className="mx-1 h-7 w-0.5 bg-[var(--color-border)]" />
           <ToolbarButton title="Insert Table" icon={<Table size={14} />} onClick={() => activeBlockId && insertBlockAfter(activeBlockId, createDefaultBlock("table"))} />
           <ToolbarButton title="Insert Code Block" icon={<FileCode size={14} />} onClick={() => activeBlockId && insertBlockAfter(activeBlockId, createDefaultBlock("code"))} />
           <ToolbarButton
@@ -1388,7 +1388,7 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
             icon={<Image size={14} />}
             onClick={() => setImageDialog({ open: true, alt: "", src: "", title: "" })}
           />
-          <div className="mx-1 h-7 w-0.5 bg-black" />
+          <div className="mx-1 h-7 w-0.5 bg-[var(--color-border)]" />
           <ToolbarButton title={isReadOnly ? "Switch to Edit" : "Switch to View"} icon={isReadOnly ? <Pencil size={14} /> : <Eye size={14} />} onClick={() => setIsReadOnly((value) => !value)} />
           <ToolbarButton title={isFullscreen ? "Exit Focus" : "Focus Mode"} icon={isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />} onClick={() => setIsFullscreen((value) => !value)} />
         </div>
@@ -1399,8 +1399,8 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
           <input
             value={linkDialog.href}
             onChange={(event) => setLinkDialog((current) => (current ? { ...current, href: event.target.value } : current))}
-            className="w-full border-2 border-black bg-white px-3 py-2 text-sm font-mono"
-            style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
+            className="w-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+            style={{ borderRadius: "var(--radius-md)", boxShadow: "none" }}
             placeholder="https://example.com"
             autoFocus
             onKeyDown={(event) => { if (event.key === "Enter") saveLink(); }}
@@ -1409,8 +1409,8 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
             {linkDialog.anchor && (
               <button
                 onClick={removeLink}
-                className="border-2 border-black px-3 py-1.5 text-xs font-bold uppercase tracking-wide font-mono text-[var(--color-danger)]"
-                style={{ borderRadius: "var(--border-radius)" }}
+                className="border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-danger)]"
+                style={{ borderRadius: "var(--radius-md)" }}
               >
                 Remove
               </button>
@@ -1418,15 +1418,15 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
             <div className="flex-1" />
             <button
               onClick={() => setLinkDialog(null)}
-              className="border-2 border-black px-3 py-1.5 text-xs font-bold uppercase tracking-wide font-mono"
-              style={{ borderRadius: "var(--border-radius)" }}
+              className="border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium"
+              style={{ borderRadius: "var(--radius-md)" }}
             >
               Cancel
             </button>
             <button
               onClick={saveLink}
-              className="border-2 border-black bg-[var(--color-accent)] px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-white font-mono"
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
+              className="border border-[var(--color-border)] bg-[var(--color-accent)] px-3 py-1.5 text-xs font-medium text-[var(--color-accent-fg)]"
+              style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-sm)" }}
             >
               Apply
             </button>
@@ -1440,37 +1440,37 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
             <input
               value={imageDialog.src}
               onChange={(event) => setImageDialog((current) => ({ ...current, src: event.target.value }))}
-              className="w-full border-2 border-black bg-white px-3 py-2 text-sm font-mono"
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
+              className="w-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+              style={{ borderRadius: "var(--radius-md)", boxShadow: "none" }}
               placeholder="Image URL"
             />
             <input
               value={imageDialog.alt}
               onChange={(event) => setImageDialog((current) => ({ ...current, alt: event.target.value }))}
-              className="w-full border-2 border-black bg-white px-3 py-2 text-sm font-mono"
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
+              className="w-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+              style={{ borderRadius: "var(--radius-md)", boxShadow: "none" }}
               placeholder="Alt text"
             />
             <input
               value={imageDialog.title}
               onChange={(event) => setImageDialog((current) => ({ ...current, title: event.target.value }))}
-              className="w-full border-2 border-black bg-white px-3 py-2 text-sm font-mono"
-              style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-input)" }}
+              className="w-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+              style={{ borderRadius: "var(--radius-md)", boxShadow: "none" }}
               placeholder="Title"
             />
             <div className="flex gap-2">
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-black px-3 py-1.5 text-xs font-bold uppercase tracking-wide font-mono"
-                style={{ borderRadius: "var(--border-radius)" }}
+                className="border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium"
+                style={{ borderRadius: "var(--radius-md)" }}
               >
                 Choose File
               </button>
               <div className="flex-1" />
               <button
                 onClick={() => setImageDialog({ open: false, alt: "", src: "", title: "" })}
-                className="border-2 border-black px-3 py-1.5 text-xs font-bold uppercase tracking-wide font-mono"
-                style={{ borderRadius: "var(--border-radius)" }}
+                className="border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium"
+                style={{ borderRadius: "var(--radius-md)" }}
               >
                 Cancel
               </button>
@@ -1485,8 +1485,8 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
                   }
                   setImageDialog({ open: false, alt: "", src: "", title: "" });
                 }}
-                className="border-2 border-black bg-[var(--color-accent)] px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-white font-mono"
-                style={{ borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-button)" }}
+                className="border border-[var(--color-border)] bg-[var(--color-accent)] px-3 py-1.5 text-xs font-medium text-[var(--color-accent-fg)]"
+                style={{ borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-sm)" }}
               >
                 Insert
               </button>
@@ -1658,10 +1658,10 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
         <div
           role="listbox"
           aria-label="Slash commands"
-          className="fixed z-30 flex w-72 flex-col overflow-hidden border-2 border-black bg-[var(--color-surface)] p-2 kaya-popover-enter"
-          style={{ ...slashMenuPos, maxHeight: "min(60vh, 480px)", borderRadius: "var(--border-radius)", boxShadow: "var(--shadow-card)" }}
+          className="fixed z-30 flex w-72 flex-col overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface)] p-2 kaya-popover-enter"
+          style={{ ...slashMenuPos, maxHeight: "min(60vh, 480px)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md)" }}
         >
-          <div className="border-b-2 border-black px-2 pb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-muted)] font-mono">
+          <div className="border-b border-[var(--color-border)] px-2 pb-2 text-[10px] font-medium tracking-[0.18em] text-[var(--color-text-muted)]">
             Slash Commands
           </div>
           <div className="mt-2 flex-1 space-y-1 overflow-y-auto">
@@ -1672,13 +1672,13 @@ export function KayaMarkdownEditor({ markdown, onChange }: Props) {
                   key={command.key}
                   onMouseEnter={() => setSlashHoverIndex(i)}
                   onClick={() => applySlashCommand(command)}
-                  className={`flex w-full items-center gap-2 border-2 px-2 py-2 text-left ${isHover ? "border-black bg-[var(--color-muted-bg)]" : "border-transparent"}`}
-                  style={{ borderRadius: "var(--border-radius)" }}
+                  className={`flex w-full items-center gap-2 border px-2 py-2 text-left ${isHover ? "border-[var(--color-border-strong)] bg-[var(--color-bg-subtle)]" : "border-transparent"}`}
+                  style={{ borderRadius: "var(--radius-md)" }}
                 >
                   {icon(command.label.slice(0, 2).toUpperCase())}
                   <span className="flex-1">
-                    <span className="block text-xs font-bold uppercase tracking-wide font-mono">{command.label}</span>
-                    <span className="block text-xs text-[var(--color-muted)] font-mono">{command.description}</span>
+                    <span className="block text-xs font-medium">{command.label}</span>
+                    <span className="block text-xs text-[var(--color-text-muted)]">{command.description}</span>
                   </span>
                 </button>
               );

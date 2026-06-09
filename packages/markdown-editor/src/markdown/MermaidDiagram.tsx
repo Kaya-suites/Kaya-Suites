@@ -66,9 +66,9 @@ export function MermaidDiagram({ code, className, isStreaming }: Props) {
     return (
       <div
         className={className}
-        style={{ borderRadius: "var(--border-radius)" }}
+        style={{ borderRadius: "var(--radius-md)" }}
       >
-        <div className="border-2 border-[var(--color-danger)] bg-[#FFD6CC] px-4 py-3 text-sm font-mono text-[var(--color-danger)]">
+        <div className="border border-[var(--color-danger)] bg-[#FFD6CC] px-4 py-3 text-sm text-[var(--color-danger)]">
           {error}
         </div>
       </div>
@@ -80,7 +80,7 @@ export function MermaidDiagram({ code, className, isStreaming }: Props) {
   return (
     <div
       className={className}
-      style={{ borderRadius: "var(--border-radius)" }}
+      style={{ borderRadius: "var(--radius-md)" }}
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );

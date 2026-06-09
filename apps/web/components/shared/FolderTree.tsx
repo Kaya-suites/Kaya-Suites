@@ -8,6 +8,7 @@ import {
   useDroppable,
 } from "@dnd-kit/core";
 import { MoreVertical, ChevronRight, Folder, FileText, Home, FilePlus, ChevronLeft, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -192,12 +193,12 @@ function DraggableFolderNode({
         ref={mergedRef}
         {...listeners}
         {...attributes}
-        className={`group flex items-center gap-1.5 px-2 py-1 cursor-pointer select-none text-xs font-mono font-bold uppercase tracking-wider transition-colors border-2 ${
+        className={`group flex items-center gap-1.5 px-2 py-1 cursor-pointer select-none text-xs font-medium transition-colors border rounded-[var(--radius-md)] ${
           isSelected
-            ? "bg-[var(--color-accent)] text-white border-transparent"
+            ? "bg-[var(--color-accent)] text-[var(--color-accent-fg)] border-transparent"
             : isOverInside
-            ? "border-[var(--color-accent)] bg-[var(--color-muted-bg)] text-black"
-            : "border-transparent text-black hover:bg-[var(--color-muted-bg)]"
+            ? "border-[var(--color-accent)] bg-[var(--color-bg-subtle)] text-[var(--color-text)]"
+            : "border-transparent text-[var(--color-text)] hover:bg-[var(--color-bg-subtle)]"
         }`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={handleRowClick}
@@ -219,7 +220,7 @@ function DraggableFolderNode({
         {/* Kebab menu button */}
         <button
           className={`shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded ${
-            isSelected ? "text-white/70 hover:text-white hover:bg-white/20" : "text-[var(--color-muted)] hover:text-black hover:bg-black/10"
+            isSelected ? "text-[var(--color-accent-fg)]/70 hover:text-[var(--color-accent-fg)] hover:bg-[var(--color-surface)]/20" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-text)]/10"
           }`}
           title="Options"
           onClick={(e) => { e.stopPropagation(); onContextMenu(e, folder.id); }}
@@ -325,21 +326,21 @@ function DraggableFolderDoc({
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className="group flex items-center gap-1.5 py-1 cursor-grab select-none border-2 border-transparent hover:bg-[var(--color-muted-bg)] transition-colors"
+      className="group flex items-center gap-1.5 py-1 cursor-grab select-none border border-transparent hover:bg-[var(--color-bg-subtle)] transition-colors"
       style={{ paddingLeft: `${(depth + 1) * 12 + 8}px`, opacity: isDragging ? 0.4 : 1 }}
     >
       <span className="w-3 h-3 shrink-0" />
-      <FileText size={11} className="shrink-0 text-[var(--color-muted)]" />
+      <FileText size={11} className="shrink-0 text-[var(--color-text-muted)]" />
       <Link
         href={`/documents/${doc.id}`}
-        className="flex-1 truncate text-xs font-mono text-[var(--color-muted)] hover:text-black transition-colors"
+        className="flex-1 truncate text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
         title={doc.title}
         onClick={(e) => e.stopPropagation()}
       >
         {doc.title}
       </Link>
       <button
-        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-[var(--color-muted)] hover:text-black"
+        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
         title="Options"
         onClick={(e) => { e.stopPropagation(); onKebabDoc(e, doc.id); }}
       >
@@ -370,12 +371,12 @@ function RootDropZone({
   return (
     <div
       ref={setNodeRef}
-      className={`flex items-center gap-1.5 px-2 py-1 cursor-pointer select-none text-xs font-mono font-bold uppercase tracking-wider transition-colors border-2 ${
+      className={`flex items-center gap-1.5 px-2 py-1 cursor-pointer select-none text-xs font-medium transition-colors border rounded-[var(--radius-md)] ${
         isSelected
-          ? "bg-[var(--color-accent)] text-white border-transparent"
+          ? "bg-[var(--color-accent)] text-[var(--color-accent-fg)] border-transparent"
           : isOver
-          ? "border-[var(--color-accent)] bg-[var(--color-muted-bg)] text-black"
-          : "border-transparent text-black hover:bg-[var(--color-muted-bg)]"
+          ? "border-[var(--color-accent)] bg-[var(--color-bg-subtle)] text-[var(--color-text)]"
+          : "border-transparent text-[var(--color-text)] hover:bg-[var(--color-bg-subtle)]"
       }`}
       onClick={() => onSelectFolder(null)}
     >
@@ -405,20 +406,20 @@ function UnfiledDocRow({
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className="group flex items-center gap-1.5 py-1 cursor-grab select-none border-2 border-transparent hover:bg-[var(--color-muted-bg)] transition-colors"
+      className="group flex items-center gap-1.5 py-1 cursor-grab select-none border border-transparent hover:bg-[var(--color-bg-subtle)] transition-colors"
       style={{ paddingLeft: "20px", opacity: isDragging ? 0.4 : 1 }}
     >
-      <FileText size={11} className="shrink-0 text-[var(--color-muted)]" />
+      <FileText size={11} className="shrink-0 text-[var(--color-text-muted)]" />
       <Link
         href={`/documents/${doc.id}`}
-        className="flex-1 truncate text-xs font-mono text-[var(--color-muted)] hover:text-black transition-colors"
+        className="flex-1 truncate text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
         title={doc.title}
         onClick={(e) => e.stopPropagation()}
       >
         {doc.title}
       </Link>
       <button
-        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-[var(--color-muted)] hover:text-black"
+        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
         title="Options"
         onClick={(e) => { e.stopPropagation(); onKebabDoc(e, doc.id); }}
       >
@@ -755,7 +756,7 @@ export function FolderTree({
     <div className="relative" onClick={closeAll}>
       <div className="py-1">
         <div className="px-2 py-1 flex items-center justify-between">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-muted)] font-mono">Folders</span>
+          <span className="text-[var(--font-size-xs)] font-medium tracking-wide text-[var(--color-text-muted)]">Folders</span>
           <div className="flex items-center gap-2">
             <button
               onClick={(e) => {
@@ -764,14 +765,14 @@ export function FolderTree({
                   selectedFolderId && selectedFolderId !== "root" ? selectedFolderId : null,
                 );
               }}
-              className="text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"
+              className="text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors"
               title="New file"
             >
               <FilePlus size={12} />
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); startCreate(null); }}
-              className="text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"
+              className="text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors"
               title="New folder"
             >
               <Plus size={12} strokeWidth={2.5} />
@@ -780,8 +781,8 @@ export function FolderTree({
               <button
                 onClick={(e) => { e.stopPropagation(); onCollapse(); }}
                 title="Hide folder sidebar"
-                className="w-7 h-7 flex items-center justify-center border-2 border-black bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity"
-                style={{ boxShadow: "var(--shadow-button)" }}
+                className="w-7 h-7 flex items-center justify-center border border-[var(--color-border)] bg-[var(--color-accent)] text-[var(--color-accent-fg)] hover:opacity-90 transition-opacity"
+                style={{ boxShadow: "var(--shadow-sm)" }}
               >
                 <ChevronLeft size={12} strokeWidth={2.5} />
               </button>
@@ -826,7 +827,7 @@ export function FolderTree({
                 if (e.key === "Escape") setCreating(null);
               }}
               onBlur={submitCreate}
-              className="flex-1 text-xs font-mono font-bold uppercase tracking-wider border-b-2 border-[var(--color-accent)] bg-transparent outline-none text-black py-0.5"
+              className="flex-1 text-xs font-medium border-b-2 border-[var(--color-accent)] bg-transparent outline-none text-[var(--color-text)] py-0.5"
               placeholder="Folder name"
               onClick={(e) => e.stopPropagation()}
             />
@@ -850,31 +851,31 @@ export function FolderTree({
       {contextMenu && (
         <div
           ref={contextMenuRef}
-          className="fixed z-50 bg-white border-2 border-black shadow-lg py-1 min-w-36"
+          className="fixed z-50 bg-[var(--color-surface)] border border-[var(--color-border)] shadow-lg py-1 min-w-36"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
           <button
-            className="w-full text-left px-3 py-1.5 text-xs font-mono font-bold uppercase tracking-wider hover:bg-[var(--color-muted-bg)] transition-colors"
+            className="w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-[var(--color-bg-subtle)] transition-colors"
             onClick={() => createDocument(contextMenu.folderId)}
           >
             New file
           </button>
           <button
-            className="w-full text-left px-3 py-1.5 text-xs font-mono font-bold uppercase tracking-wider hover:bg-[var(--color-muted-bg)] transition-colors"
+            className="w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-[var(--color-bg-subtle)] transition-colors"
             onClick={() => startCreate(contextMenu.folderId)}
           >
             New subfolder
           </button>
           <button
-            className="w-full text-left px-3 py-1.5 text-xs font-mono font-bold uppercase tracking-wider hover:bg-[var(--color-muted-bg)] transition-colors"
+            className="w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-[var(--color-bg-subtle)] transition-colors"
             onClick={() => startRename(contextMenu.folderId)}
           >
             Rename
           </button>
-          <div className="border-t border-black my-1" />
+          <div className="border-t border-[var(--color-border)] my-1" />
           <button
-            className="w-full text-left px-3 py-1.5 text-xs font-mono font-bold uppercase tracking-wider hover:bg-[var(--color-danger)] hover:text-white transition-colors text-[var(--color-danger)]"
+            className="w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-[var(--color-danger)] hover:text-[var(--color-accent-fg)] transition-colors text-[var(--color-danger)]"
             onClick={() => confirmDeleteFolder(contextMenu.folderId)}
           >
             Delete folder
@@ -886,12 +887,12 @@ export function FolderTree({
       {docKebabMenu && (
         <div
           ref={docKebabMenuRef}
-          className="fixed z-50 bg-white border-2 border-black shadow-lg py-1 min-w-36"
+          className="fixed z-50 bg-[var(--color-surface)] border border-[var(--color-border)] shadow-lg py-1 min-w-36"
           style={{ top: docKebabMenu.y, left: docKebabMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
           <button
-            className="w-full text-left px-3 py-1.5 text-xs font-mono font-bold uppercase tracking-wider hover:bg-[var(--color-danger)] hover:text-white transition-colors text-[var(--color-danger)]"
+            className="w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-[var(--color-danger)] hover:text-[var(--color-accent-fg)] transition-colors text-[var(--color-danger)]"
             onClick={() => deleteDocument(docKebabMenu.id)}
           >
             Delete document
@@ -911,7 +912,7 @@ export function FolderTree({
               if (e.key === "Escape") setRenaming(null);
             }}
             onBlur={submitRename}
-            className="w-full text-xs font-mono font-bold uppercase tracking-wider border-2 border-[var(--color-accent)] bg-white outline-none px-2 py-1 text-black"
+            className="w-full text-xs font-medium border border-[var(--color-accent)] bg-[var(--color-surface)] outline-none px-2 py-1 text-[var(--color-text)]"
             onClick={(e) => e.stopPropagation()}
           />
         </div>
@@ -920,52 +921,55 @@ export function FolderTree({
       {/* Folder delete confirmation modal */}
       {deleteConfirm && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--color-text)]/40 p-4"
           onClick={() => setDeleteConfirm(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="folder-delete-title"
         >
           <div
-            className="bg-white border-2 border-black shadow-xl p-6 w-full max-w-sm mx-4"
+            className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] p-6 w-full max-w-sm"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-sm font-bold uppercase tracking-wider font-mono mb-3">
+            <h2
+              id="folder-delete-title"
+              className="font-[var(--font-serif)] text-xl font-semibold tracking-tight mb-3"
+            >
               Delete folder
             </h2>
-            <p className="text-xs font-mono text-black mb-2">
-              Delete <span className="font-bold">&ldquo;{deleteConfirm.name}&rdquo;</span>?
+            <p className="text-[var(--font-size-sm)] text-[var(--color-text)] mb-2 leading-relaxed">
+              Delete <span className="font-semibold">“{deleteConfirm.name}”</span>?
             </p>
-            <p className="text-xs font-mono text-[var(--color-danger)] mb-5">
+            <p className="text-[var(--font-size-sm)] text-[var(--color-text-muted)] mb-6 leading-relaxed">
               This will permanently delete{" "}
               {deleteConfirm.docCount > 0 && (
                 <span>
-                  <span className="font-bold">{deleteConfirm.docCount}</span>{" "}
+                  <span className="font-semibold text-[var(--color-text)]">{deleteConfirm.docCount}</span>{" "}
                   document{deleteConfirm.docCount !== 1 ? "s" : ""}
                   {deleteConfirm.subFolderCount > 0 ? " and " : ""}
                 </span>
               )}
               {deleteConfirm.subFolderCount > 0 && (
                 <span>
-                  <span className="font-bold">{deleteConfirm.subFolderCount}</span>{" "}
+                  <span className="font-semibold text-[var(--color-text)]">{deleteConfirm.subFolderCount}</span>{" "}
                   subfolder{deleteConfirm.subFolderCount !== 1 ? "s" : ""}
                 </span>
               )}{" "}
               inside it. This cannot be undone.
             </p>
             <div className="flex justify-end gap-2">
-              <button
-                className="px-4 py-2 text-xs font-bold uppercase tracking-wider font-mono border-2 border-black hover:bg-[var(--color-muted-bg)] transition-colors"
-                onClick={() => setDeleteConfirm(null)}
-              >
+              <Button variant="ghost" onClick={() => setDeleteConfirm(null)}>
                 Cancel
-              </button>
-              <button
-                className="px-4 py-2 text-xs font-bold uppercase tracking-wider font-mono border-2 border-black bg-[var(--color-danger)] text-white hover:opacity-90 transition-opacity"
+              </Button>
+              <Button
+                variant="danger"
                 onClick={() => {
                   deleteFolder(deleteConfirm.id);
                   setDeleteConfirm(null);
                 }}
               >
                 Delete
-              </button>
+              </Button>
             </div>
           </div>
         </div>

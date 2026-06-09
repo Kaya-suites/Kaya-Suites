@@ -6,7 +6,7 @@ import { useState } from "react";
 
 const MDXEditorClient = dynamic(
   () => import("@/components/shared/MDXEditorClient"),
-  { ssr: false, loading: () => <div className="animate-pulse h-64 bg-[var(--color-muted-bg)] border-2 border-black" style={{ borderRadius: "var(--border-radius)" }} /> }
+  { ssr: false, loading: () => <div className="animate-pulse h-64 bg-[var(--color-bg-subtle)] border border-[var(--color-border)]" style={{ borderRadius: "var(--radius-md)" }} /> }
 );
 
 const INITIAL_MARKDOWN = `# Test page
