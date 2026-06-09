@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { proxyError } from "@/lib/bff";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     });
     const data = await res.json();
     return Response.json(data, { status: res.status });
-  } catch {
-    return Response.json({ error: "Failed to seed demo document" }, { status: 502 });
+  } catch (err) {
+    return proxyError(err, "documents/seed-demo");
   }
 }

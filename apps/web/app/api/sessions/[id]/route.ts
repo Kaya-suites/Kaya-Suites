@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { proxyError } from "@/lib/bff";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -19,8 +20,8 @@ export async function PATCH(
       body: JSON.stringify(body),
     });
     return new Response(null, { status: res.status });
-  } catch {
-    return Response.json({ error: "backend unreachable" }, { status: 502 });
+  } catch (err) {
+    return proxyError(err, "sessions/[id]");
   }
 }
 
@@ -36,7 +37,7 @@ export async function DELETE(
       headers: { ...(cookie && { cookie }) },
     });
     return new Response(null, { status: res.status });
-  } catch {
-    return Response.json({ error: "backend unreachable" }, { status: 502 });
+  } catch (err) {
+    return proxyError(err, "sessions/[id]");
   }
 }

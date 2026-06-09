@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { proxyError } from "@/lib/bff";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -25,7 +26,7 @@ export async function GET(
         "Content-Disposition": disposition,
       },
     });
-  } catch {
-    return Response.json({ error: "backend unreachable" }, { status: 502 });
+  } catch (err) {
+    return proxyError(err, "documents/[id]/export");
   }
 }

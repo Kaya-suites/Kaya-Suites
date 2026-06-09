@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { proxyError } from "@/lib/bff";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -10,8 +11,8 @@ export async function GET(request: NextRequest): Promise<Response> {
     });
     const data = await res.json();
     return Response.json(data, { status: res.status });
-  } catch {
-    return Response.json([], { status: 200 }); // empty list when backend is down
+  } catch (err) {
+    return proxyError(err, "sessions");
   }
 }
 
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     });
     const data = await res.json();
     return Response.json(data, { status: res.status });
-  } catch {
-    return Response.json({ error: "backend unreachable" }, { status: 502 });
+  } catch (err) {
+    return proxyError(err, "sessions");
   }
 }

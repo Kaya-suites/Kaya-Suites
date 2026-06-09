@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { proxyError } from "@/lib/bff";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -25,8 +26,8 @@ export async function POST(request: NextRequest): Promise<Response> {
       },
       body: JSON.stringify({ message, context }),
     });
-  } catch {
-    return Response.json({ error: "backend unreachable" }, { status: 502 });
+  } catch (err) {
+    return proxyError(err, "chat");
   }
 
   if (!upstream.ok || !upstream.body) {
