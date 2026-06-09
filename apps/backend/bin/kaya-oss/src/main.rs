@@ -433,11 +433,25 @@ async fn main() -> anyhow::Result<()> {
             "session cookies will be issued WITHOUT the Secure flag (dev/HTTP mode). Set KAYA_COOKIES_SECURE=1 or use an HTTPS FRONTEND_URL in production.",
         );
     }
+    // Cross-site deploys (e.g. frontend on `*.onrender.com` and backend on a
+    // *different* `*.onrender.com` — `onrender.com` is on the Public Suffix
+    // List, so sibling subdomains are cross-site) require `SameSite=None` or
+    // the browser will silently drop the session cookie on XHRs. Default to
+    // `Lax`; operators opt in via `KAYA_COOKIE_SAMESITE=none|lax|strict`.
+    // `None` is forced to `Secure` regardless of `KAYA_COOKIES_SECURE`.
+    let same_site_env = std::env::var("KAYA_COOKIE_SAMESITE")
+        .ok()
+        .map(|s| s.to_ascii_lowercase());
+    let (same_site, secure_cookies) = match same_site_env.as_deref() {
+        Some("none") => (SameSite::None, true),
+        Some("strict") => (SameSite::Strict, secure_cookies),
+        _ => (SameSite::Lax, secure_cookies),
+    };
     let session_layer = SessionManagerLayer::new(session_store)
         .with_name("kaya_session")
         .with_http_only(true)
         .with_secure(secure_cookies)
-        .with_same_site(SameSite::Lax)
+        .with_same_site(same_site)
         .with_expiry(Expiry::OnInactivity(
             tower_sessions::cookie::time::Duration::days(7),
         ));
