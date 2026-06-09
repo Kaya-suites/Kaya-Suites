@@ -76,6 +76,11 @@ async fn register(
             Json(serde_json::json!({ "error": "username_taken" })),
         )
             .into_response(),
+        Err(RegisterError::WeakPassword(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "weak_password", "reason": reason })),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!(error = %e, "register failed");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()

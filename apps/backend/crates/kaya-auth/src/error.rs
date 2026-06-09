@@ -9,6 +9,9 @@ pub enum RegisterError {
     #[error("that username is already taken")]
     UsernameTaken,
 
+    #[error("password is too weak: {0}")]
+    WeakPassword(&'static str),
+
     #[error("password hashing failed: {0}")]
     PasswordHash(String),
 

@@ -49,6 +49,7 @@ use utoipa::OpenApi;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
+mod rate_limit;
 mod routes;
 mod session_store;
 mod state;
@@ -95,6 +96,76 @@ async fn static_handler(uri: axum::http::Uri) -> Response {
         .status(StatusCode::NOT_FOUND)
         .body(Body::from("not found"))
         .unwrap()
+}
+
+// ── CSRF Origin/Referer guard ─────────────────────────────────────────────────
+
+/// Per-request guard for cookie-authenticated, state-changing routes.
+///
+/// `SameSite=Lax` blocks most cross-site POSTs, but it does not protect
+/// against same-site attackers (sibling subdomain takeover, an XSS on a peer
+/// app, etc.). We additionally require that `Origin` (or `Referer` as a
+/// fallback for clients that strip Origin) matches the configured frontend
+/// origin. GET/HEAD/OPTIONS are unaffected — they should not mutate state.
+#[derive(Clone)]
+struct CsrfOrigins {
+    allowed: Vec<String>,
+}
+
+async fn csrf_guard(
+    State(origins): State<CsrfOrigins>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let m = request.method();
+    if matches!(
+        *m,
+        Method::GET | Method::HEAD | Method::OPTIONS
+    ) {
+        return next.run(request).await;
+    }
+
+    let headers = request.headers();
+    let origin_match = headers
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+        .map(|o| origins.allowed.iter().any(|a| a == o));
+    if origin_match == Some(true) {
+        return next.run(request).await;
+    }
+    // Some browsers strip Origin (e.g. on redirects, same-origin same-method
+    // navigations). Accept Referer with a matching origin as a fallback.
+    let referer_match = headers
+        .get(header::REFERER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(referer_origin)
+        .map(|origin| origins.allowed.iter().any(|a| a == &origin));
+    if referer_match == Some(true) {
+        return next.run(request).await;
+    }
+
+    tracing::warn!(
+        method = %m,
+        path = %request.uri().path(),
+        origin = ?headers.get(header::ORIGIN),
+        referer = ?headers.get(header::REFERER),
+        "CSRF guard rejected state-changing request",
+    );
+    (StatusCode::FORBIDDEN, "origin not allowed").into_response()
+}
+
+/// Extract `scheme://host[:port]` from a Referer URL. Returns `None` for any
+/// malformed input — callers should treat that as "no match".
+fn referer_origin(referer: &str) -> Option<String> {
+    let (scheme, rest) = referer.split_once("://")?;
+    if scheme.is_empty() || scheme.contains('/') {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next()?;
+    if authority.is_empty() {
+        return None;
+    }
+    Some(format!("{scheme}://{authority}"))
 }
 
 // ── inject_storage middleware ─────────────────────────────────────────────────
@@ -257,8 +328,27 @@ async fn main() -> anyhow::Result<()> {
         any_pool.clone(),
         auth_backend_kind,
     ));
+    let superadmin_password = match std::env::var("KAYA_SUPERADMIN_PASSWORD") {
+        Ok(p) if !p.is_empty() => p,
+        _ => {
+            // No env var set. Generate a one-shot random password and log it
+            // exactly once so the operator can grab it from boot logs. This
+            // avoids the previous hardcoded "KayaPassword" backdoor while
+            // still letting a fresh install boot without manual config.
+            let pw = Uuid::new_v4().simple().to_string();
+            tracing::warn!(
+                superadmin_email = %superadmin_email,
+                password = %pw,
+                "KAYA_SUPERADMIN_PASSWORD not set — generated a random one-shot password. Save it now; it will not be shown again. Set KAYA_SUPERADMIN_PASSWORD in your env to use a stable password.",
+            );
+            pw
+        }
+    };
+    // Validate the operator-supplied password before we hash it into the DB.
+    kaya_auth::password_auth::validate_password_strength(&superadmin_password)
+        .map_err(|e| anyhow::anyhow!("KAYA_SUPERADMIN_PASSWORD rejected: {e}"))?;
     password_auth_svc
-        .seed_superadmin(&superadmin_email, "KayaSuperAdmin", "KayaPassword")
+        .seed_superadmin(&superadmin_email, "KayaSuperAdmin", &superadmin_password)
         .await
         .context("seed superadmin")?;
     tracing::info!("superadmin ready");
@@ -318,9 +408,22 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // -- Auth layer ------------------------------------------------------------
+    // Cookies are marked Secure unless the frontend is plain HTTP (dev). The
+    // operator can force either side with KAYA_COOKIES_SECURE=1|0.
+    let secure_cookies = match std::env::var("KAYA_COOKIES_SECURE").ok().as_deref() {
+        Some("1") | Some("true") => true,
+        Some("0") | Some("false") => false,
+        _ => !frontend_url.starts_with("http://"),
+    };
+    if !secure_cookies {
+        tracing::warn!(
+            "session cookies will be issued WITHOUT the Secure flag (dev/HTTP mode). Set KAYA_COOKIES_SECURE=1 or use an HTTPS FRONTEND_URL in production.",
+        );
+    }
     let session_layer = SessionManagerLayer::new(session_store)
         .with_name("kaya_session")
         .with_http_only(true)
+        .with_secure(secure_cookies)
         .with_same_site(SameSite::Lax)
         .with_expiry(Expiry::OnInactivity(
             tower_sessions::cookie::time::Duration::days(7),
@@ -350,11 +453,33 @@ async fn main() -> anyhow::Result<()> {
         ])
         .allow_credentials(true);
 
+    // -- CSRF guard ------------------------------------------------------------
+    // Allow the configured frontend, plus the public URL of this server so
+    // first-party tools hosted on the same origin (e.g. OpenAPI explorer)
+    // aren't rejected. Operators can extend via KAYA_EXTRA_ORIGINS (comma-sep).
+    let mut csrf_allowed = vec![frontend_url.clone()];
+    if let Ok(pub_url) = std::env::var("KAYA_PUBLIC_URL") {
+        if !pub_url.is_empty() {
+            csrf_allowed.push(pub_url);
+        }
+    }
+    if let Ok(extra) = std::env::var("KAYA_EXTRA_ORIGINS") {
+        for o in extra.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            csrf_allowed.push(o.to_string());
+        }
+    }
+    let csrf_origins = CsrfOrigins { allowed: csrf_allowed };
+
     // -- Shared routes (auth-gated) --------------------------------------------
-    let shared_routes = kaya_server::router().route_layer(axum::middleware::from_fn_with_state(
-        state.clone(),
-        inject_storage,
-    ));
+    let shared_routes = kaya_server::router()
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            inject_storage,
+        ))
+        .route_layer(axum::middleware::from_fn_with_state(
+            csrf_origins.clone(),
+            csrf_guard,
+        ));
 
     // -- OAuth routes (mounted OUTSIDE inject_storage) -------------------------
     // The public ones (well-known, register, token) need no cookie auth.
@@ -365,11 +490,34 @@ async fn main() -> anyhow::Result<()> {
         std::env::var("KAYA_PUBLIC_URL").unwrap_or_else(|_| format!("http://localhost:{port}")),
     );
     let consent_store = kaya_server::ConsentRequestStore::new();
-    let oauth_routes = kaya_server::oauth_public_router()
-        .merge(kaya_server::oauth_authenticated_router())
+
+    // Rate limit unauthenticated OAuth endpoints (DCR + token + discovery) so
+    // an attacker can't spam client_id creations or scan the issuer surface.
+    let oauth_public_limiter = rate_limit::RateLimiter::new(60, std::time::Duration::from_secs(60));
+    let oauth_public = kaya_server::oauth_public_router().route_layer(
+        axum::middleware::from_fn_with_state(oauth_public_limiter, rate_limit::enforce),
+    );
+    let oauth_authenticated = kaya_server::oauth_authenticated_router().route_layer(
+        axum::middleware::from_fn_with_state(csrf_origins.clone(), csrf_guard),
+    );
+    let oauth_routes = oauth_public
+        .merge(oauth_authenticated)
         .layer(axum::Extension(any_pool.clone()))
         .layer(axum::Extension(oauth_issuer.clone()))
         .layer(axum::Extension(consent_store.clone()));
+
+    // Rate limit /auth/* (login/register/me/logout). 30/min per IP is generous
+    // for legitimate UI, prohibitive for credential stuffing.
+    let auth_limiter = rate_limit::RateLimiter::new(30, std::time::Duration::from_secs(60));
+    let auth_routes = routes::auth::router()
+        .route_layer(axum::middleware::from_fn_with_state(
+            auth_limiter,
+            rate_limit::enforce,
+        ))
+        .route_layer(axum::middleware::from_fn_with_state(
+            csrf_origins.clone(),
+            csrf_guard,
+        ));
 
     // -- /mcp HTTP route — needs a configured ModelRouter only ---------------
     let mcp_router = match &state.llm {
@@ -395,7 +543,7 @@ async fn main() -> anyhow::Result<()> {
 
     // -- Full router ----------------------------------------------------------
     let mut app = oa_router
-        .merge(routes::auth::router())
+        .merge(auth_routes)
         .merge(routes::account::router())
         .merge(routes::dashboard::router())
         .merge(routes::admin::router())
@@ -416,6 +564,10 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("bind {addr}"))?;
     tracing::info!(port, "kaya-oss listening");
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }

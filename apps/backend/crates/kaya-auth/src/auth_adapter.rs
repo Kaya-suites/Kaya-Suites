@@ -27,12 +27,19 @@ use crate::password_auth::Backend;
 // ── AuthUser ──────────────────────────────────────────────────────────────────
 
 /// The authenticated user stored in the tower-sessions session store.
+///
+/// `password_hash` is persisted server-side in the session store (it never
+/// leaves the database — the cookie just holds an opaque session id). It feeds
+/// `session_auth_hash` so that a password reset invalidates every existing
+/// session, not just the one that performed the reset.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthUser {
     pub id: Uuid,
     pub email: String,
     pub username: Option<String>,
     pub is_superadmin: bool,
+    #[serde(default)]
+    pub password_hash: String,
 }
 
 impl AxumAuthUser for AuthUser {
@@ -42,9 +49,10 @@ impl AxumAuthUser for AuthUser {
         self.id
     }
 
-    /// Changing a user's email invalidates all existing sessions automatically.
+    /// Hashing email + password_hash means BOTH email changes and password
+    /// changes invalidate live sessions automatically.
     fn session_auth_hash(&self) -> &[u8] {
-        self.email.as_bytes()
+        self.password_hash.as_bytes()
     }
 }
 
@@ -129,6 +137,7 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
             email: row.try_get("email").unwrap_or_default(),
             username: row.try_get("username").unwrap_or(None),
             is_superadmin: decode_bool(&row, "is_superadmin"),
+            password_hash: hash,
         }))
     }
 
@@ -137,7 +146,9 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
         user_id: &axum_login::UserId<Self>,
     ) -> Result<Option<Self::User>, Self::Error> {
         let row = sqlx::query(
-            &self.backend.prepare("SELECT id, email, username, is_superadmin FROM users WHERE id = ?"),
+            &self.backend.prepare(
+                "SELECT id, email, username, is_superadmin, password_hash FROM users WHERE id = ?",
+            ),
         )
         .bind(user_id.to_string())
         .fetch_optional(&self.pool)
@@ -148,6 +159,7 @@ impl axum_login::AuthnBackend for KayaAuthBackend {
             email: r.try_get("email").unwrap_or_default(),
             username: r.try_get("username").unwrap_or(None),
             is_superadmin: decode_bool(&r, "is_superadmin"),
+            password_hash: r.try_get("password_hash").unwrap_or_default(),
         }))
     }
 }

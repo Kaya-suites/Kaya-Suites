@@ -21,6 +21,26 @@ pub enum SeedError {
     Database(#[from] sqlx::Error),
 }
 
+/// Minimum length for user-supplied passwords. Enforced at registration time.
+/// Existing hashes are not re-validated.
+pub const MIN_PASSWORD_LEN: usize = 8;
+
+/// Reject passwords that are too short or have too little character variety.
+/// Returns a `RegisterError::WeakPassword` with a short reason on failure.
+pub fn validate_password_strength(password: &str) -> Result<(), RegisterError> {
+    if password.chars().count() < MIN_PASSWORD_LEN {
+        return Err(RegisterError::WeakPassword("must be at least 8 characters"));
+    }
+    let has_letter = password.chars().any(|c| c.is_alphabetic());
+    let has_digit = password.chars().any(|c| c.is_ascii_digit());
+    if !(has_letter && has_digit) {
+        return Err(RegisterError::WeakPassword(
+            "must contain at least one letter and one number",
+        ));
+    }
+    Ok(())
+}
+
 /// Database backend dialect — controls placeholder syntax.
 ///
 /// Postgres requires `$1, $2, ...`; SQLite and MySQL accept `?`.
@@ -77,6 +97,7 @@ impl PasswordAuthService {
         username: Option<&str>,
         password: &str,
     ) -> Result<AuthUser, RegisterError> {
+        validate_password_strength(password)?;
         let salt = SaltString::generate(&mut OsRng);
         let hash = Argon2::default()
             .hash_password(password.as_bytes(), &salt)
@@ -128,6 +149,7 @@ impl PasswordAuthService {
             email: email.to_string(),
             username: username.map(|s| s.to_string()),
             is_superadmin: false,
+            password_hash: hash,
         })
     }
 
