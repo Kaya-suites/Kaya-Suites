@@ -19,7 +19,8 @@ use kaya_core::storage::{
     Chunk, ChunkHit, Document, Embedding, Folder, StorageAdapter, StorageError,
 };
 
-pub static MYSQL_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/mysql");
+// Canonical MySQL migrations now live in the `kaya-db` crate.
+pub use kaya_db::MYSQL_MIGRATOR;
 
 use crate::document::sha256_hex;
 
@@ -45,149 +46,6 @@ impl MySqlAdapter {
         }
     }
 
-    /// Create MySQL tables for the storage adapter.
-    ///
-    /// Idempotent — uses `CREATE TABLE IF NOT EXISTS`.
-    pub async fn run_migrations(pool: &MySqlPool) -> Result<(), StorageError> {
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS documents (
-                id               VARCHAR(36)  NOT NULL,
-                user_id          VARCHAR(36)  NOT NULL,
-                title            TEXT         NOT NULL,
-                frontmatter_json MEDIUMTEXT   NOT NULL,
-                content_hash     VARCHAR(64)  NOT NULL,
-                updated_at       VARCHAR(32)  NOT NULL,
-                deleted_at       VARCHAR(32),
-                body             MEDIUMTEXT   NOT NULL DEFAULT '',
-                PRIMARY KEY (id),
-                KEY documents_user_idx (user_id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-        )
-        .execute(pool)
-        .await
-        .map_err(box_err)?;
-
-        // Drop the path column from databases created with the old schema.
-        let _ = sqlx::query("ALTER TABLE documents DROP COLUMN IF EXISTS path")
-            .execute(pool)
-            .await;
-
-        // Add folder_id column (no-op if already present).
-        let _ = sqlx::query("ALTER TABLE documents ADD COLUMN IF NOT EXISTS folder_id VARCHAR(36)")
-            .execute(pool)
-            .await;
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS chunks (
-                user_id      VARCHAR(36)  NOT NULL,
-                document_id  VARCHAR(36)  NOT NULL,
-                paragraph_id VARCHAR(255) NOT NULL,
-                ordinal      INT          NOT NULL,
-                content      MEDIUMTEXT   NOT NULL,
-                content_hash VARCHAR(64)  NOT NULL,
-                PRIMARY KEY (user_id, document_id, paragraph_id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-        )
-        .execute(pool)
-        .await
-        .map_err(box_err)?;
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS chunk_embeddings (
-                user_id      VARCHAR(36)  NOT NULL,
-                document_id  VARCHAR(36)  NOT NULL,
-                paragraph_id VARCHAR(255) NOT NULL,
-                vector       MEDIUMBLOB   NOT NULL,
-                PRIMARY KEY (user_id, document_id, paragraph_id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-        )
-        .execute(pool)
-        .await
-        .map_err(box_err)?;
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS folders (
-                id         VARCHAR(36)  NOT NULL,
-                user_id    VARCHAR(36)  NOT NULL,
-                name       TEXT         NOT NULL,
-                parent_id  VARCHAR(36),
-                sort_order BIGINT       NOT NULL DEFAULT 0,
-                created_at VARCHAR(32)  NOT NULL,
-                updated_at VARCHAR(32)  NOT NULL,
-                PRIMARY KEY (id),
-                KEY folders_user_parent_idx (user_id, parent_id),
-                KEY folders_user_parent_sort_idx (user_id, parent_id, sort_order)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-        )
-        .execute(pool)
-        .await
-        .map_err(box_err)?;
-
-        let _ = sqlx::query(
-            "ALTER TABLE folders ADD COLUMN IF NOT EXISTS sort_order BIGINT NOT NULL DEFAULT 0",
-        )
-        .execute(pool)
-        .await;
-
-        let _ = sqlx::query(
-            "CREATE INDEX folders_user_parent_sort_idx ON folders (user_id, parent_id, sort_order)",
-        )
-        .execute(pool)
-        .await;
-
-        sqlx::query(
-            "UPDATE folders f
-             JOIN (
-                SELECT
-                    id,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY user_id, COALESCE(parent_id, '__root__')
-                        ORDER BY sort_order ASC, name ASC, created_at ASC, id ASC
-                    ) - 1 AS rn
-                FROM folders
-             ) ranked ON ranked.id = f.id
-             SET f.sort_order = ranked.rn",
-        )
-        .execute(pool)
-        .await
-        .map_err(box_err)?;
-
-        // ── Documents: sort_order column ──────────────────────────────────────
-
-        let _ = sqlx::query(
-            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS sort_order BIGINT NOT NULL DEFAULT 0",
-        )
-        .execute(pool)
-        .await;
-
-        let _ = sqlx::query(
-            "CREATE INDEX documents_folder_sort_idx ON documents (user_id, folder_id, sort_order)",
-        )
-        .execute(pool)
-        .await;
-
-        // Normalize document sort_orders on every startup (idempotent once sequential).
-        sqlx::query(
-            "UPDATE documents d
-             JOIN (
-                 SELECT
-                     id,
-                     ROW_NUMBER() OVER (
-                         PARTITION BY user_id, COALESCE(folder_id, '__root__')
-                         ORDER BY sort_order ASC, updated_at DESC, id ASC
-                     ) - 1 AS rn
-                 FROM documents
-                 WHERE deleted_at IS NULL
-             ) ranked ON ranked.id = d.id
-             SET d.sort_order = ranked.rn
-             WHERE d.deleted_at IS NULL",
-        )
-        .execute(pool)
-        .await
-        .map_err(box_err)?;
-
-        Ok(())
-    }
 
     fn user_id(&self) -> Uuid {
         self.inner.user_context.user_id

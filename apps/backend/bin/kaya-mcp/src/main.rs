@@ -72,20 +72,16 @@ async fn main() -> Result<()> {
                 .create_if_missing(true)
                 .journal_mode(SqliteJournalMode::Wal);
             let sqlite = SqlitePoolOptions::new().connect_with(opts).await?;
-            SqliteAdapter::run_migrations(&sqlite).await?;
-            SqliteSessionStorage::run_migrations(&sqlite).await?;
+            // Per-adapter migrations folded into the unified kaya_db baseline
+            // applied above.
             DbBackend::Sqlite(sqlite)
         }
         Dialect::Postgres => {
-            // Postgres has no separate dialect-specific migration step; the
-            // universal `kaya_db::run_migrations` above covers everything.
             let pg = PgPool::connect(&database_url).await?;
             DbBackend::Postgres(pg)
         }
         Dialect::Mysql => {
             let mysql = MySqlPool::connect(&database_url).await?;
-            MySqlAdapter::run_migrations(&mysql).await?;
-            MySqlSessionStorage::run_migrations(&mysql).await?;
             DbBackend::Mysql(mysql)
         }
     };

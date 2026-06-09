@@ -18,7 +18,8 @@ use kaya_core::storage::{
     Chunk, ChunkHit, Document, Embedding, Folder, StorageAdapter, StorageError,
 };
 
-pub static SQLITE_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/sqlite");
+// Canonical SQLite migrations now live in the `kaya-db` crate.
+pub use kaya_db::SQLITE_MIGRATOR;
 
 use crate::document::sha256_hex;
 
@@ -41,6 +42,10 @@ pub struct SqliteAdapter {
 
 impl SqliteAdapter {
     /// Open (or create) the SQLite database at `db_path`, scoped to `user_context`.
+    ///
+    /// The caller is responsible for running [`kaya_db::SQLITE_MIGRATOR`]
+    /// against the pool before any adapter use — this constructor no longer
+    /// runs DDL itself.
     pub async fn new(db_path: &Path, user_context: UserContext) -> Result<Self, StorageError> {
         let opts = SqliteConnectOptions::new()
             .filename(db_path)
@@ -52,7 +57,10 @@ impl SqliteAdapter {
             .await
             .map_err(box_err)?;
 
-        run_migrations(&pool).await?;
+        kaya_db::SQLITE_MIGRATOR
+            .run(&pool)
+            .await
+            .map_err(|e| StorageError::Backend(Box::new(e)))?;
 
         Ok(Self {
             inner: Arc::new(Inner { pool, user_context }),
@@ -60,20 +68,11 @@ impl SqliteAdapter {
     }
 
     /// Construct from an existing `SqlitePool`, scoped to `user_context`.
-    ///
-    /// Migrations are run immediately (idempotent).
-    pub async fn from_pool(pool: SqlitePool, user_context: UserContext) -> Result<Self, StorageError> {
-        run_migrations(&pool).await?;
-        Ok(Self {
+    /// The pool is expected to already have migrations applied.
+    pub fn from_pool(pool: SqlitePool, user_context: UserContext) -> Self {
+        Self {
             inner: Arc::new(Inner { pool, user_context }),
-        })
-    }
-
-    /// Run SQLite storage migrations on an existing pool.
-    ///
-    /// Idempotent — safe to call on every startup.
-    pub async fn run_migrations(pool: &SqlitePool) -> Result<(), StorageError> {
-        run_migrations(pool).await
+        }
     }
 
     fn user_id(&self) -> Uuid {
@@ -763,161 +762,6 @@ impl StorageAdapter for SqliteAdapter {
     }
 }
 
-// ── Migrations ────────────────────────────────────────────────────────────────
-
-/// Sentinel "local" user used to backfill rows from legacy single-user SQLite
-/// databases that pre-date the user_id column. New deploys never see this user
-/// because rows are always written with the authenticated session's user_id.
-const LEGACY_LOCAL_USER_ID: &str = "00000000-0000-0000-0000-000000000001";
-
-async fn run_migrations(pool: &SqlitePool) -> Result<(), StorageError> {
-    // ── documents ──────────────────────────────────────────────────────────────
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS documents (
-            id               TEXT NOT NULL,
-            user_id          TEXT NOT NULL,
-            title            TEXT NOT NULL,
-            frontmatter_json TEXT NOT NULL,
-            content_hash     TEXT NOT NULL,
-            updated_at       TEXT NOT NULL,
-            deleted_at       TEXT,
-            body             TEXT NOT NULL DEFAULT '',
-            folder_id        TEXT,
-            sort_order       INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (id)
-        )",
-    )
-    .execute(pool)
-    .await
-    .map_err(box_err)?;
-    // Backfill columns on databases that pre-date them. ADD COLUMN is idempotent
-    // when the column already exists (we ignore the error).
-    let _ = sqlx::query("ALTER TABLE documents ADD COLUMN body TEXT NOT NULL DEFAULT ''")
-        .execute(pool).await;
-    let _ = sqlx::query("ALTER TABLE documents ADD COLUMN folder_id TEXT")
-        .execute(pool).await;
-    let _ = sqlx::query("ALTER TABLE documents ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
-        .execute(pool).await;
-    // Legacy single-user DBs lack user_id entirely. Add it and backfill with the
-    // sentinel local user. New deploys are no-ops here.
-    let _ = sqlx::query(&format!(
-        "ALTER TABLE documents ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LEGACY_LOCAL_USER_ID}'"
-    ))
-    .execute(pool)
-    .await;
-
-    // ── folders ────────────────────────────────────────────────────────────────
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS folders (
-            id         TEXT NOT NULL,
-            user_id    TEXT NOT NULL,
-            name       TEXT NOT NULL,
-            parent_id  TEXT,
-            sort_order INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (id),
-            FOREIGN KEY (parent_id) REFERENCES folders(id)
-        )",
-    )
-    .execute(pool)
-    .await
-    .map_err(box_err)?;
-    let _ = sqlx::query("ALTER TABLE folders ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
-        .execute(pool).await;
-    let _ = sqlx::query(&format!(
-        "ALTER TABLE folders ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LEGACY_LOCAL_USER_ID}'"
-    ))
-    .execute(pool)
-    .await;
-
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS folders_user_parent_sort_idx \
-         ON folders (user_id, parent_id, sort_order)",
-    )
-    .execute(pool).await.map_err(box_err)?;
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS documents_user_folder_sort_idx \
-         ON documents (user_id, folder_id, sort_order)",
-    )
-    .execute(pool).await.map_err(box_err)?;
-
-    // ── Sort-order normalization (per user) ────────────────────────────────────
-    // Idempotent: repairs gaps/collisions left by older code that didn't compact.
-    sqlx::query(
-        "WITH ranked AS (
-            SELECT id, ROW_NUMBER() OVER (
-                PARTITION BY user_id, COALESCE(parent_id, '__root__')
-                ORDER BY sort_order ASC, name ASC, created_at ASC, id ASC
-            ) - 1 AS rn
-            FROM folders
-        )
-        UPDATE folders SET sort_order = (SELECT ranked.rn FROM ranked WHERE ranked.id = folders.id)",
-    )
-    .execute(pool).await.map_err(box_err)?;
-    sqlx::query(
-        "WITH ranked AS (
-            SELECT id, ROW_NUMBER() OVER (
-                PARTITION BY user_id, COALESCE(folder_id, '__root__')
-                ORDER BY sort_order ASC, updated_at DESC, id ASC
-            ) - 1 AS rn
-            FROM documents WHERE deleted_at IS NULL
-        )
-        UPDATE documents SET sort_order = (SELECT ranked.rn FROM ranked WHERE ranked.id = documents.id)
-        WHERE deleted_at IS NULL",
-    )
-    .execute(pool).await.map_err(box_err)?;
-
-    // ── chunks ─────────────────────────────────────────────────────────────────
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS chunks (
-            user_id      TEXT NOT NULL,
-            document_id  TEXT NOT NULL,
-            paragraph_id TEXT NOT NULL,
-            ordinal      INTEGER NOT NULL,
-            content      TEXT NOT NULL,
-            content_hash TEXT NOT NULL,
-            PRIMARY KEY (user_id, document_id, paragraph_id)
-        )",
-    )
-    .execute(pool).await.map_err(box_err)?;
-    let _ = sqlx::query(&format!(
-        "ALTER TABLE chunks ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LEGACY_LOCAL_USER_ID}'"
-    ))
-    .execute(pool).await;
-
-    // ── chunk_fts ──────────────────────────────────────────────────────────────
-    // FTS5 stays user-id-less; isolation comes from JOINs against `chunks` /
-    // `documents` which carry user_id.
-    sqlx::query(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
-            content,
-            document_id  UNINDEXED,
-            paragraph_id UNINDEXED,
-            ordinal      UNINDEXED,
-            tokenize     = 'unicode61'
-        )",
-    )
-    .execute(pool).await.map_err(box_err)?;
-
-    // ── chunk_embeddings ───────────────────────────────────────────────────────
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS chunk_embeddings (
-            user_id      TEXT NOT NULL,
-            document_id  TEXT NOT NULL,
-            paragraph_id TEXT NOT NULL,
-            vector       BLOB NOT NULL,
-            PRIMARY KEY (user_id, document_id, paragraph_id)
-        )",
-    )
-    .execute(pool).await.map_err(box_err)?;
-    let _ = sqlx::query(&format!(
-        "ALTER TABLE chunk_embeddings ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LEGACY_LOCAL_USER_ID}'"
-    ))
-    .execute(pool).await;
-
-    Ok(())
-}
 
 async fn next_doc_sort_order_sqlite(
     pool: &SqlitePool,

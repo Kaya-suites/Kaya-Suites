@@ -117,9 +117,7 @@ async fn main() -> anyhow::Result<()> {
                 tenant_id: sentinel,
                 user_id: sentinel,
             };
-            let storage = SqliteAdapter::from_pool(pool.clone(), user_ctx)
-                .await
-                .context("failed to create storage adapter")?;
+            let storage = SqliteAdapter::from_pool(pool.clone(), user_ctx);
             run_reindex(Arc::new(storage), Arc::new(router), doc).await
         }
     }

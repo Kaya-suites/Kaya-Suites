@@ -289,22 +289,12 @@ async fn main() -> anyhow::Result<()> {
                 .create_if_missing(true)
                 .journal_mode(SqliteJournalMode::Wal);
             let sqlite = SqlitePoolOptions::new().connect_with(opts).await?;
-            SqliteAdapter::run_migrations(&sqlite)
-                .await
-                .context("sqlite storage migrations")?;
-            SqliteSessionStorage::run_migrations(&sqlite)
-                .await
-                .context("sqlite session migrations")?;
+            // Per-adapter migrations now live in the unified kaya-db baseline
+            // applied above via kaya_db::run_migrations.
             DbBackend::Sqlite(sqlite)
         }
         Dialect::Mysql => {
             let mysql = MySqlPool::connect(&database_url).await?;
-            MySqlAdapter::run_migrations(&mysql)
-                .await
-                .context("mysql storage migrations")?;
-            MySqlSessionStorage::run_migrations(&mysql)
-                .await
-                .context("mysql session migrations")?;
             DbBackend::Mysql(mysql)
         }
     };
