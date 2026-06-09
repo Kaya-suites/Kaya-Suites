@@ -639,7 +639,7 @@ async fn next_doc_sort_order_postgres(
 ) -> Result<i64, StorageError> {
     let row = match folder_id {
         Some(fid) => sqlx::query(
-            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort \
+            "SELECT (COALESCE(MAX(sort_order), -1) + 1)::BIGINT AS next_sort \
              FROM documents WHERE deleted_at IS NULL AND folder_id = $1",
         )
         .bind(fid.to_string())
@@ -647,7 +647,7 @@ async fn next_doc_sort_order_postgres(
         .await
         .map_err(box_err)?,
         None => sqlx::query(
-            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort \
+            "SELECT (COALESCE(MAX(sort_order), -1) + 1)::BIGINT AS next_sort \
              FROM documents WHERE deleted_at IS NULL AND folder_id IS NULL",
         )
         .fetch_one(pool)
@@ -723,7 +723,7 @@ async fn next_folder_sort_order_postgres(
 ) -> Result<i64, StorageError> {
     let row = match parent_id {
         Some(parent_id) => sqlx::query(
-            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort
+            "SELECT (COALESCE(MAX(sort_order), -1) + 1)::BIGINT AS next_sort
              FROM folders
              WHERE parent_id = $1",
         )
@@ -732,7 +732,7 @@ async fn next_folder_sort_order_postgres(
         .await
         .map_err(box_err)?,
         None => sqlx::query(
-            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort
+            "SELECT (COALESCE(MAX(sort_order), -1) + 1)::BIGINT AS next_sort
              FROM folders
              WHERE parent_id IS NULL",
         )

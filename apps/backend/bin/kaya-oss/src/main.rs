@@ -180,6 +180,41 @@ fn referer_origin(referer: &str) -> Option<String> {
     Some(format!("{scheme}://{authority}"))
 }
 
+// ── fill_empty_error_body middleware ──────────────────────────────────────────
+
+/// Replace empty 4xx/5xx response bodies with a JSON `{"error": "..."}` so
+/// the client sees *something* useful. Many handlers return a bare
+/// `StatusCode::INTERNAL_SERVER_ERROR.into_response()` after logging the real
+/// cause; before this middleware existed those landed at the browser as empty
+/// 500s with no body. We don't rewrite responses that already have a body.
+async fn fill_empty_error_body(request: Request, next: Next) -> Response {
+    let response = next.run(request).await;
+    let status = response.status();
+    if !status.is_client_error() && !status.is_server_error() {
+        return response;
+    }
+    let (parts, body) = response.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to buffer response body for fill_empty_error_body");
+            return Response::from_parts(parts, Body::empty());
+        }
+    };
+    if !bytes.is_empty() {
+        return Response::from_parts(parts, Body::from(bytes));
+    }
+    let canonical = status.canonical_reason().unwrap_or("error");
+    let body = serde_json::json!({ "error": canonical.to_string() }).to_string();
+    let mut parts = parts;
+    parts.headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    parts.headers.remove(header::CONTENT_LENGTH);
+    Response::from_parts(parts, Body::from(body))
+}
+
 // ── inject_storage middleware ─────────────────────────────────────────────────
 
 async fn inject_storage(
@@ -575,6 +610,7 @@ async fn main() -> anyhow::Result<()> {
         app = app.merge(r);
     }
     let app = app
+        .layer(axum::middleware::from_fn(fill_empty_error_body))
         .layer(auth_layer)
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http())

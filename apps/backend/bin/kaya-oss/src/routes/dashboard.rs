@@ -63,7 +63,11 @@ async fn metering_summary(
         }
         Err(e) => {
             tracing::error!(user_id = %user.id, error = %e, "metering summary query failed");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("metering summary: {e}") })),
+            )
+                .into_response()
         }
     }
 }
