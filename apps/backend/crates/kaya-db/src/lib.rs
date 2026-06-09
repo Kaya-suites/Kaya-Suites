@@ -130,19 +130,15 @@ async fn prepare_sqlite_legacy(pool: &AnyPool) -> anyhow::Result<()> {
         pool,
         "ui_preferences",
         &["user_id", "key"],
-        "
-        CREATE TABLE ui_preferences_new (
+        "CREATE TABLE ui_preferences_new (
             user_id    TEXT    NOT NULL,
             key        TEXT    NOT NULL,
             value      TEXT    NOT NULL,
             updated_at INTEGER NOT NULL,
             PRIMARY KEY (user_id, key)
-        );
-        INSERT INTO ui_preferences_new (user_id, key, value, updated_at)
-            SELECT user_id, key, value, updated_at FROM ui_preferences;
-        DROP TABLE ui_preferences;
-        ALTER TABLE ui_preferences_new RENAME TO ui_preferences;
-        ",
+        )",
+        "INSERT INTO ui_preferences_new (user_id, key, value, updated_at)
+            SELECT user_id, key, value, updated_at FROM ui_preferences",
     )
     .await?;
 
@@ -150,8 +146,7 @@ async fn prepare_sqlite_legacy(pool: &AnyPool) -> anyhow::Result<()> {
         pool,
         "document_embedding_status",
         &["user_id", "document_id"],
-        "
-        CREATE TABLE document_embedding_status_new (
+        "CREATE TABLE document_embedding_status_new (
             user_id          TEXT    NOT NULL,
             document_id      TEXT    NOT NULL,
             task_id          TEXT,
@@ -162,16 +157,13 @@ async fn prepare_sqlite_legacy(pool: &AnyPool) -> anyhow::Result<()> {
             updated_at       INTEGER NOT NULL,
             last_indexed_at  INTEGER,
             PRIMARY KEY (user_id, document_id)
-        );
-        INSERT INTO document_embedding_status_new
+        )",
+        "INSERT INTO document_embedding_status_new
             (user_id, document_id, task_id, status, expected_chunks,
              embedded_chunks, last_error, updated_at, last_indexed_at)
             SELECT user_id, document_id, task_id, status, expected_chunks,
                    embedded_chunks, last_error, updated_at, last_indexed_at
-            FROM document_embedding_status;
-        DROP TABLE document_embedding_status;
-        ALTER TABLE document_embedding_status_new RENAME TO document_embedding_status;
-        ",
+            FROM document_embedding_status",
     )
     .await?;
 
@@ -179,8 +171,7 @@ async fn prepare_sqlite_legacy(pool: &AnyPool) -> anyhow::Result<()> {
         pool,
         "chunks",
         &["user_id", "document_id", "paragraph_id"],
-        "
-        CREATE TABLE chunks_new (
+        "CREATE TABLE chunks_new (
             user_id      TEXT    NOT NULL,
             document_id  TEXT    NOT NULL,
             paragraph_id TEXT    NOT NULL,
@@ -188,13 +179,10 @@ async fn prepare_sqlite_legacy(pool: &AnyPool) -> anyhow::Result<()> {
             content      TEXT    NOT NULL,
             content_hash TEXT    NOT NULL,
             PRIMARY KEY (user_id, document_id, paragraph_id)
-        );
-        INSERT INTO chunks_new (user_id, document_id, paragraph_id, ordinal, content, content_hash)
+        )",
+        "INSERT INTO chunks_new (user_id, document_id, paragraph_id, ordinal, content, content_hash)
             SELECT user_id, document_id, paragraph_id, ordinal, content, content_hash
-            FROM chunks;
-        DROP TABLE chunks;
-        ALTER TABLE chunks_new RENAME TO chunks;
-        ",
+            FROM chunks",
     )
     .await?;
 
@@ -202,19 +190,15 @@ async fn prepare_sqlite_legacy(pool: &AnyPool) -> anyhow::Result<()> {
         pool,
         "chunk_embeddings",
         &["user_id", "document_id", "paragraph_id"],
-        "
-        CREATE TABLE chunk_embeddings_new (
+        "CREATE TABLE chunk_embeddings_new (
             user_id      TEXT NOT NULL,
             document_id  TEXT NOT NULL,
             paragraph_id TEXT NOT NULL,
             vector       BLOB NOT NULL,
             PRIMARY KEY (user_id, document_id, paragraph_id)
-        );
-        INSERT INTO chunk_embeddings_new (user_id, document_id, paragraph_id, vector)
-            SELECT user_id, document_id, paragraph_id, vector FROM chunk_embeddings;
-        DROP TABLE chunk_embeddings;
-        ALTER TABLE chunk_embeddings_new RENAME TO chunk_embeddings;
-        ",
+        )",
+        "INSERT INTO chunk_embeddings_new (user_id, document_id, paragraph_id, vector)
+            SELECT user_id, document_id, paragraph_id, vector FROM chunk_embeddings",
     )
     .await?;
 
@@ -236,15 +220,20 @@ async fn primary_key_columns(
     Ok(rows.into_iter().map(|(name, _)| name).collect())
 }
 
-/// If `table` exists and its PRIMARY KEY does not match `expected_pk`, run
-/// `rebuild_sql` (a sequence of statements ending with the rename of the new
-/// table over the old one). No-op when the table already has the right PK,
-/// or when the table doesn't exist yet.
+/// If `table` exists and its PRIMARY KEY does not match `expected_pk`, rebuild
+/// it via the standard SQLite recipe (create staging, copy, drop, rename).
+/// No-op when the table already has the right PK, or when the table doesn't
+/// exist yet.
+///
+/// Defensive against partial prior runs: drops any leftover `*_new` staging
+/// table at the start, and wraps the rebuild in a transaction so a mid-way
+/// failure leaves the original table intact.
 async fn rebuild_if_pk_legacy(
     pool: &AnyPool,
     table: &str,
     expected_pk: &[&str],
-    rebuild_sql: &str,
+    create_new: &str,
+    insert_copy: &str,
 ) -> anyhow::Result<()> {
     let exists: Option<(String,)> = sqlx::query_as(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -262,18 +251,43 @@ async fn rebuild_if_pk_legacy(
         return Ok(());
     }
 
+    let staging = format!("{table}_new");
+
+    // Defensive cleanup: any leftover staging table or stray index/view that
+    // happens to share the target name (from a crashed previous attempt).
+    // Each statement is best-effort because most will be no-ops.
+    let _ = sqlx::query(&format!("DROP TABLE IF EXISTS {staging}"))
+        .execute(pool).await;
+    let _ = sqlx::query(&format!("DROP INDEX IF EXISTS {table}"))
+        .execute(pool).await;
+    let _ = sqlx::query(&format!("DROP VIEW IF EXISTS {table}"))
+        .execute(pool).await;
+
     tracing::info!(
         table,
         current_pk = ?current_pk,
         expected_pk = ?expected_pk,
         "rebuilding SQLite table with new PRIMARY KEY",
     );
-    for stmt in rebuild_sql.split(';').map(str::trim).filter(|s| !s.is_empty()) {
-        sqlx::query(stmt)
-            .execute(pool)
-            .await
-            .with_context(|| format!("rebuilding {table}: {stmt}"))?;
-    }
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(create_new)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("rebuilding {table}: CREATE staging"))?;
+    sqlx::query(insert_copy)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("rebuilding {table}: INSERT copy"))?;
+    sqlx::query(&format!("DROP TABLE {table}"))
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("rebuilding {table}: DROP original"))?;
+    sqlx::query(&format!("ALTER TABLE {staging} RENAME TO {table}"))
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("rebuilding {table}: RENAME staging"))?;
+    tx.commit().await.with_context(|| format!("rebuilding {table}: COMMIT"))?;
     Ok(())
 }
 
